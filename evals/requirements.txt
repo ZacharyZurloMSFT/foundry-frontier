@@ -1,4 +1,4 @@
 httpx==0.28.1
 azure-identity==1.19.0
 azure-ai-evaluation==1.1.0
-prompty>=0.1.50
+prompty>=2.0.2
