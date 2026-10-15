@@ -1,0 +1,50 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/apps/api"
+    schedule: { interval: "weekly" }
+    open-pull-requests-limit: 5
+    groups:
+      azure-sdk:
+        patterns: ["azure-*"]
+      agent-framework:
+        patterns: ["agent-framework*", "agent_framework*"]
+  - package-ecosystem: "pip"
+    directory: "/evals"
+    schedule: { interval: "weekly" }
+    groups:
+      azure-sdk:
+        patterns: ["azure-*"]
+  - package-ecosystem: "pip"
+    directory: "/pipelines/content-understanding"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "pip"
+    directory: "/pipelines/red-team"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "pip"
+    directory: "/pipelines/optimizer"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "pip"
+    directory: "/agents/orchestrator"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "npm"
+    directory: "/apps/web-tech"
+    schedule: { interval: "weekly" }
+    groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react*"]
+  - package-ecosystem: "npm"
+    directory: "/apps/web-voice"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "docker"
+    directory: "/apps/api"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "docker"
+    directory: "/apps/mcp-tech-lookup"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "docker"
+    directory: "/apps/mcp-work-order"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly" }

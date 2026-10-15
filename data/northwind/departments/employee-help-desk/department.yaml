@@ -1,0 +1,32 @@
+schema_version: 1
+slug: employee-help-desk
+name: "Employee & Adjuster Support"
+tagline: "Grounded HR and IT support plus adjuster procedures and review boundaries."
+pillar: rag
+icon: "📚"
+brand_color: "#2e7d32"
+foundry_project: nw-employee-help-desk
+search_index: nw-hr
+cu_inbox_prefix: employee-help-desk
+enabled_tabs: [hr_chat]
+customer_archetype: "HR ops, IT service desk, adjuster enablement teams."
+
+seed_dir: seed
+golden_path: golden/dataset.jsonl
+prompts_dir: prompts
+cu_analyzer_dir: null
+
+# Slim single-agent RAG story — one prompt agent, one Search index, no HITL.
+agents:
+  hosted: []
+  prompt:
+    - northwind-hr-assistant
+
+# Phase 4 authoring targets — these strings feed the seed-generator prompt so
+# a rerun stays consistent across the corpus.
+corpus_theme: |
+  Northwind Insurance employee handbook, benefits guide, PTO / expense
+  policies, IT service-desk runbooks, VPN + laptop setup howtos, security
+  training, adjuster evidence handling and manager-approval workflows.
+  Fictional insurer; preserve employee HR/IT guidance separately from
+  claim adjudication. Agents cannot approve, deny or pay an insurance claim.

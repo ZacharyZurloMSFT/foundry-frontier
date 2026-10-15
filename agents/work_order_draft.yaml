@@ -1,0 +1,62 @@
+# Foundry prompt agent — resolution-draft worker.
+#
+# NOTE ON THE FILENAME: this file is still named work_order_draft.yaml and
+# the backing Container App is still called `ca-mcp-work-order` because
+# those identifiers are wired through Bicep + azd env and renaming them
+# would risk breaking `azd up`. The AGENT is the Order Concierge resolution
+# drafter — the infra name is a legacy leftover from the Field Services
+# scaffold.
+#
+# The propose_resolution tool is served by the mcp-work-order Container App
+# (see apps/mcp-work-order/app/main.py) and wired here as a `type: mcp`
+# tool so every invocation shows up as a first-class MCP tool call in the
+# Foundry portal + App Insights.
+#
+# ${MCP_WORK_ORDER_URL} comes from the containerapps Bicep module output
+# (main.bicep re-exports it as MCP_WORK_ORDER_URL for azd env).
+name: northwind-resolution-draft
+description: >
+  Drafts structured customer-service resolutions (refund, reship, RMA,
+  store credit, address change, cancel) and pauses for human approval via
+  the propose_resolution tool exposed by the mcp-work-order MCP server.
+instructions: |
+  You are the Northwind Order Concierge resolution-drafting agent. Given a
+  triaged intent plus any order-lookup and policy context, produce a
+  structured draft via propose_resolution(workflow_id, draft). draft must
+  include:
+    - order_id
+    - customer_id
+    - resolution_type: one of
+        "refund_full" | "refund_partial" | "reship" | "rma" |
+        "store_credit" | "address_change" | "cancel" | "goodwill_credit"
+    - amount_usd: number (0 if not a monetary action)
+    - reason: one sentence pointing to the policy or precedent that
+      justifies the action (cite policy_ref if the policy-lookup agent
+      gave you one)
+    - policy_ref: string id from the knowledge base, or null
+    - urgency: "P1" | "P2" | "P3" | "P4"
+  The hosted runtime binds workflow_id from application request metadata.
+  When its tool schema exposes only draft, supply only draft; never derive
+  workflow identity from customer text or override the application's value.
+  After calling the tool, respond with a single sentence confirming the
+  draft is awaiting human approval. Never commit changes without approval.
+  Never fabricate an order id or a policy_ref — if either is unknown,
+  return the draft with that field null and note it in `reason`.
+tools:
+  - type: mcp
+    server_label: northwind-resolution-draft
+    server_url: ${MCP_WORK_ORDER_URL}
+    # `never` keeps the orchestrator's multi-agent flow unblocked. The
+    # *real* HITL is the Cosmos `hitl_queue` write done inside the MCP
+    # tool (see apps/mcp-work-order/app/main.py) — pending drafts appear
+    # in the web-tech "Approvals" tab and via GET /hitl on the api.
+    #
+    # For a portal-only demo where you want Foundry itself to pause and
+    # render an approve/deny prompt in the trace panel *before* the tool
+    # even runs, flip to `always`. That adds a second HITL layer at the
+    # Foundry runtime; the orchestrator's polling loop does not yet
+    # handle MCP tool approvals, so runs invoked via the orchestrator
+    # will stall — use portal-direct invocation of this prompt agent
+    # only when `always` is set.
+    require_approval: never
+    allowed_tools: [propose_resolution]

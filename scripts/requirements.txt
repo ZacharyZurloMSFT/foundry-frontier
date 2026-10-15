@@ -1,0 +1,8 @@
+# Runtime deps for postprovision scripts. Kept unpinned/loose so we don't
+# clobber the pre-installed `agent-framework-*` stack in .venv which needs
+# newer azure-ai-projects / httpx / openai.
+azure-ai-projects>=2.2,<3.0
+azure-identity>=1.19
+azure-storage-blob>=12.24
+httpx>=0.28
+PyYAML>=6

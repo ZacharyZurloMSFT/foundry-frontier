@@ -1,0 +1,21 @@
+{
+  "description": "Extract fictional insurance supporting invoice facts without inferring that repairs, payment or coverage have been approved.",
+  "baseAnalyzerId": "prebuilt-document",
+  "models": {"completion": "gpt-4.1"},
+  "config": {"returnDetails": true, "estimateFieldSourceAndConfidence": true},
+  "fieldSchema": {
+    "fields": {
+      "source_document_id": {"type": "string"},
+      "claim_id": {"type": "string"},
+      "policy_id": {"type": "string"},
+      "invoice_id": {"type": "string"},
+      "invoice_date": {"type": "date"},
+      "supplier_name": {"type": "string"},
+      "service_description": {"type": "string"},
+      "invoice_total_usd": {"type": "number"},
+      "paid_status_as_stated": {"type": "string", "description": "Only explicit payment wording; leave absent when not stated"},
+      "missing_fields": {"type": "array", "items": {"type": "string"}},
+      "source_references": {"type": "array", "items": {"type": "string"}}
+    }
+  }
+}

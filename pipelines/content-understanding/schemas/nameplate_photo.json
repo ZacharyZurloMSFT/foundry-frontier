@@ -1,0 +1,15 @@
+{
+  "description": "Read equipment nameplate photos to populate asset registry.",
+  "baseAnalyzerId": "prebuilt-imageAnalyzer",
+  "scenario": "image",
+  "fieldSchema": {
+    "fields": {
+      "vendor": {"type": "string"},
+      "model": {"type": "string"},
+      "serial_number": {"type": "string"},
+      "manufacture_year": {"type": "integer"},
+      "voltage": {"type": "string"},
+      "refrigerant": {"type": "string"}
+    }
+  }
+}

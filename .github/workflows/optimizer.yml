@@ -1,0 +1,78 @@
+name: Prompt Optimizer (nightly)
+# Runs the Foundry Prompt Optimizer + Agent Optimizer against each prompt
+# under agents/ using the golden dataset. When the optimizer finds a variant
+# that beats baseline by >= OPTIMIZER_MIN_LIFT on the rubric evaluator, it
+# opens a PR swapping the .prompty file and updating baseline.json.
+on:
+  schedule:
+    - cron: "0 6 * * *"    # nightly 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: "Agent name (e.g. triage, work_order_draft, or 'all')"
+        default: "all"
+        required: true
+      min_lift:
+        description: "Minimum score lift over baseline to open a PR"
+        default: "0.05"
+        required: true
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    environment: staging
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [triage, work_order_draft]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - run: pip install -r pipelines/optimizer/requirements.txt
+      - name: Optimize ${{ matrix.agent }}
+        id: opt
+        env:
+          FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+          FOUNDRY_JUDGE_DEPLOYMENT: gpt-5.4
+          OPTIMIZER_MIN_LIFT: ${{ inputs.min_lift || '0.05' }}
+        run: |
+          python pipelines/optimizer/run_prompt_optimizer.py \
+            --agent ${{ matrix.agent }} \
+            --dataset data/golden/dataset.jsonl \
+            --baseline evals/baseline.json \
+            --report optimizer-report-${{ matrix.agent }}.json
+      - name: Open PR when a better prompt was found
+        if: steps.opt.outputs.improved == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(optimizer): promote ${{ matrix.agent }} prompt (+${{ steps.opt.outputs.lift }})"
+          title: "🧠 Optimizer: ${{ matrix.agent }} +${{ steps.opt.outputs.lift }} vs baseline"
+          body: |
+            The nightly Prompt Optimizer found a variant of the **${{ matrix.agent }}**
+            prompt that beat baseline by **${{ steps.opt.outputs.lift }}** on the
+            rubric evaluator.
+
+            - Golden set: `data/golden/dataset.jsonl`
+            - Judge model: `gpt-5.4`
+            - Report: attached as workflow artifact
+            - Prompt file: `agents/${{ matrix.agent }}.yaml`
+
+            All four eval tiers will re-run when you push a commit to this branch.
+          branch: optimizer/${{ matrix.agent }}
+          labels: optimizer, needs-review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optimizer-${{ matrix.agent }}
+          path: optimizer-report-${{ matrix.agent }}.json

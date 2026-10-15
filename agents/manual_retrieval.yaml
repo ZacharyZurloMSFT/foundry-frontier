@@ -1,0 +1,59 @@
+# Foundry prompt agent — policy-lookup worker.
+#
+# The knowledge base is attached natively via Foundry IQ: the agent gets an
+# MCPTool wired to a project RemoteTool connection (scripts/connect-knowledge-base.py
+# creates the connection; scripts/create-prompt-agents.py translates the
+# `knowledge` block below into an MCPTool on the PromptAgentDefinition).
+# This is what the Foundry portal renders under the agent's Knowledge panel
+# rather than the Tools panel — no client-side function tool needed.
+#
+# NOTE: the filename is still manual_retrieval.yaml so `create-prompt-agents.py`
+# can still find it by path — the agent is the Order Concierge policy lookup.
+name: northwind-policy-lookup
+description: >
+  Grounded answers from the Northwind Foundry IQ knowledge base (return
+  policy, shipping SLA, product catalog, warranty terms, past resolution
+  precedents) with citations. The knowledge base is attached natively via
+  MCP and shows up in the agent's Knowledge panel.
+instructions: |
+  You are the Northwind Order Concierge policy-lookup agent. You must use
+  the attached knowledge base to answer every user question about return
+  windows, shipping SLAs, refund thresholds, product specs, warranty terms,
+  or precedent from prior resolved cases. Never answer from your own
+  general knowledge.
+
+  When you use information from the knowledge base, include citations to
+  the retrieved sources — render them exactly as the knowledge base
+  returns them (for example: [title, p.N](source_uri)). Do not paraphrase
+  or drop citations.
+
+  If the knowledge base does not contain the answer, respond with
+  "I do not know". Do not invent facts or citations.
+knowledge:
+  # References the Foundry IQ knowledge base + the project connection
+  # scripts/connect-knowledge-base.py provisions. The Foundry portal
+  # surfaces this in the agent's Knowledge panel.
+  - kind: foundry_iq
+    knowledge_base: ${AZURE_SEARCH_KNOWLEDGE_BASE}
+    connection: ${FOUNDRY_KB_CONNECTION_NAME}
+
+  # A4: Bing Grounding fallback with attribution required. If the FIQ KB
+  # misses (which happens for very new SKUs, promo campaigns, or
+  # regulatory updates that aren't in the corpus yet), the agent falls
+  # back to Bing — but must still cite. `require_citations: true` blocks
+  # the response entirely if the model returns text without a citation.
+  - kind: bing_grounding
+    connection: ${FOUNDRY_BING_CONNECTION_NAME}
+    require_citations: true
+    fallback: true
+
+  # A4: SharePoint / OneLake connector for governed customer content
+  # (master return policy, category-manager pricing exceptions, executive
+  # escalation runbooks). Optional — leave
+  # ${FOUNDRY_SHAREPOINT_CONNECTION_NAME} unset to skip. Included in the
+  # scaffold so the governance story is one env-var away from live.
+  - kind: sharepoint
+    connection: ${FOUNDRY_SHAREPOINT_CONNECTION_NAME}
+    site: ${FOUNDRY_SHAREPOINT_SITE}
+    optional: true
+tools: []

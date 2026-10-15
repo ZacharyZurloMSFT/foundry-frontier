@@ -1,0 +1,39 @@
+name: Prompt Registry
+# On merge to main: for every .prompty and agent.yaml under agents/, upload
+# the file to the Foundry Prompt Store tagged with the current git SHA. That
+# creates the trace-back-to-PR link used by Foundry Observability.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agents/**"
+      - "evals/evaluators/rubrics/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - run: pip install azure-ai-projects==1.0.0 azure-identity==1.19.0 pyyaml==6.0.2
+      - name: Publish prompts tagged with ${{ github.sha }}
+        env:
+          FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+          GIT_SHA: ${{ github.sha }}
+        run: python scripts/publish-prompts.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: copilot-harness-prompt-${{ github.sha }}
+          path: agents/copilot-harness/instructions.prompty

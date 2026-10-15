@@ -1,0 +1,133 @@
+{
+  "kind": "insurance_execution_code_review_contract_not_a_receipt",
+  "state": "awaiting_independent_parent_review_not_permission",
+  "prepared_source_code_sha256": {
+    "pipelines\\orders-learning\\insurance_learning.py": "138196ac4005680ab2c98e897f06233327421f81665c55c9161b43fd021ffadf",
+    "evals\\insurance.py": "8b249c2545278ac8c7e60425ff584beb8fdbad72cc0cba57cd72086c20be10a6",
+    "evals\\insurance_review.py": "5618613b95059241dbfce18e634039e2282c11e53286de5010e7538936ab3ce8",
+    "evals\\insurance_gates.py": "ccd7d0abcf52175d0a539bf08410a85ba365cf83ad80b93db71b194b4d5e8cca",
+    "evals\\insurance_native.py": "78d63b8a5607b09c2f71876ae66279fb3e6099552c28267786b7b7516e317df7",
+    "scripts\\review-insurance-datasets.py": "3519fcaade05af206bbd5ca7d4f5dfa99ce7fc3a1b21148dc706ba50ab4d7d7b",
+    "scripts\\run-insurance-quality-gates.py": "901c937532be8240f658dca67c7d03fc2f4615fb1e37232b4585c651df8fc36d"
+  },
+  "executed_source_code_sha256": {
+    "pipelines\\orders-learning\\insurance_learning.py": "138196ac4005680ab2c98e897f06233327421f81665c55c9161b43fd021ffadf",
+    "evals\\insurance.py": "8b249c2545278ac8c7e60425ff584beb8fdbad72cc0cba57cd72086c20be10a6",
+    "evals\\insurance_review.py": "74a478377de0f0cec922a6a8e27039fc7148ed4a7c40a9d2ffa66fa198b77c5b",
+    "evals\\insurance_gates.py": "e1a7a36c1e96f92ef204866627669baaee52be039863b801091f25cf1e3e1c94",
+    "evals\\insurance_native.py": "e9682d283281499b96fdd627561751087c83dbcb001549e369f6c673f247b337",
+    "scripts\\review-insurance-datasets.py": "3519fcaade05af206bbd5ca7d4f5dfa99ce7fc3a1b21148dc706ba50ab4d7d7b",
+    "scripts\\run-insurance-quality-gates.py": "a4f8f9600233d5389aa80f16c8d3797ba6fcaa7015db65296d992a676a7cc8a4"
+  },
+  "receipt_template": {
+    "schema_version": 1,
+    "kind": "insurance_reviewed_execution_code",
+    "receipt_version": "insurance-2026-10-14-execution-code-v1",
+    "actor_type": "assistant",
+    "reviewer_session_id": "",
+    "reviewed_at": "",
+    "expires_at": "",
+    "scope": "evaluation_only_no_training",
+    "individual_human_annotations": 0,
+    "manifest_sha256": "a528a43c451ef3d2ec5357978b0fefd8a2f3fb3d9d10e26c275f99da6b6f618e",
+    "artifact_approval_receipt_sha256": "",
+    "changes": {
+      "evals\\insurance_review.py": {
+        "prepared_sha256": "5618613b95059241dbfce18e634039e2282c11e53286de5010e7538936ab3ce8",
+        "executed_sha256": "74a478377de0f0cec922a6a8e27039fc7148ed4a7c40a9d2ffa66fa198b77c5b",
+        "finding_ids": [
+          "INS-LINEAGE-001"
+        ]
+      },
+      "evals\\insurance_gates.py": {
+        "prepared_sha256": "ccd7d0abcf52175d0a539bf08410a85ba365cf83ad80b93db71b194b4d5e8cca",
+        "executed_sha256": "e1a7a36c1e96f92ef204866627669baaee52be039863b801091f25cf1e3e1c94",
+        "finding_ids": [
+          "INS-GATE-001",
+          "INS-GATE-002",
+          "INS-GATE-003"
+        ]
+      },
+      "evals\\insurance_native.py": {
+        "prepared_sha256": "78d63b8a5607b09c2f71876ae66279fb3e6099552c28267786b7b7516e317df7",
+        "executed_sha256": "e9682d283281499b96fdd627561751087c83dbcb001549e369f6c673f247b337",
+        "finding_ids": [
+          "INS-EXEC-001",
+          "INS-EXEC-002",
+          "INS-LINEAGE-001"
+        ]
+      },
+      "scripts\\run-insurance-quality-gates.py": {
+        "prepared_sha256": "901c937532be8240f658dca67c7d03fc2f4615fb1e37232b4585c651df8fc36d",
+        "executed_sha256": "a4f8f9600233d5389aa80f16c8d3797ba6fcaa7015db65296d992a676a7cc8a4",
+        "finding_ids": [
+          "INS-LINEAGE-001"
+        ]
+      }
+    },
+    "test_evidence": {
+      "command": [
+        ".\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        ".insurance-execution-code-test-work",
+        "--junitxml",
+        "evals\\review-evidence\\insurance-execution-code-v1-pytest.xml",
+        "evals\\tests\\test_insurance_gates.py",
+        "scripts\\tests\\test_insurance_review_workflow.py",
+        "scripts\\tests\\test_insurance_execution_code_review.py"
+      ],
+      "result_path": "evals\\review-evidence\\insurance-execution-code-v1-pytest.xml",
+      "result_sha256": "ca25d216a5d566f07bb8625bcda23810f06d1d1b3d3cd9194791872bb1a247ad",
+      "test_sources_sha256": {
+        "evals\\tests\\test_insurance_gates.py": "28c69639bdfb24c67653bf189e1c10fcb00bc3dafb38110efee997a2a75ad8c0",
+        "scripts\\tests\\test_insurance_review_workflow.py": "2988f7f6d20f21039c72ec48c8347603cd926a0e057782ee52e442c7a333bf30",
+        "scripts\\tests\\test_insurance_execution_code_review.py": "ee1238383767895031fd3cfe03b24b0755001a440964616ad1e699a53ba85134"
+      }
+    }
+  },
+  "parent_must_fill_before_minting": [
+    "reviewer_session_id",
+    "reviewed_at",
+    "expires_at",
+    "artifact_approval_receipt_sha256"
+  ],
+  "minimum_reviewed_at": "2026-10-14T19:36:35.853401+00:00",
+  "validity": "Timezone-aware reviewed_at <= now < expires_at <= reviewed_at + 24 hours; test evidence <= reviewed_at and at most 24 hours old.",
+  "review_authority": "Actual parent assistant review-session attestation, not human annotation, new user approval, a signature, or spending authorization.",
+  "required_cli_flags": [
+    "--execution-code-review FILE",
+    "--execution-code-review-sha256 INDEPENDENT_PARENT_PIN",
+    "--approval-receipt EXISTING_ACTUAL_USER_RECEIPT"
+  ],
+  "native_python_keyword_arguments": [
+    "execution_code_review",
+    "execution_code_review_sha256",
+    "approval_receipt_path (build_plan/verify_code_lineage only)"
+  ],
+  "finding_descriptions": {
+    "INS-EXEC-001": "Normalize documented SDK modelName/modelVersion serialization.",
+    "INS-EXEC-002": "Require exact registered ID and documented uri_file discriminator.",
+    "INS-GATE-001": "Require unique current queue item with explicit nonexecution.",
+    "INS-GATE-002": "Restrict negation to its matched proposition/conjunction scope.",
+    "INS-GATE-003": "Bind refusal name, all requested arguments, status and error code to the same event.",
+    "INS-LINEAGE-001": "Wire strict independently pinned execution-code review and preserve both source maps."
+  },
+  "test_result_summary": {
+    "tests": "212",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "27.671"
+  },
+  "remaining_execution_blockers": [
+    "Parent independently reviews these frozen source/test results, fills the template, and exclusively creates a NEW receipt outside the pack.",
+    "Parent independently pins the minted receipt bytes, and binds the exact original artifact approval receipt bytes.",
+    "The native $1 all-call token/retry/service-charge bounds and live pricing remain UNVERIFIED; this code review does not admit paid execution."
+  ],
+  "warning": "This contract is deliberately not an accepted receipt. Do not auto-pin current code or treat passing local tests as native evaluation/release approval."
+}

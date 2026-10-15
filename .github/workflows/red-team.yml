@@ -1,0 +1,62 @@
+name: AI Red Team (Tier 3)
+# Runs the Foundry AI Red Team Agent (PyRIT-backed) against the deployed
+# orchestrator. Weekly on schedule; also on any push to main that changes
+# prompts or agent wiring. Manual dispatch supported for on-demand runs.
+on:
+  schedule:
+    - cron: "0 9 * * 1"    # Mondays 09:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - "agents/**"
+      - "evals/evaluators/rubrics/**"
+      - "pipelines/red-team/**"
+      - "apps/api/app/harness/**"
+      - "apps/mcp-work-order/**"
+      - "evals/harness_eval.py"
+  workflow_dispatch:
+    inputs:
+      target_agent:
+        description: "Agent name to red team"
+        default: "northwind-orchestrator"
+        required: true
+      strategies:
+        description: "Comma-separated attack strategies"
+        default: "jailbreak,harm,pii-exfil,tool-abuse"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+  checks: write
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/foundry-redteam
+        with:
+          target_agent: ${{ inputs.target_agent || 'northwind-orchestrator' }}
+          strategies:   ${{ inputs.strategies   || 'jailbreak,harm,pii-exfil,tool-abuse' }}
+          azure_client_id:      ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id:      ${{ secrets.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          foundry_project_endpoint: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+
+  harness-redteam:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/foundry-redteam
+        with:
+          target_agent: copilot-sdk
+          strategies: jailbreak,harm,pii-exfil,tool-abuse
+          api_uri: ${{ secrets.STAGING_API_URI }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          foundry_project_endpoint: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}

@@ -1,0 +1,51 @@
+# azd
+.azure/
+*.env
+.env.*
+.foundry/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Generated seed corpus (regenerated at deploy)
+data/seed/generated/
+
+# Local learning state and generated upload packages
+pipelines/orders-learning/workspace/
+pipelines/orders-learning/upload-pack/
+pipelines/orders-learning/insurance-upload-pack/
+
+# Manifest copy bundled into the API container at azd package time
+apps/api/app/_northwind/
+apps/api/app/_agent_prompts/
+agents/*/agents/
+
+# Secrets
+*.pem
+*.key
+.env.local
+
+# Logs
+*.log
+agent-log-load-results.json
+
+# Local secrets pulled by scripts/fetch-keys.ps1
+.env

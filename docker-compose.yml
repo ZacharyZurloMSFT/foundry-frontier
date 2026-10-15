@@ -1,0 +1,60 @@
+# Local dev compose: runs the FastAPI backend + both React SPAs against the
+# already-provisioned dev Azure services (Foundry, Search, Cosmos, Storage).
+# Requires a .env file at the repo root (generate via `scripts/fetch-keys.ps1`).
+#
+# Usage:
+#   docker compose up --build
+#     api        → http://localhost:8000
+#     web-tech   → http://localhost:5173
+#     web-voice  → http://localhost:5174
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    image: northwind-copilot/api:local
+    env_file:
+      - .env
+    environment:
+      PORT: "8000"
+      COPILOT_HARNESS_ENABLED: "${COPILOT_HARNESS_ENABLED:-false}"
+      COPILOT_HARNESS_PROMPT_PATH: /app/app/_agent_prompts/instructions.prompty
+    volumes:
+      - ./agents/copilot-harness:/app/app/_agent_prompts:ro
+      - ./data/northwind:/app/app/_northwind:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web-tech:
+    build:
+      context: ./apps/web-tech
+      dockerfile: Dockerfile.local
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    image: northwind-copilot/web-tech:local
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+  web-voice:
+    build:
+      context: ./apps/web-voice
+      dockerfile: Dockerfile.local
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    image: northwind-copilot/web-voice:local
+    depends_on:
+      - api
+    ports:
+      - "5174:80"
+    restart: unless-stopped

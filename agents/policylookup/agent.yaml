@@ -1,0 +1,32 @@
+name: northwind-policy-lookup
+kind: hosted
+description: Hosted specialist using canonical manual_retrieval.yaml and the existing Foundry IQ Search MCP connection.
+protocols:
+  - protocol: responses
+    version: 2.0.0
+environment_variables:
+  - name: NORTHWIND_BUSINESS_DOMAIN
+    value: retail
+  - name: NORTHWIND_INSURANCE_AGENTS_READY
+    value: "false"
+  - name: ORDER_AGENT_ROLE
+    value: policylookup
+  - name: MODEL_DEPLOYMENT_NAME
+    value: ${MODEL_DEPLOYMENT_NAME}
+  - name: ORDERS_MODEL_GATEWAY_ENDPOINT
+    value: ${ORDERS_MODEL_GATEWAY_ENDPOINT}
+  - name: ORDERS_MODEL_GATEWAY_MODEL
+    value: ${ORDERS_GATEWAY_SPECIALIST_MODEL}
+  - name: ORDERS_MODEL_GATEWAY_DEPLOYMENT
+    value: ${MODEL_DEPLOYMENT_NAME}
+  - name: AZURE_SEARCH_ENDPOINT
+    value: ${AZURE_SEARCH_ENDPOINT}
+  - name: AZURE_SEARCH_KNOWLEDGE_BASE
+    value: ${AZURE_SEARCH_KNOWLEDGE_BASE}
+  - name: AZURE_SEARCH_INDEX
+    value: ${AZURE_SEARCH_INDEX}
+  - name: ORDERS_KB_CONNECTION
+    value: ${ORDERS_KB_CONNECTION}
+resources:
+  cpu: "1.0"
+  memory: 2Gi

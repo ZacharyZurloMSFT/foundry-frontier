@@ -1,0 +1,56 @@
+[
+  {
+    "id": "nw-auto-form-2026-v1",
+    "title": "Northwind Insurance - Fictional Washington Auto Wording",
+    "doc_type": "policy",
+    "policy_ref": "NW-AUTO-WA-2026-v1",
+    "source_version": "1",
+    "jurisdiction": "Fictional WA personal auto",
+    "source": "data/northwind/departments/claims-warranty/seed/warranty-carrier-30gx.md"
+  },
+  {
+    "id": "nw-claims-handling-2026-v1",
+    "title": "Northwind Insurance - Endorsement and Evidence Review",
+    "doc_type": "procedure",
+    "policy_ref": "NW-CLAIMS-HANDLING-2026-V1",
+    "source": "data/northwind/departments/claims-warranty/seed/warranty-trane-rtac.md"
+  },
+  {
+    "id": "nw-fnol-demo-2001",
+    "title": "Northwind Insurance - Synthetic FNOL CLM-2001",
+    "doc_type": "fnol",
+    "jurisdiction": "Fictional WA personal auto",
+    "policy_ref": "NW-FNOL-DEMO-2001",
+    "source": "data/northwind/departments/claims-warranty/seed/intake-form-CL-8817.md"
+  },
+  {
+    "id": "nw-estimate-demo-2001",
+    "title": "Northwind Insurance - Synthetic Repair Estimate and Invoice",
+    "doc_type": "repair_estimate",
+    "jurisdiction": "Fictional WA personal auto",
+    "policy_ref": "NW-ESTIMATE-DEMO-2001",
+    "source": "data/northwind/departments/claims-warranty/seed/intake-form-CL-8901-hw.md"
+  },
+  {
+    "id": "nw-adjuster-review-2026-v1",
+    "title": "Northwind Insurance - Adjuster Review and Internal Approval Boundaries",
+    "doc_type": "procedure",
+    "policy_ref": "NW-CLAIMS-HANDLING-2026-V1",
+    "source": "data/northwind/departments/employee-help-desk/seed/manager-approval-workflow.md",
+    "section": "## Adjuster procedures and claims-review boundaries"
+  },
+  {
+    "id": "nw-policyholder-faq-2026-v1",
+    "title": "Northwind Insurance - Policyholder Claims FAQ",
+    "doc_type": "faq",
+    "policy_ref": "NW-VOICE-FAQ-2026-V1",
+    "source": "data/northwind/departments/contact-center/seed/deflection-faq.md"
+  },
+  {
+    "id": "nw-policyholder-handoff-2026-v1",
+    "title": "Northwind Insurance - Policyholder Intake and Adjuster Handoff",
+    "doc_type": "procedure",
+    "policy_ref": "NW-VOICE-SCRIPTS-2026-V1",
+    "source": "data/northwind/departments/contact-center/seed/call-scripts.md"
+  }
+]

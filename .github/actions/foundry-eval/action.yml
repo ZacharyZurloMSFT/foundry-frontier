@@ -1,0 +1,64 @@
+name: "foundry-eval"
+description: "Run the Foundry golden-set evaluator against a deployed agent and post the diff vs baseline."
+inputs:
+  dataset:
+    description: "Path to the golden JSONL dataset"
+    required: true
+    default: "data/golden/dataset.jsonl"
+  baseline:
+    description: "Path to baseline.json for the regression gate"
+    required: false
+    default: "evals/baseline.json"
+  api_uri:
+    description: "Deployed API endpoint under test"
+    required: true
+  foundry_endpoint:
+    description: "Foundry AI Services endpoint"
+    required: true
+  foundry_project_endpoint:
+    description: "Foundry project endpoint"
+    required: true
+  worker_deployment:
+    description: "Worker model deployment name"
+    required: false
+    default: "gpt-4o"
+  output:
+    description: "Where to write results.json"
+    required: false
+    default: "evals/results.json"
+
+outputs:
+  results_path:
+    description: "Path to the JSON results"
+    value: ${{ steps.run.outputs.results_path }}
+  regressed:
+    description: "true if any metric regressed vs baseline"
+    value: ${{ steps.run.outputs.regressed }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with: { python-version: "3.12" }
+    - name: Install eval deps
+      shell: bash
+      run: pip install -r evals/requirements.txt
+    - name: Run Foundry evaluators
+      id: run
+      shell: bash
+      env:
+        API_URI: ${{ inputs.api_uri }}
+        FOUNDRY_ENDPOINT: ${{ inputs.foundry_endpoint }}
+        FOUNDRY_PROJECT_ENDPOINT: ${{ inputs.foundry_project_endpoint }}
+        FOUNDRY_WORKER_DEPLOYMENT: ${{ inputs.worker_deployment }}
+      run: |
+        python evals/run_evals.py \
+          --dataset "${{ inputs.dataset }}" \
+          --output  "${{ inputs.output }}" \
+          --baseline "${{ inputs.baseline }}"
+        echo "results_path=${{ inputs.output }}" >> "$GITHUB_OUTPUT"
+        python - <<'PY' && echo "regressed=true"  >> "$GITHUB_OUTPUT" || echo "regressed=false" >> "$GITHUB_OUTPUT"
+        import json, sys
+        r = json.load(open("${{ inputs.output }}"))
+        sys.exit(0 if r.get("regressed") else 1)
+        PY

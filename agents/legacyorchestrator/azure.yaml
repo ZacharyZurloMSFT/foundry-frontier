@@ -1,0 +1,23 @@
+name: northwind-legacy-orchestrator
+services:
+  legacyorchestrator:
+    project: .
+    host: azure.ai.agent
+    language: python
+    kind: hosted
+    name: northwind-orchestrator
+    description: Existing northwind-project manager, preserving its prompt-agent delegation while routing its model through the gateway.
+    codeConfiguration:
+      dependencyResolution: remote_build
+      entryPoint: main.py
+      runtime: python_3_13
+    container:
+      resources: {cpu: "0.5", memory: 1Gi}
+    protocols: [{protocol: responses, version: 2.0.0}]
+    environmentVariables:
+      - {name: AZURE_AI_MODEL_DEPLOYMENT_NAME, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}
+      - {name: AZURE_SEARCH_ENDPOINT, value: "${AZURE_SEARCH_ENDPOINT}"}
+      - {name: AZURE_SEARCH_INDEX, value: "${AZURE_SEARCH_INDEX}"}
+      - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
+      - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_MODEL_GATEWAY_MODEL}"}
+      - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}

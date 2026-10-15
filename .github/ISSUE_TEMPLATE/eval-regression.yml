@@ -1,0 +1,35 @@
+name: Eval regression
+description: File a regression when a prod trace fails an evaluator
+title: "[eval-regression] <metric> drifted <sigma>σ on <workflow>"
+labels: ["eval-regression", "needs-triage", "copilot-fix"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue was filed automatically by the **drift detector** or the
+        **red-team** pipeline. The GitHub Copilot coding agent will pick it up
+        (see `.github/copilot-setup-steps.yml`) and draft a fix PR seeded with
+        the failing trace payload.
+  - type: input
+    id: workflow
+    attributes: { label: Workflow, description: "e.g. triage, work_order_draft, orchestrator" }
+    validations: { required: true }
+  - type: input
+    id: metric
+    attributes: { label: Metric, description: "e.g. Groundedness, WorkOrderCompleteness, RedTeamPassRate" }
+    validations: { required: true }
+  - type: input
+    id: trace_id
+    attributes: { label: App Insights trace id }
+  - type: input
+    id: prompt_sha
+    attributes: { label: Prompt git SHA that shipped this behavior }
+  - type: textarea
+    id: failing_input
+    attributes: { label: Failing input (from trace) }
+  - type: textarea
+    id: failing_output
+    attributes: { label: Failing output (from trace) }
+  - type: textarea
+    id: expected
+    attributes: { label: Expected behavior / rubric criterion violated }

@@ -1,0 +1,20 @@
+{
+  "description": "Northwind service report extractor — pulls structured fields from field-tech reports.",
+  "baseAnalyzerId": "prebuilt-documentAnalyzer",
+  "scenario": "document",
+  "config": { "returnDetails": true },
+  "fieldSchema": {
+    "fields": {
+      "site_id": {"type": "string", "description": "Northwind site identifier, e.g. NW-SEA-207"},
+      "report_date": {"type": "date", "description": "Date of the service visit"},
+      "technician_name": {"type": "string"},
+      "equipment_vendor": {"type": "string", "enum": ["Carrier","Trane","York","Daikin","Other"]},
+      "equipment_model": {"type": "string"},
+      "symptom": {"type": "string"},
+      "root_cause": {"type": "string"},
+      "parts_replaced": {"type": "array", "items": {"type": "string"}},
+      "labor_hours": {"type": "number"},
+      "resolved": {"type": "boolean"}
+    }
+  }
+}

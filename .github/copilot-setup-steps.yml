@@ -1,0 +1,29 @@
+# Copilot coding agent setup steps.
+# These run in the Copilot sandbox before it works on any issue labeled
+# `copilot-fix` (the drift detector + red-team pipelines add that label
+# automatically). Keeps the agent from thrashing on missing tools.
+name: copilot-setup-steps
+on: workflow_dispatch
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Install eval + pipeline deps
+        run: |
+          pip install -r evals/requirements.txt
+          pip install -r pipelines/red-team/requirements.txt
+          pip install -r pipelines/optimizer/requirements.txt
+          pip install ruff==0.8.4 mypy==1.13.0
+      - name: Install web build tools (used by the api's static preview)
+        run: |
+          (cd apps/web-tech && npm install --no-audit --no-fund)
+          (cd apps/web-voice && npm install --no-audit --no-fund)
+      - name: Prime GitHub Models smoke eval (no Azure creds required)
+        run: python evals/smoke_eval.py --self-check

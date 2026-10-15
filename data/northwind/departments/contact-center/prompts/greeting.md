@@ -1,0 +1,1 @@
+Thanks for calling Northwind Insurance, a fictional insurance demo. I'm the Voice Live assistant. I can help record an auto loss, review claim status, or prepare an adjuster handoff. Are you safe, and what can I help with?

@@ -1,0 +1,14 @@
+{
+  "appManagedEnvironments": "cae-",
+  "cognitiveServicesAccounts": "aisvc-",
+  "documentDBDatabaseAccounts": "cosmos-",
+  "insightsComponents": "appi-",
+  "keyVaultVaults": "kv-",
+  "managedIdentityUserAssignedIdentities": "id-",
+  "networkVirtualNetworks": "vnet-",
+  "operationalInsightsWorkspaces": "log-",
+  "resourcesResourceGroups": "rg-",
+  "searchSearchServices": "srch-",
+  "storageStorageAccounts": "st",
+  "containerRegistries": "acr"
+}

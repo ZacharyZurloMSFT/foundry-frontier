@@ -1,0 +1,16 @@
+{
+  "description": "Describe visible vehicle damage evidence for fictional insurance review. Photos alone cannot establish cause, fault, fraud, loss date or coverage. Do not invent identities.",
+  "baseAnalyzerId": "prebuilt-document",
+  "models": {"completion": "gpt-4.1"},
+  "config": {"returnDetails": true, "estimateFieldSourceAndConfidence": true},
+  "fieldSchema": {
+    "fields": {
+      "source_document_id": {"type": "string", "description": "Only when visible/provided"},
+      "claim_id": {"type": "string", "description": "Only when explicitly labelled"},
+      "visible_vehicle_description": {"type": "string"},
+      "damage_observations": {"type": "array", "items": {"type": "string"}, "description": "Observable location/type of visible damage, qualified for uncertainty"},
+      "image_limitations": {"type": "array", "items": {"type": "string"}, "description": "Occlusion, poor lighting, illegible text or missing context"},
+      "source_references": {"type": "array", "items": {"type": "string"}}
+    }
+  }
+}

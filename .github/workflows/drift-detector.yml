@@ -1,0 +1,33 @@
+name: Drift Detector
+# Runs after Continuous Eval finishes. Pulls the last N nights of results
+# from the workflow artifact history, computes a rolling z-score per metric,
+# and files an issue when anything drifts >2σ from the 7-day baseline.
+#
+# The Copilot coding agent picks up the issue (see .github/copilot-setup-steps.yml)
+# and drafts a fix PR seeded with the failing trace payload.
+on:
+  workflow_run:
+    workflows: ["Continuous Eval"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  detect:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install httpx==0.28.1 pyyaml==6.0.2
+      - name: Detect drift + open issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          THRESHOLD_SIGMA: "2.0"
+          WINDOW_DAYS: "7"
+        run: python evals/drift_detector.py

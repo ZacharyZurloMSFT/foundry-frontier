@@ -1,0 +1,34 @@
+name: Bicep Policy
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/bicep-policy.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  psrule:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bicep CLI
+        run: |
+          curl -sLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep && sudo mv bicep /usr/local/bin/
+          bicep build infra/main.bicep --stdout > /tmp/main.json
+      - name: PSRule for Azure
+        uses: microsoft/ps-rule@v2.9.0
+        with:
+          modules: PSRule.Rules.Azure
+          inputPath: /tmp/main.json
+          outputFormat: Sarif
+          outputPath: psrule.sarif
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: psrule.sarif
+          category: psrule-azure
