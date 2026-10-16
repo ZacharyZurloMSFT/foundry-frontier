@@ -241,5 +241,6 @@ jobs:
         with:
           name: app-rollback-${{ github.run_id }}-${{ github.run_attempt }}
           path: .release-state/rollback-*.json
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
