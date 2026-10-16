@@ -1,0 +1,245 @@
+name: Scoped App Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Existing app to release
+        type: choice
+        options: [all, api, mcp-tech-lookup, mcp-work-order, web-tech, web-voice]
+        default: all
+        required: true
+      expected_sha:
+        description: Expected current main SHA (blank uses this workflow's SHA); successful main CI required
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+# Also used by the infrastructure apply workflow. Never interrupt live mutations.
+concurrency:
+  group: northwind-live-mutations
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      vars.NORTHWIND_DEPLOY_ENABLED == 'true' &&
+      github.repository == 'ZacharyZurloMSFT/foundry-frontier' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        contains(fromJSON('["push","workflow_dispatch"]'), github.event.workflow_run.event) &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.id == github.event.repository.id))
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.trust.outputs.sha }}
+      services: ${{ steps.plan.outputs.services }}
+    steps:
+      - name: Verify trusted current-main source and successful CI before checkout
+        id: trust
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const repository = await github.rest.repos.get({owner, repo});
+            if (repository.data.full_name !== 'ZacharyZurloMSFT/foundry-frontier' ||
+                repository.data.default_branch !== 'main') throw new Error('Untrusted repository');
+            const ci = await github.rest.actions.getWorkflow({owner, repo, workflow_id: 'ci.yml'});
+            let sha;
+            const trusted = run => run.workflow_id === ci.data.id &&
+              run.head_repository?.id === repository.data.id && run.head_branch === 'main' &&
+              ['push', 'workflow_dispatch'].includes(run.event) &&
+              run.status === 'completed' && run.conclusion === 'success';
+            if (context.eventName === 'workflow_run') {
+              const run = context.payload.workflow_run;
+              if (!trusted(run)) throw new Error('Untrusted or unsuccessful CI source');
+              sha = run.head_sha;
+            } else {
+              if (context.ref !== 'refs/heads/main') throw new Error('Dispatch must use main');
+              sha = context.payload.inputs.expected_sha || context.sha;
+              if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Expected a full source SHA');
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: ci.data.id, head_sha: sha, branch: 'main', per_page: 100
+              });
+              const eligible = runs.data.workflow_runs.filter(r =>
+                ['push', 'workflow_dispatch'].includes(r.event));
+              if (!eligible.length || !trusted(eligible[0])) throw new Error('Successful current-main CI required');
+            }
+            const main = await github.rest.repos.getCommit({owner, repo, ref: 'main'});
+            if (!/^[0-9a-f]{40}$/.test(sha) || main.data.sha !== sha || context.sha !== sha)
+              throw new Error('Source is not this run and current main; wait for current-main CI');
+            // Only successful automatic releases advance the all-service baseline.
+            const releases = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'deploy-apps.yml', branch: 'main',
+              event: 'workflow_run', status: 'success', per_page: 100
+            });
+            const previous = releases.data.workflow_runs.find(r =>
+              r.id < context.runId && r.head_repository?.id === repository.data.id);
+            core.setOutput('sha', sha);
+            core.setOutput('base', previous?.head_sha || '');
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.trust.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Select changes since the last successful automatic app release
+        id: plan
+        env:
+          SOURCE_SHA: ${{ steps.trust.outputs.sha }}
+          BASE_SHA: ${{ steps.trust.outputs.base }}
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTED_SERVICE: ${{ inputs.service }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Planning imports httpx but never authenticates or contacts Azure.
+          pip install --quiet httpx
+          args=(plan --source-sha "$SOURCE_SHA")
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            args+=(--service "$SELECTED_SERVICE")
+          elif [[ -n "$BASE_SHA" ]]; then
+            args+=(--base-sha "$BASE_SHA")
+          fi
+          services="$(python scripts/release-app.py "${args[@]}")"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: verify
+    if: needs.verify.result == 'success' && needs.verify.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: northwind-apps
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ needs.verify.outputs.sha }}
+      SERVICES_JSON: ${{ needs.verify.outputs.services }}
+      AZURE_APPS_CLIENT_ID: ${{ vars.AZURE_APPS_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_APPS_RESOURCE_GROUP: ${{ vars.AZURE_APPS_RESOURCE_GROUP }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      VITE_INSURANCE_BUSINESS_ENABLED: ${{ vars.VITE_INSURANCE_BUSINESS_ENABLED || 'false' }}
+      VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID }}
+      VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
+      VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE }}
+      VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID }}
+    steps:
+      - name: Recheck source after environment approval and validate exact Azure scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
+          test "$AZURE_SUBSCRIPTION_ID" = 137c905b-7734-479e-acc5-ab8222462936
+          test "$AZURE_TENANT_ID" = 043c812b-d828-4850-8da0-cfda17c314d4
+          test "$AZURE_APPS_RESOURCE_GROUP" = rg-northwind-apps
+          test "$ACR_NAME" = acrzurlonorthwind
+          test -n "$AZURE_APPS_CLIENT_ID"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install --quiet httpx azure-identity reportlab==4.2.5
+      - uses: docker/setup-buildx-action@v3
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_APPS_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Snapshot nonsecret release guards and package exact verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .release-state
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          export GITHUB_SHA="$SOURCE_SHA"
+          api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
+            --name ca-api --query properties.configuration.ingress.fqdn -o tsv)"
+          [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+          export VITE_API_BASE_URL="https://$api_fqdn"
+          while IFS= read -r service; do
+            case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech|web-voice) ;; *) exit 1 ;; esac
+            az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-$service" \
+              --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
+              -o json > ".release-state/before-$service.json"
+            jq -e '.revision and .image' ".release-state/before-$service.json" > /dev/null
+            case "$service" in
+              api)
+                python data/seed/generate.py --domain insurance
+                python -c 'import shutil; dest = "apps/api/app/_northwind"; shutil.rmtree(dest, ignore_errors=True); shutil.copytree("data/northwind", dest)'
+                python scripts/bundle-insurance-assets.py --service api
+                python scripts/bundle-harness-assets.py
+                ;;
+              mcp-*)
+                python scripts/bundle-insurance-assets.py --service "$service"
+                ;;
+              web-*)
+                if [[ "$service" == web-tech ]]; then python scripts/release-app.py check-frontend; fi
+                (cd "apps/$service" && npm ci --no-audit --no-fund && npm run build)
+                ;;
+            esac
+          done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+      - name: Build and push immutable images on the runner (never ACR admin credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          az acr login --name "$ACR_NAME" --output none
+          deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "DEPLOYED_AT=$deployed_at" >> "$GITHUB_ENV"
+          while IFS= read -r service; do
+            tag="$ACR_NAME.azurecr.io/$service:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            # No Vite build args: web-tech's default preserves the validated prebuilt dist.
+            docker buildx build --platform linux/amd64 --push --tag "$tag" \
+              --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.created=$deployed_at" \
+              --metadata-file ".release-state/build-$service.json" "apps/$service"
+            digest="$(jq -er '."containerimage.digest"' ".release-state/build-$service.json")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s' "$ACR_NAME.azurecr.io/$service@$digest" > ".release-state/image-$service"
+          done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+      - name: Release digest-pinned images, preserving all configuration and opt-in flags
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="gha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${SOURCE_SHA:0:12}"
+          while IFS= read -r service; do
+            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
+            args=(release --subscription "$AZURE_SUBSCRIPTION_ID" --tenant "$AZURE_TENANT_ID"
+              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "ca-$service"
+              --image "$(cat ".release-state/image-$service")" --revision "$revision"
+              --expected-revision "$(jq -er .revision ".release-state/before-$service.json")"
+              --rollback-file ".release-state/rollback-$service.json" --apply)
+            if [[ "$service" == api ]]; then
+              args+=(--git-sha "$SOURCE_SHA" --deployed-at "$DEPLOYED_AT" --github-repository "$GITHUB_REPOSITORY")
+            fi
+            python scripts/release-app.py "${args[@]}"
+          done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+      - name: Preserve secret-free rollback records even when readiness is unknown
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-rollback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release-state/rollback-*.json
+          if-no-files-found: ignore
+          retention-days: 14

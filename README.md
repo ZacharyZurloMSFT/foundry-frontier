@@ -166,6 +166,69 @@ Do not run an unscoped `azd up` against the migrated deployment. Use the
 split-group reuse profile and scoped app deployments below. Insurance agents
 use the dedicated SDK deployment script, not the retail azd agent services.
 
+### Scoped GitHub Actions delivery
+
+The private source repository is `ZacharyZurloMSFT/foundry-frontier`. Its new
+delivery lanes are deliberately separate:
+
+| Workflow | Trigger and boundary |
+| --- | --- |
+| `CI` | PRs/main/manual; application contracts, deployment contracts, TypeScript, web tests/builds, and Bicep compilation. No Azure login or paid inference. |
+| `Scoped App Release` (`deploy-apps.yml`) | Successful trusted CI for current `main`, or explicit main dispatch after successful CI; build and release selected existing apps only. |
+| `Scoped Infrastructure` (`deploy-infra.yml`) | Successful trusted main CI or manual plan. Apply is manual and requires the exact reviewed main SHA and a successful same-source plan-run artifact. |
+
+`deploy-progressive.yml` is retired: it can no longer call `azd up` or `azd down`.
+Legacy evaluation/training/prompt workflows remain disabled until separately
+configured and budgeted; enabling CI does not authorise those jobs.
+
+App releases use immutable image digests and preserve existing environment,
+secret references, managed identity, service endpoints and capability flags.
+API build metadata reports the actual source SHA. Rollback artifacts contain
+previous image/revision and build metadata only, never full app configuration.
+Changing the deployment profile does not approve new insurance identities or
+enable business-portal flags. Hosted Foundry agents are not deployed by this lane.
+
+Infrastructure is **not** the greenfield stack. The original `infra/main.bicep`
+reuse lane remains reference-only; applying it would not manage updates. The
+new `infra/live/storage-networking.bicep` manages just four resources in
+`rg-northwind-networking`: the Blob private endpoint, its DNS zone/group and
+the existing VNet's private-DNS link. It references, but never redeclares, the
+existing Storage account, VNet or subnets. It does not enable public networking,
+change application images/settings, provision another AI service, or implement
+evidence processing. Other infrastructure changes still receive static CI,
+but need an explicitly reviewed live management boundary before automated apply.
+
+Plan artifacts bind the complete what-if result, compiled template hash and
+reviewed source SHA. Apply re-plans and rejects drift, deletes, out-of-scope
+resources or unrecognised changes. It uses incremental deployment and requires
+private-endpoint approval/readiness. A private endpoint is not proof of
+end-to-end blob reachability; rehearse data-plane access separately.
+App rollout and infra apply share a non-cancelling mutation concurrency group.
+
+Run `python scripts\configure-github-oidc.py` to preview the one-time setup.
+After explicit operator approval, `--apply` creates three dedicated managed
+identities, environment-bound OIDC trust, scoped role definitions/assignments,
+main-only GitHub environments, and nonsecret repository variables. No client
+secret is created. App permissions are confined to five named Container Apps
+plus ACR push; infra planning has read/what-if access, and infra apply has only
+the reviewed networking writes and Storage private-endpoint approval.
+The setup command deliberately leaves repository Actions disabled.
+
+Required variables are `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+`AZURE_APPS_CLIENT_ID`, `AZURE_INFRA_PLAN_CLIENT_ID`,
+`AZURE_INFRA_APPLY_CLIENT_ID`, `AZURE_APPS_RESOURCE_GROUP`, `ACR_NAME`,
+`NORTHWIND_DEPLOY_ENABLED` and `NORTHWIND_INFRA_ENABLED`. The identities trust
+only the `northwind-apps`, `northwind-infra-plan` and `northwind-infra-apply`
+environments for this repository; environments allow `main` only. Infra apply
+always needs an explicit dispatch/full-SHA confirmation even if GitHub's plan
+does not support required-reviewer environment protection. This is not a claim
+of enforced two-person approval.
+
+Keep Actions disabled until the new workflow commit and OIDC setup are reviewed.
+Then disable the legacy workflows individually, enable only `CI`,
+`deploy-apps.yml` and `deploy-infra.yml`, enable repository Actions, and dispatch
+`CI` on `main`. Never enable the old paid/greenfield workflows as a shortcut.
+
 Each department is its own **Foundry project** inside a shared AI Services
 account. Model deployments, UAMI, VNet, and observability are shared;
 agents, connections, evaluators, and red-team runs are scoped per project.

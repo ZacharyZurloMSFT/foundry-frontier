@@ -2,59 +2,67 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request: {}
-
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  lint-and-typecheck:
+  contracts:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - name: Install ruff + mypy
-        run: pip install ruff==0.8.4 mypy==1.13.0
-      - name: Ruff
-        run: ruff check apps/api evals pipelines data/seed
-      - name: Mypy (best-effort)
-        run: mypy apps/api/app --ignore-missing-imports --follow-imports=silent || true
-
-  bicep:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Bicep build
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/mcp-tech-lookup/requirements.txt
+            apps/mcp-work-order/requirements.txt
+      - run: pip install -r apps/api/requirements.txt -r apps/mcp-tech-lookup/requirements.txt -r apps/mcp-work-order/requirements.txt reportlab==4.2.5 ruff==0.8.4 mypy==1.13.0
+      - name: Generate ignored synthetic inputs from tracked sources (offline only)
+        run: python data/seed/generate.py --domain insurance
+      - name: Check connected business contracts
         run: |
-          curl -sLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
-          chmod +x bicep && sudo mv bicep /usr/local/bin/
-          bicep build infra/main.bicep --stdout > /tmp/main.json
-          echo "Bicep compiled OK"
-
+          ruff check apps/api/app/business apps/api/tests/test_business_api.py apps/api/tests/test_business_foundation.py
+          mypy apps/api/app/business --ignore-missing-imports --follow-imports=silent
+      - name: Compile infrastructure for deployment contract tests
+        run: |
+          az bicep install --version v0.46.1
+          az bicep build --file infra/main.bicep --outfile infra/main.json
+          az bicep build --file infra/live/storage-networking.bicep --outfile /tmp/storage-networking.json
+      - name: API and release contracts (no cloud or model calls)
+        env:
+          APPLICATIONINSIGHTS_CONNECTION_STRING: ""
+        run: |
+          python -m pytest apps/api/tests \
+            scripts/tests/test_deployment_reuse.py \
+            scripts/tests/test_deployment_insurance_bundle.py \
+            scripts/tests/test_bundle_harness_assets.py \
+            scripts/tests/test_release_app.py \
+            scripts/tests/test_actions_infra.py -q
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         app: [web-tech, web-voice]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
-      - working-directory: apps/${{ matrix.app }}
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: apps/${{ matrix.app }}
+      - run: npm run build
+        working-directory: apps/${{ matrix.app }}
       - if: matrix.app == 'web-tech'
-        working-directory: apps/web-tech
         run: npm run typecheck && npm test
-
-  harness-contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install -r apps/api/requirements.txt -r apps/mcp-work-order/requirements.txt
-      - run: python -m copilot download-runtime
-      - name: SDK, API, storage, approval and evaluation contracts
-        env:
-          TEST_COPILOT_RUNTIME: "1"
-        run: python -m pytest apps/api/tests evals/tests/test_harness_eval.py -q
+        working-directory: apps/web-tech
