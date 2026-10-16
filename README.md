@@ -182,7 +182,11 @@ Completing an evidence task is an attributable manual action, not a document
 extraction, confirmed fact or automatic workflow transition. No external
 communication, coverage adjudication, settlement or payment is implemented.
 
-### Durable evidence increment (local, not yet activated)
+### Durable evidence increment (deployed, activation gated)
+
+The initial gated code release is `60c8fb7` (16 October 2026). Source and worker
+capabilities are shipped, but evidence/business access, uploads, extraction and
+worker execution remain disabled pending their separate operational approvals.
 
 The connected journey adds protected claim documents, processing jobs and
 individual-field review. Sources are bounded PDF/JPEG/PNG documents, at most
