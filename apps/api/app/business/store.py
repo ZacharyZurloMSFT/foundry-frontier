@@ -17,7 +17,7 @@ from ..repositories import _container
 from .models import BusinessError, ConcurrentChange, DemoRun, RunId
 
 MAX_RUN_BYTES = 1_500_000
-RUN_ID = TypeAdapter(RunId)
+RUN_ID: TypeAdapter[str] = TypeAdapter(RunId)
 RECORD_KIND = "insurance_business_run"
 
 
