@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -92,6 +93,7 @@ async def test_verified_token_resolves_server_owned_account_context(api):
     assert response.status_code == 200
     assert response.json() == {
         "run_id": "run-a", "role": "policyholder", "policyholder_id": "PH-1001",
+        "actor_key": hashlib.sha256(f"run-a\0{auth.subject_id(TENANT, CUSTOMER_A)}".encode()).hexdigest(),
         "source_version": "insurance-synthetic-v2", "synthetic": True, "adjusters": [],
     }
     employee = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {identity[1](EMPLOYEE)}"})
@@ -99,6 +101,25 @@ async def test_verified_token_resolves_server_owned_account_context(api):
     assert employee.json()["adjusters"] == [auth.subject_id(TENANT, EMPLOYEE)]
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["X-Correlation-ID"]
+
+
+@pytest.mark.asyncio
+async def test_actor_key_is_stable_actor_specific_and_run_scoped_even_for_shared_customer_mapping(api):
+    client, repository, identity = api
+    first = (await client.get("/api/v1/me")).json()
+    assert (await client.get("/api/v1/me")).json()["actor_key"] == first["actor_key"]
+    stored = await repository.get("run-a")
+    stored.state.actors[auth.subject_id(TENANT, CUSTOMER_B)] = ActorMapping(
+        role="policyholder", policyholder_id="PH-1001",
+    )
+    await repository.replace(stored.state, stored.etag)
+    headers = {"Authorization": f"Bearer {identity[1](CUSTOMER_B)}"}
+    same_customer = (await client.get("/api/v1/me", headers=headers)).json()
+    other_run = (await client.get("/api/v1/me", headers={**headers, "X-Demo-Run": "run-b"})).json()
+    assert first["role"] == same_customer["role"] and first["policyholder_id"] == same_customer["policyholder_id"]
+    assert len({first["actor_key"], same_customer["actor_key"], other_run["actor_key"]}) == 3
+    assert all(len(context["actor_key"]) == 64 for context in (first, same_customer, other_run))
+    assert CUSTOMER_A not in json.dumps(first) and CUSTOMER_B not in json.dumps(same_customer)
 
 
 @pytest.mark.asyncio

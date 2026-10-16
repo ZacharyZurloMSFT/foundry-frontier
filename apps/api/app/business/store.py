@@ -14,6 +14,7 @@ from azure.cosmos.exceptions import (
 from pydantic import TypeAdapter
 
 from ..repositories import _container
+from .evidence_capacity import require_capacity
 from .models import BusinessError, ConcurrentChange, DemoRun, RunId
 
 MAX_RUN_BYTES = 1_500_000
@@ -43,8 +44,10 @@ def _document(state: DemoRun) -> dict:
         "id": key, "workflowId": key, "record_kind": RECORD_KIND,
         "state": state.model_dump(mode="json"),
     }
-    if len(json.dumps(document, ensure_ascii=True).encode("utf-8")) > MAX_RUN_BYTES:
+    size_bytes = len(json.dumps(document, ensure_ascii=True).encode("utf-8"))
+    if size_bytes > MAX_RUN_BYTES:
         raise BusinessError("run_capacity", "This bounded demo run has reached its storage limit.", 409)
+    require_capacity(state, size_bytes, MAX_RUN_BYTES)
     return document
 
 

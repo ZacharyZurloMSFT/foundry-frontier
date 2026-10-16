@@ -4,6 +4,7 @@ import { ClaimRecord, Identity, Page, statusLabel } from "./models";
 import { DateText, ErrorNotice, Loading, Pager } from "./shared";
 import { PolicyView } from "./Policies";
 import CaseCommands from "./CaseCommands";
+import DocumentsPanel from "./DocumentsPanel";
 
 export function ClaimDetail({ api, initialClaim, claimId, identity, onError }: {
   api: BusinessApi; initialClaim: ClaimRecord | null; claimId: string; identity: Identity; onError: (error: unknown) => void;
@@ -51,8 +52,10 @@ export function ClaimDetail({ api, initialClaim, claimId, identity, onError }: {
         <h4>Next evidence steps</h4>
         {claim.outstanding_evidence.length ? <ul>{claim.outstanding_evidence.map((e, i) => <li key={i}>{e}</li>)}</ul> : <p>No outstanding evidence is currently listed. This is not a coverage decision.</p>}
         {claim.review_flags.length > 0 && <><h4>Review flags</h4><ul>{claim.review_flags.map((flag, i) => <li key={i}>{statusLabel(flag)}</li>)}</ul></>}
-        <p className="business-muted">Uploads and document extraction are not integrated. Evidence can be tracked manually by an adjuster; there is no upload or assistant action here.</p>
+        <p className="business-muted">Evidence is managed below when enabled. AI assistance and voice are not integrated with this case.</p>
       </article>
+      <DocumentsPanel claim={claim} identity={identity} api={api} caseBusy={busy} caseLocked={locked}
+        onCaseChanged={() => setReload(value => value + 1)} onError={onError} />
       <section className="business-panel" aria-labelledby="case-tasks-title"><h3 id="case-tasks-title">Evidence tasks</h3>
         {!claim.tasks.length && <p>No evidence tasks have been created.</p>}
         <ul className="business-list">{claim.tasks.map(task => <li key={task.task_id}><div className="business-heading"><h4>{task.title}</h4><span className="business-badge">{task.status}</span></div>

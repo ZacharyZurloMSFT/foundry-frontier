@@ -144,7 +144,9 @@ class InsuranceBusinessService:
     async def account_context(self, run_id: str, subject_id: str) -> AccountContext:
         stored, actor = await self._context(run_id, subject_id)
         return AccountContext(
-            run_id=run_id, role=actor.role, policyholder_id=actor.policyholder_id,
+            run_id=run_id,
+            actor_key=hashlib.sha256(f"{run_id}\0{subject_id}".encode()).hexdigest(),
+            role=actor.role, policyholder_id=actor.policyholder_id,
             source_version=stored.state.source_version,
             adjusters=sorted(
                 subject for subject, mapping in stored.state.actors.items() if mapping.role == "adjuster"

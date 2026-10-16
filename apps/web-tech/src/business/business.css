@@ -171,6 +171,8 @@ html[data-theme="dark"][data-insurance-business="true"] {
 .insurance-business .business-back { margin-bottom: 24px; }
 .business-skip { position: absolute; left: 16px; top: -100px; background: var(--cp-surface); color: var(--cp-link); padding: 12px; z-index: 10; border: 1px solid var(--cp-border); }
 .business-skip:focus { top: 8px; }
+.business-evidence-spans { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; background: var(--cp-surface-soft); border: 1px solid var(--cp-border); border-radius: 0.625rem; font-family: Consolas, "Courier New", Courier, monospace; font-size: .8125rem; }
+.business-field-review { margin-bottom: 0; }
 @media (max-width: 960px) {
   .business-header { align-items: start; flex-direction: column; gap: 20px; }
   .business-hero { gap: 32px; }

@@ -36,9 +36,13 @@ export function readCommand(storage: RetryStorage, slot: string): ReportCommand 
 }
 export async function prepareReportCommand(report: LossReport, storage: RetryStorage, slot: string): Promise<ReportCommand> {
   const hash = await reportHash(report);
+  return prepareHashedCommand(hash, storage, slot);
+}
+export function prepareHashedCommand(hash: string, storage: RetryStorage, slot: string, noun = "report"): ReportCommand {
+  if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("A valid command fingerprint is required.");
   const previous = readCommand(storage, slot);
   if (previous) {
-    if (previous.hash !== hash) throw new Error("This report differs from the saved command. Restore the exact original fields to retry, or check your claims and explicitly start a new report.");
+    if (previous.hash !== hash) throw new Error(`This ${noun} differs from the saved command. Restore the exact original fields to retry, or check the case and explicitly start a new ${noun}.`);
     return previous;
   }
   const command = { key: crypto.randomUUID(), hash };
@@ -46,9 +50,9 @@ export async function prepareReportCommand(report: LossReport, storage: RetrySto
   try { storage.setItem(slot, JSON.stringify(command)); } catch { throw new ReportStorageError(); }
   return command;
 }
-export function clearConfirmedCommand(storage: RetryStorage, slot: string): string | null {
+export function clearConfirmedCommand(storage: RetryStorage, slot: string, noun = "claim"): string | null {
   try { storage.removeItem(slot); return null; }
   catch {
-    return "The claim is confirmed, but its saved retry key could not be cleared. Check your claims before starting another report.";
+    return `The ${noun} is confirmed, but its saved retry key could not be cleared. Check the case before starting another submission.`;
   }
 }

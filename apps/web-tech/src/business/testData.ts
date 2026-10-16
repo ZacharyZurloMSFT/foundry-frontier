@@ -18,7 +18,7 @@ export const policyExample: PolicySnapshot = {
   citations: [{ section_id: "collision", policy_ref: "WORD-TEST#collision", text: "Synthetic citation.", source_uri: "synthetic://WORD-TEST", title: "Test auto wording", version: "1", state: "WA", effective_from: "2026-01-01", effective_to: "2026-12-31" }],
 };
 export const identityExample: Identity = {
-  run_id: "test-run", role: "policyholder", policyholder_id: "PH-TEST", source_version: "source-v1", synthetic: true, adjusters: [],
+  run_id: "test-run", role: "policyholder", policyholder_id: "PH-TEST", source_version: "source-v1", synthetic: true, adjusters: [], actor_key: "a".repeat(64),
 };
 export const claimExample: ClaimRecord = {
   claim_id: "CLM-TEST", run_id: "test-run", policy_id: "POL-TEST", policyholder_id: "PH-TEST",

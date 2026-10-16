@@ -63,7 +63,7 @@ them disabled until their real dependencies and supported transport are
 verified. CU upload limit is 10 MiB; extracted facts still require human
 review, especially missing or low-confidence fields.
 
-### Connected manual business journey (not deployed)
+### Connected manual business journey (deployed, activation gated)
 
 `apps/api/app/business` starts the persistent insurance business layer, separate
 from AI adapters. It provides typed, run-scoped policy and claim reads,
@@ -87,8 +87,9 @@ Retention/reset policy is not implemented or approved by this increment.
 Both new surfaces are **disabled by default**. `NORTHWIND_BUSINESS_API_ENABLED`
 gates the API; `VITE_INSURANCE_BUSINESS_ENABLED` selects the new business-first
 frontend at build time. When disabled, the existing fixture-based demos and
-draft-only approvals are unchanged. This increment does not deploy, register
-identities, seed Azure, or enable audience access.
+draft-only approvals are unchanged. The application code is deployed through
+scoped CI/CD, but insurance identity registrations, participant mappings, seeded
+business runs and audience access still require separate approval.
 
 The API verifies delegated **Entra v2 RS256 access tokens**, including signature,
 issuer, tenant, audience, expiry, required scope, and permitted client application.
@@ -140,6 +141,37 @@ run in existing Cosmos and refuses to overwrite one; all mappings must match
 the configured tenant. The operator must have private-network connectivity and
 the appropriate data-plane permission. A failed read never auto-seeds a run.
 
+`scripts/configure-insurance-identity.py` prepares the real API/SPA registrations
+without changing existing GitHub deployment identities. Its default preview is
+fully offline and requires an explicit tenant, stable deployment UUID, exact SPA
+redirect origin, run ID and the same private participant mapping:
+
+```powershell
+python scripts\configure-insurance-identity.py --preview `
+  --tenant-id "<approved-tenant-uuid>" --deployment-id "<stable-deployment-uuid>" `
+  --redirect-uri "https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/" `
+  --run-id northwind-demo --actors-json C:\secure\actors.json
+```
+
+A separately approved `--apply --journal C:\secure\insurance-identity.json`
+reconciles only registrations carrying the exact deployment ownership marker.
+It checkpoints confirmed IDs and uncertain writes so an interrupted create is
+query-reconciled, not blindly submitted again. Keep that journal outside source
+control. The API is single-tenant/v2 and exposes only `access_as_user`; the SPA
+uses authorization-code/PKCE, the exact redirect and the API's delegated scope.
+No client secret or implicit flow is configured.
+
+Both service principals require participant assignment. `--assign-participants`
+is a separate explicit opt-in to assign only the existing tenant users in the
+approved map; it never invites users or guesses accounts from display names.
+Registration management and participant assignment require an already authorised
+operator and appropriate delegated Graph permissions. The tool neither grants
+those permissions nor performs administrative consent. It emits proposed API
+and frontend settings with both business enablement flags still **false**.
+Assignments/consent, authenticated run seeding, real sign-in and negative-access
+rehearsal remain prerequisites for activation. Each participant currently has one
+server-mapped role per run; there is no client-side persona privilege switch.
+
 Protected routes include `/me`, `/me/policies`, `/me/claims`, `/policies/{id}`,
 and `/claims/{id}` under `/api/v1`. Loss reporting requires `Idempotency-Key`;
 identical retries return the original result, and changed input conflicts.
@@ -150,13 +182,85 @@ Completing an evidence task is an attributable manual action, not a document
 extraction, confirmed fact or automatic workflow transition. No external
 communication, coverage adjudication, settlement or payment is implemented.
 
+### Durable evidence increment (local, not yet activated)
+
+The connected journey adds protected claim documents, processing jobs and
+individual-field review. Sources are bounded PDF/JPEG/PNG documents, at most
+10 MiB, selected from the synthetic allowlist or an independently enabled upload
+path. Every submission requires synthetic-data acknowledgement and an
+idempotency key. Original bytes and raw extraction/provenance live in immutable
+private Blob objects; the existing run aggregate atomically stores references,
+job state, review metadata and audit through ETag-protected updates.
+No new public container, shared-access URL or general Azure token is exposed.
+This deliberately bounded increment permits up to eight documents per run and
+four per claim, subject to shared capacity. Admission reserves audit/byte space
+for worker reconciliation and each document's first six-field review; unrelated
+claim commands cannot consume that reserved space. Capacity rejection happens
+before source writes, rather than after a paid submission has started.
+
+The portal downloads source bytes through the authorised API and verifies
+MIME, length and SHA-256 before offering the original. Available field confidence
+and source spans remain untrusted suggestions. Accepting, correcting or clearing
+a field is an explicit adjuster decision with source/review version checks and
+attribution; the original extraction is not overwritten. Manual correction
+works without CU, and confirmation changes no claim workflow or financial state.
+Customers see only their permitted case and human-reviewed facts; presenter
+accounts have no evidence mutation controls.
+
+Protected evidence routes under `/api/v1` are `/evidence/status`,
+`/evidence/samples`, `/claims/{id}/documents` (list/raw upload),
+`/claims/{id}/documents/samples`, `/documents/{id}` and
+`/documents/{id}/content`, `/jobs/{id}` with explicit `/retry` or `/cancel`,
+and `/documents/{id}/reviews`. Uploads are raw request bodies, not document URLs.
+Evidence responses omit ETags and use explicit document, review and job versions.
+`/me.actor_key` is an opaque, actor/run-specific fingerprint used to isolate
+pending browser command keys across sign-in changes; it confers no access.
+
+| Evidence configuration | Default and boundary |
+| --- | --- |
+| `NORTHWIND_EVIDENCE_ENABLED` | `false`; gates new source submission |
+| `NORTHWIND_EVIDENCE_UPLOADS_ENABLED` | `false`; separate operator opt-in for bounded synthetic uploads |
+| `NORTHWIND_EVIDENCE_EXTRACTION_ENABLED` | `false`; extraction admission only, not proof of live CU success |
+| `NORTHWIND_EVIDENCE_WORKER_ENABLED` | `false`; does not create or schedule a worker |
+| `NORTHWIND_EVIDENCE_WORKER_RUN_IDS` | Empty; explicit comma-separated run allowlist, no run discovery |
+| `NORTHWIND_EVIDENCE_WORKER_LEASE_SECONDS` | `60`, bounded 30-300 |
+| `NORTHWIND_EVIDENCE_WORKER_BATCH_SIZE` | `5`, bounded 1-20 |
+| `NORTHWIND_EVIDENCE_WORKER_MAX_ATTEMPTS` | `3`, bounded 1-5 |
+
+Source/job records survive the browser connection. Processing is a separate
+bounded process, not an API background task:
+
+```powershell
+# Only after approving identities, private connectivity and the CU budget:
+Set-Location apps\api
+python -m app.business.evidence_worker --run-id northwind-demo --once
+# Or explicitly bound repeated work with --iterations <1-60>.
+```
+
+The worker additionally requires existing `NORTHWIND_CU_ENABLED` and valid CU
+configuration. It uses durable leases to prevent competing workers from
+processing the same job, resumes polling a saved provider operation after
+restart, and refuses a blind retry if submission outcome is uncertain.
+Cancellation stops further application processing; it does not promise to cancel
+provider compute already submitted. Closing a browser never cancels the job.
+Raw results and confirmed fields remain separate on completion.
+
+**Operational gates remain:** approve/apply and rehearse the private Storage
+path; approve participant mappings and activate sign-in; deploy/schedule the
+bounded worker with its run allowlist; approve inference budgets; then exercise
+actual Blob, identity and CU dependencies. No worker resource or schedule is
+created by this increment. Orphan blobs are retained safely, not silently
+deleted; scoped cleanup, retention and reset are still separate work. Status
+responses describe configuration, not certified connectivity or production
+readiness.
+
 The greenfield Bicep parameters carry the API settings with disabled/blank
 defaults and permit PATCH/preflight for task completion. The split-group reuse
 profile remains read-only and does not update the existing API's environment or
 ingress policy; any eventual activation requires an explicitly scoped deployment.
 
-**Still pending:** private Storage/DNS connectivity, durable uploads/extraction
-jobs and source review, assistant/MCP/voice migration to dynamic scoped claims,
+**Still pending:** private Storage/DNS activation, real sign-in and durable
+evidence/worker activation, assistant/MCP/voice migration to dynamic scoped claims,
 review/application commands, presenter reset, retention and release acceptance.
 The new manual portal deliberately does not call legacy fixture-based agents,
 employee knowledge or technical labs for new claims. Do not present it as a full

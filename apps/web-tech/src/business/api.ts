@@ -9,22 +9,26 @@ export function errorMessage(error: unknown): string { return error instanceof E
 export type TokenProvider = () => Promise<string>;
 export class BusinessApi {
   constructor(private readonly config: BusinessConfig, private readonly token: TokenProvider) {}
-  private async request<T>(path: string, parser: (value: unknown) => T, method = "GET", body?: unknown, idempotencyKey?: string): Promise<T> {
+  async exchange(path: string, method = "GET", body?: BodyInit, extraHeaders?: HeadersInit): Promise<Response> {
     // Acquire before sending; interactive-required must never automatically replay a command.
     const token = await this.token();
     const headers = new Headers({ Authorization: `Bearer ${token}`, "X-Demo-Run": this.config.runId, Accept: "application/json" });
-    if (body !== undefined) headers.set("Content-Type", "application/json");
-    if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+    new Headers(extraHeaders).forEach((value, name) => {
+      if (name !== "authorization" && name !== "x-demo-run") headers.set(name, value);
+    });
     const write = method !== "GET";
     let response: Response;
     try {
       response = await fetch(`${this.config.apiBase}/api/v1${path}`, {
         method, headers, credentials: "omit", cache: "no-store", redirect: "error",
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        ...(body !== undefined ? { body } : {}),
       });
     } catch {
       throw new BusinessError(write ? "The connection ended. The outcome is unknown; check the current case before another action." : "Unable to reach the insurance service.", 0, "network_error", null, write);
     }
+    return response;
+  }
+  async readJson<T>(response: Response, parser: (value: unknown) => T, write = false): Promise<T> {
     const correlationId = response.headers.get("X-Correlation-ID");
     let value: unknown;
     try { value = await response.json(); } catch {
@@ -48,6 +52,12 @@ export class BusinessApi {
     } catch {
       throw new BusinessError("The service response did not match the insurance contract. No substitute records were loaded.", response.status, "invalid_response", correlationId, write);
     }
+  }
+  async request<T>(path: string, parser: (value: unknown) => T, method = "GET", body?: unknown, idempotencyKey?: string): Promise<T> {
+    const headers = new Headers();
+    if (body !== undefined) headers.set("Content-Type", "application/json");
+    if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+    return this.readJson(await this.exchange(path, method, body === undefined ? undefined : JSON.stringify(body), headers), parser, method !== "GET");
   }
   me() {
     return this.request("/me", value => {
