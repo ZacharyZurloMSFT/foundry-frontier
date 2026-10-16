@@ -219,7 +219,9 @@ Required variables are `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
 `AZURE_INFRA_APPLY_CLIENT_ID`, `AZURE_APPS_RESOURCE_GROUP`, `ACR_NAME`,
 `NORTHWIND_DEPLOY_ENABLED` and `NORTHWIND_INFRA_ENABLED`. The identities trust
 only the `northwind-apps`, `northwind-infra-plan` and `northwind-infra-apply`
-environments for this repository; environments allow `main` only. Infra apply
+environments for this repository using GitHub's immutable owner/repository-ID
+subject prefix; setup verifies that the current OIDC policy matches rather than
+changing GitHub's subject policy. Environments allow `main` only. Infra apply
 always needs an explicit dispatch/full-SHA confirmation even if GitHub's plan
 does not support required-reviewer environment protection. This is not a claim
 of enforced two-person approval.

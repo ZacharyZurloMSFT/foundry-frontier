@@ -149,7 +149,7 @@ def test_oidc_plan_has_no_credentials_and_no_subscription_wide_assignments():
     assert preview["environment_branch_allowlist"] == ["main"]
     assert len(preview["identities"]) == 3
     for identity in preview["identities"]:
-        assert identity["federated_subject"] == f"repo:{setup.REPOSITORY}:environment:{identity['environment']}"
+        assert identity["federated_subject"] == f"{setup.SUBJECT_PREFIX}:environment:{identity['environment']}"
     assert all(binding["scope"] != setup.BASE for binding in preview["role_bindings"])
     assert not any("roleAssignments/write" in action for role in setup.ROLES.values() for action in role["actions"])
     assert all(not role.get("dataActions") for role in setup.ROLES.values())
@@ -161,3 +161,18 @@ def test_oidc_preview_has_no_cloud_calls(monkeypatch):
     monkeypatch.setattr(setup, "gh", lambda *_: pytest.fail("Preview cannot access GitHub"))
     monkeypatch.setattr(setup, "AzureCliCredential", lambda **_: pytest.fail("Preview cannot authenticate"))
     assert setup.preview()["repository"] == setup.REPOSITORY
+
+
+def test_oidc_policy_requires_the_observed_immutable_repository_subject():
+    repo = {"id": setup.REPOSITORY_ID, "owner": {"id": setup.OWNER_ID}}
+    policy = {"use_default": True, "use_immutable_subject": True, "sub_claim_prefix": setup.SUBJECT_PREFIX}
+    setup.validate_oidc_policy(repo, policy)
+    for changes in (
+        {"use_default": False}, {"use_immutable_subject": False},
+        {"sub_claim_prefix": f"repo:{setup.REPOSITORY}"},
+        {"sub_claim_prefix": setup.SUBJECT_PREFIX + "-other"},
+    ):
+        with pytest.raises(ValueError, match="subject policy changed"):
+            setup.validate_oidc_policy(repo, {**policy, **changes})
+    with pytest.raises(ValueError, match="Repository identity"):
+        setup.validate_oidc_policy({**repo, "id": 123}, policy)
