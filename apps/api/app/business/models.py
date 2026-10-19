@@ -6,6 +6,8 @@ from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from .evidence_models import EvidenceState
+
 RunId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 PolicyId = Annotated[str, StringConstraints(pattern=r"^POL-\d+$")]
 PolicyholderId = Annotated[str, StringConstraints(pattern=r"^PH-\d+$")]
@@ -184,6 +186,7 @@ class AssignAdjuster(Contract):
 
 class AccountContext(Contract):
     run_id: RunId
+    actor_key: str = Field(pattern=r"^[0-9a-f]{64}$")
     role: ActorRole
     policyholder_id: PolicyholderId | None
     source_version: str
@@ -213,4 +216,5 @@ class DemoRun(Contract):
     policies: dict[str, PolicySnapshot]
     claims: dict[str, ClaimRecord]
     loss_receipts: dict[str, LossReceipt] = Field(default_factory=dict)
+    evidence: EvidenceState = Field(default_factory=EvidenceState)
     synthetic: Literal[True] = True

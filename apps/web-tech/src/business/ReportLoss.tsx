@@ -26,7 +26,7 @@ export default function ReportLoss({ api, identity, initialPolicy, onCreated, on
   const [error, setError] = useState<unknown>(null), [pending, setPending] = useState(false), [resetChecked, setResetChecked] = useState(false);
   const [uncertain, setUncertain] = useState(false), [storageBlocked, setStorageBlocked] = useState(false);
   const sending = useRef(false);
-  const slot = reportStorageKey(identity.run_id, identity.policyholder_id || "");
+  const slot = reportStorageKey(identity.run_id, identity.actor_key);
   useEffect(() => {
     try { setPending(readCommand(window.sessionStorage, slot) !== null); }
     catch (e) { setError(e); setPending(true); setStorageBlocked(true); }
@@ -104,7 +104,7 @@ export default function ReportLoss({ api, identity, initialPolicy, onCreated, on
         <small id="loss-description-help">{description.length}/2,000 characters. Include only synthetic incident facts.</small>
       </fieldset>
       <label className="business-check"><input type="checkbox" required checked={acknowledged} disabled={busy} onChange={e => setAcknowledged(e.target.checked)} />I understand this is a synthetic insurance demonstration and confirm this report contains synthetic information only.</label>
-      <p className="business-muted">Document uploads, extraction, an assistant, and voice are not integrated in this manual journey. No external messages are sent.</p>
+      <p className="business-muted">After reporting, open the case to attach synthetic evidence when enabled. An assistant and voice are not integrated in this journey. No external messages are sent.</p>
       <button className="business-primary" type="submit" disabled={busy || !policy || !acknowledged || storageBlocked}>{busy ? "Submitting report…" : pending ? "Explicitly retry this exact report" : "Submit loss report"}</button>
     </form>
   </section>;

@@ -2,7 +2,7 @@ export type Role = "policyholder" | "adjuster" | "presenter";
 export type ClaimStatus = "reported" | "evidence_requested" | "evidence_received" | "adjuster_review" | "customer_update_prepared";
 export interface Identity {
   run_id: string; role: Role; policyholder_id: string | null; source_version: string;
-  synthetic: true; adjusters: string[];
+  synthetic: true; adjusters: string[]; actor_key: string;
 }
 export interface Source {
   title: string; version: string; state: string; effective_from: string; effective_to: string;
@@ -89,8 +89,10 @@ export function parseIdentity(value: unknown): Identity {
     run_id: text(v.run_id, "run_id"), role: choice(v.role, ["policyholder", "adjuster", "presenter"], "role"),
     policyholder_id: nullable(v.policyholder_id, "policyholder_id"), source_version: text(v.source_version, "source_version"),
     synthetic: synthetic(v.synthetic), adjusters: strings(v.adjusters, "adjusters"),
+    actor_key: text(v.actor_key, "actor_key"),
   };
   if (result.role === "policyholder" && (!result.policyholder_id || result.adjusters.length > 0)) invalid("customer identity");
+  if (!/^[a-f0-9]{64}$/.test(result.actor_key)) invalid("actor_key");
   return result;
 }
 export function parsePolicy(value: unknown): PolicySnapshot {
