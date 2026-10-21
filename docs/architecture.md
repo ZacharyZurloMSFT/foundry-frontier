@@ -2,8 +2,9 @@
 
 The demo is organized as **one company (Northwind Insurance), four
 departments, one shared AI Services account**. The existing account retains
-five projects: four active department targets plus the separate legacy
-`northwind` project.
+four insurance projects: `nw-insurance-claims`, `nw-insurance-support`,
+`nw-insurance-documents`, and `nw-insurance-contact-center`. Retired retail
+projects are not deployment or fallback targets.
 See [`docs/departments.md`](./departments.md) for the department layout.
 
 ## Replacement-stack placement
@@ -19,7 +20,7 @@ Live placement in subscription
 - **Networking** (`rg-northwind-networking`): replacement
   `vnet-zurlo-northwind`, approved Cosmos PE `pe-zz-cosmos-northwind` and
   `privatelink.documents.azure.com` link `northwind-networking`.
-- **AI** (`rg-northwind-ai`): `aisvc-zurlo-northwind`, all five projects and
+- **AI** (`rg-northwind-ai`): `aisvc-zurlo-northwind`, the four insurance projects and
   `ai-gateway-northwind`. **Data** (`rg-northwind-data`): existing Storage,
   Search and Cosmos remain untouched.
 
@@ -52,19 +53,19 @@ Content Understanding remains available through the API.
                                 │            Azure Foundry account        │
                                 │  Shared: models, Voice Live, UAMI       │
                                 │                                         │
-                                │  ┌─── northwind-orders (5 hosted) ───┐  │
-                                │  │  triage, tech_lookup,             │  │
-                                │  │  manual_retrieval, work_order,    │  │
-                                │  │  northwind-orchestrator (hosted)  │  │
+                                │  ┌─── nw-insurance-claims ───────────┐  │
+                                │  │  Five insurance hosted agents:   │  │
+                                │  │  triage, records, wording, draft,│  │
+                                │  │  insurance orchestrator          │  │
                                 │  └───────────────────────────────────┘  │
-                                │  ┌─── nw-employee-help-desk (RAG) ──┐   │
-                                │  │  northwind-hr-assistant           │  │
+                                │  ┌─── nw-insurance-support (RAG) ───┐  │
+                                │  │  Direct grounded adjuster RAG    │  │
                                 │  └───────────────────────────────────┘  │
-                                │  ┌─── nw-claims-warranty (CU) ───────┐  │
+                                │  ┌─── nw-insurance-documents (CU) ──┐  │
                                 │  │  northwind-claim-intake analyzer  │  │
                                 │  │  northwind-claims-triage          │  │
                                 │  └───────────────────────────────────┘  │
-                                │  ┌─── nw-contact-center (Voice) ─────┐  │
+                                │  ┌─── nw-insurance-contact-center ──┐  │
                                 │  │  Voice Live + intent classifier   │  │
                                 │  └───────────────────────────────────┘  │
                                 └──────────────────▲──────────────────────┘
@@ -99,9 +100,8 @@ Content Understanding remains available through the API.
 
 Each of the four departments gets its own `Microsoft.CognitiveServices/accounts/projects`
 resource inside the shared `aisvc-zurlo-northwind` AI Services account. The
-native flagship uses `northwind-orders`; the retained legacy `northwind`
-project is separate. The other
-three (`nw-employee-help-desk`, `nw-claims-warranty`, `nw-contact-center`)
+native flagship uses `nw-insurance-claims`. The other
+three (`nw-insurance-support`, `nw-insurance-documents`, `nw-insurance-contact-center`)
 are provisioned by an `additionalProjects` for-loop in
 `infra/modules/foundry.bicep`. Account-scoped RBAC (Azure AI User,
 Cognitive Services OpenAI User) inherits to all projects, so the shared
@@ -111,9 +111,9 @@ The department → endpoint map is exported to the API + orchestrator as a
 JSON string in the `FOUNDRY_PROJECT_ENDPOINTS` env var; the API's
 `X-Department` middleware resolves the header to the right project.
 
-### Order Concierge hosted runtime
+### Insurance hosted runtime
 
-The Order Concierge code targets the existing `northwind-orders` project
+The insurance code targets the existing `nw-insurance-claims` project
 under `aisvc-zurlo-northwind`, without replacing the other departments.
 Its manager and four specialists have independent hosted definitions:
 `agents\orchestrator\agent.yaml`, `agents\triage\agent.yaml`,
@@ -131,15 +131,15 @@ The SDK source-ZIP path uses the same entrypoint with `python_3_13` and
 the four canonical specialist YAML files, and the manager instructions;
 copy the hosted requirements file to `requirements.txt` at the ZIP root.
 Do not package virtual environments, tests, or secrets.
-`ORDER_AGENT_ROLE` selects `manager`, `triage`, `orderlookup`,
-`policylookup`, or `resolutiondraft`. `MODEL_DEPLOYMENT_NAME` selects the
+`AGENT_ROLE` selects `orchestrator`, `triage`, `policy_claim_lookup`,
+`policy_wording`, or `claim_action_draft`. `MODEL_DEPLOYMENT_NAME` selects the
 baseline (`ORDERS_MODEL_DEPLOYMENT` remains an alias);
 `TRIAGE_MODEL_DEPLOYMENT` explicitly overrides triage inference.
 Absent an override, the runtime reports `model_route=baseline`, not a
 fine-tuned deployment. It never trains or deploys models. Responses metadata
 reports the actual selected model, role, and canonical prompt SHA-256.
 Triage's internal inference uses account-level Chat Completions at
-`ORDERS_OPENAI_ENDPOINT` (the account's `https://...openai.azure.com/openai/v1/`
+`AZURE_OPENAI_ENDPOINT` (the account's `https://...openai.azure.com/openai/v1/`
 endpoint), with managed-identity tokens scoped to Cognitive Services and
 `store=false`. Grant its runtime principal Cognitive Services OpenAI User.
 It never falls back to Chat Completions on the non-default project. The
@@ -148,9 +148,9 @@ all internal model calls disable storage. External invocation of every
 hosted role remains the agent-specific Responses endpoint.
 
 Model gateway routing is explicitly enabled with
-`ORDERS_MODEL_GATEWAY_ENDPOINT=https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/`,
-`ORDERS_MODEL_GATEWAY_MODEL` (the gateway alias, such as
-`aisvc-zurlo-northwind/gpt-4o`), and `ORDERS_MODEL_GATEWAY_DEPLOYMENT`
+`MODEL_GATEWAY_ENDPOINT=https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/`,
+`MODEL_GATEWAY_MODEL` (the gateway alias, such as
+`aisvc-zurlo-northwind/gpt-4o`), and `MODEL_GATEWAY_DEPLOYMENT`
 (the original model deployment). The last value must match the selected
 deployment, including a triage override; changing models cannot silently
 reuse a gateway alias for a different deployment. All five roles use this
@@ -162,15 +162,10 @@ invocation still uses the original Foundry project and hosted endpoints.
 Responses metadata retains the original deployment and additionally
 records the gateway alias, endpoint and provider response/model.
 
-The legacy `northwind` project manager is kept separately in
-`agents\legacyorchestrator`, recovered from its deployed source rather
-than replaced with the Orders runtime. Its own model uses the same
-gateway and managed-identity scope; its existing prompt-agent delegation
-and tools remain unchanged. Use its isolated `northwind-legacy-gateway`
-azd environment, not the root `northwind-dev` environment. Its local
-environment must explicitly bind both `AZURE_AI_PROJECT_ENDPOINT` and
-`FOUNDRY_PROJECT_ENDPOINT` to the legacy project, so azd cannot select an
-unrelated default project.
+`agents\legacyorchestrator` and the retail prompt files are historical
+compatibility sources, not part of the active insurance deployment contract.
+Deprecated configuration aliases are normalized at input boundaries with
+conflict detection; new insurance manifests emit only primary setting names.
 
 Creating a version does not replace an existing fixed-ratio agent
 endpoint selector. After granting the new version's gateway access,
@@ -179,12 +174,12 @@ version for rollback. The expired-model `northwind-triage-ft-demo`
 companion is not silently substituted with a base-model gateway alias.
 
 Prompts are loaded directly from the packaged canonical YAML, including
-the manager's `agents\orchestrator\instructions.yaml`. The order specialist
-uses the existing four-order MCP service, not a second in-process fixture.
+the manager's `agents\insurance\orchestrator.yaml`. The records specialist
+uses the insurance policy/claim MCP service, not a second in-process fixture.
 The policy specialist uses the existing Search Foundry IQ MCP project
-connection (`ORDERS_KB_CONNECTION=northwind-orders-kb-mcp`,
+connection (`INSURANCE_KB_CONNECTION_NAME=nw-insurance-claims-kb-mcp`,
 `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_KNOWLEDGE_BASE`;
-`ORDERS_KB_CONNECTION_NAME` remains an alias). Authentication is supplied by
+deprecated Orders setting names remain input aliases). Authentication is supplied by
 that project connection, including API-key-backed Search connections; the
 agent does not request Search bearer tokens. In direct project mode,
 Foundry resolves the connection. In model-gateway mode, account-level
@@ -197,8 +192,21 @@ has payload capture disabled. Model routing does not change MCP endpoints
 or grant the agents permission to approve resolutions.
 This runtime does not activate the optional
 Bing/SharePoint scaffolds. Models and project connections use Azure
-Identity. The existing order/proposal MCP transports retain their existing
+Identity. The existing insurance lookup/draft MCP transports retain their existing
 service authentication contract.
+
+The packaged `agents/hosted/build.json` records source commit, clean-tree state
+and hashes of every allowlisted input. The running host validates those bytes
+before reporting its source manifest, selected prompt and configuration hashes.
+Deployment receipts also bind the exact uploaded ZIP/content hash and immutable
+serving version; locally rebuilding an old ZIP is not proof of remote source.
+
+Fleet readiness is controlled at the API, not in agent definitions.
+`scripts/verify-insurance-fleet.py` reads completed synthetic responses, current
+versions/selectors and the single pending draft without starting inference.
+`scripts/release-app.py` keeps readiness false while configuring all four routes;
+activation additionally requires matching evidence and a fresh serving-version
+check. Other application flags and shared resources remain unchanged.
 
 Callers use the project SDK's **agent-specific** Responses client and send
 application-owned `metadata.workflow_id` for resolution-capable turns.

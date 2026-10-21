@@ -18,6 +18,8 @@ from .insurance_domain import (
 from .orchestrator_client import run_turn
 from .repositories import enqueue_hitl
 from .settings import get_settings
+from .company import _try_parse_endpoints_json
+from .insurance_config import INSURANCE_PROJECT, valid_insurance_routes
 
 router = APIRouter(prefix="/insurance", tags=["synthetic-insurance"])
 
@@ -30,11 +32,15 @@ def insurance_runtime_ready() -> bool:
         return False
     return (
         settings.business_domain == "insurance" and settings.insurance_agents_ready
-        and settings.order_project_name == "northwind-orders"
+        and settings.order_project_name == INSURANCE_PROJECT
         and settings.order_agents_hosted and project.scheme == "https" and bool(project.hostname)
         and not project.username and not project.password and not project.query and not project.fragment
         and project.path.rstrip("/") == f"/api/projects/{settings.order_project_name}"
-        and settings.insurance_orchestrator_agent_id.startswith("northwind-insurance-")
+        and settings.insurance_orchestrator_agent_id == "northwind-insurance-orchestrator"
+        and valid_insurance_routes(
+            _try_parse_endpoints_json(settings.foundry_project_endpoints),
+            settings.foundry_project_endpoint,
+        )
     )
 
 
@@ -43,9 +49,9 @@ def require_insurance_runtime() -> None:
         raise HTTPException(
             503, "Insurance agent inference is unavailable. Deploy and verify the converted insurance "
             "agents in the existing project, then configure NORTHWIND_BUSINESS_DOMAIN=insurance, "
-            "NORTHWIND_INSURANCE_AGENTS_READY=true, ORDER_AGENTS_HOSTED=true and "
-            "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID, with FOUNDRY_PROJECT_ENDPOINT pointing to "
-            "the existing ORDER_PROJECT_NAME=northwind-orders, not the legacy web project. "
+            "NORTHWIND_INSURANCE_AGENTS_READY=true, AGENTS_HOSTED=true and "
+            "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID, with INSURANCE_PROJECT_ENDPOINT pointing to "
+            "INSURANCE_PROJECT_NAME=nw-insurance-claims and all four insurance department routes. "
             "Existing retail agents are not insurance-ready.",
         )
 

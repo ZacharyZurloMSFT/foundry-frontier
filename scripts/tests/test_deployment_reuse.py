@@ -28,7 +28,7 @@ GREENFIELD_MODULES = {
 
 def valid_environment():
     env = {key: "preserved" for key in module.PRESERVED_KEYS}
-    endpoint = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/northwind-orders"
+    endpoint = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/nw-insurance-claims"
     env.update({
         "NORTHWIND_REUSE_EXISTING_RESOURCES": "true",
         "AZURE_RESOURCE_GROUP": "rg-northwind-ai",
@@ -42,17 +42,17 @@ def valid_environment():
         "AZURE_AI_PROJECT_ID": (
             "/subscriptions/137c905b-7734-479e-acc5-ab8222462936"
             "/resourceGroups/rg-northwind-ai/providers/Microsoft.CognitiveServices"
-            "/accounts/aisvc-zurlo-northwind/projects/northwind-orders"
+            "/accounts/aisvc-zurlo-northwind/projects/nw-insurance-claims"
         ),
-        "ORDER_PROJECT_NAME": "northwind-orders",
+        "ORDER_PROJECT_NAME": "nw-insurance-claims",
         "ORDER_AGENTS_HOSTED": "true",
         "FOUNDRY_PROJECT_ENDPOINT": endpoint,
         "AZURE_AI_PROJECT_ENDPOINT": endpoint,
         "FOUNDRY_PROJECT_ENDPOINTS": json.dumps({
             "order-concierge": endpoint,
-            "employee-help-desk": endpoint.replace("northwind-orders", "nw-employee-help-desk"),
-            "claims-warranty": endpoint.replace("northwind-orders", "nw-claims-warranty"),
-            "contact-center": endpoint.replace("northwind-orders", "nw-contact-center"),
+            "employee-help-desk": endpoint.replace("nw-insurance-claims", "nw-insurance-support"),
+            "claims-warranty": endpoint.replace("nw-insurance-claims", "nw-insurance-documents"),
+            "contact-center": endpoint.replace("nw-insurance-claims", "nw-insurance-contact-center"),
         }),
     })
     return env
@@ -99,7 +99,7 @@ def test_bicepparam_roundtrips_structured_endpoint_string_without_changing_raw_i
     endpoints["synthetic-note"] = 'Quoted "value", backslash \\, newline\nUnicode é and ${NOT_AN_ENV_LOOKUP}'
     raw = json.dumps(endpoints, **formatting)
     env["FOUNDRY_PROJECT_ENDPOINTS"] = raw
-    env["NORTHWIND_BUSINESS_DOMAIN"] = "insurance"
+    env["NORTHWIND_BUSINESS_DOMAIN"] = "retail"
     original = env.copy()
     assert module.validate_environment(env) == []
     parameters = compile_parameters(env)
@@ -192,7 +192,7 @@ def test_cli_defaults_to_replacement_stack_without_requiring_or_using_legacy_lab
         "NORTHWIND_INSURANCE_AGENTS_READY": ready,
     })
     if ready == "true":
-        env["FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID"] = "northwind-insurance-orchestrator:1"
+        env["FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID"] = "northwind-insurance-orchestrator"
     if legacy_label is not None:
         env["AZURE_LEGACY_RESOURCE_GROUP"] = legacy_label
     original = env.copy()
@@ -239,10 +239,17 @@ def test_cli_rejects_stale_project_id_before_reporting_success(monkeypatch, caps
 )
 def test_reuse_rejects_missing_inputs(key):
     env = valid_environment()
-    del env[key]
-    assert key in " ".join(module.validate_environment(env))
+    group = next(
+        ((primary, *aliases) for primary, aliases in module.ALIASES.items() if key in (primary, *aliases)),
+        (key,),
+    )
+    for name in group:
+        env.pop(name, None)
+    errors = " ".join(module.validate_environment(env))
+    assert any(name in errors for name in group)
     env[key] = " "
-    assert key in " ".join(module.validate_environment(env))
+    errors = " ".join(module.validate_environment(env))
+    assert any(name in errors for name in group)
 
 
 def test_foundry_cannot_accidentally_resolve_in_apps():
@@ -263,7 +270,7 @@ def test_agent_target_cannot_remain_in_legacy_after_foundry_moved():
         ("rg-northwind-ai", "rg-northwind-dev"),
         ("137c905b-7734-479e-acc5-ab8222462936", "00000000-0000-0000-0000-000000000000"),
         ("aisvc-zurlo-northwind", "aisvc-other"),
-        ("northwind-orders", "nw-employee-help-desk"),
+        ("nw-insurance-claims", "nw-insurance-support"),
         ("/projects/", "/wrongType/"),
     ],
 )
@@ -307,11 +314,11 @@ def test_private_endpoint_selection_cannot_be_blank_or_an_id(value):
     [
         ("AZURE_LOG_ANALYTICS_RESOURCE_GROUP", "", "cannot be blank"),
         ("ORDER_AGENTS_HOSTED", "yes", "exactly true or false"),
-        ("AZURE_AI_PROJECT_ENDPOINT", "https://wrong.example/api/projects/northwind", "must agree"),
-        ("ORDER_PROJECT_NAME", "northwind", "resolve ORDER_PROJECT_NAME"),
+        ("AZURE_AI_PROJECT_ENDPOINT", "https://wrong.example/api/projects/northwind", "Conflicting settings"),
+        ("ORDER_PROJECT_NAME", "northwind", "INSURANCE_PROJECT_NAME=nw-insurance-claims"),
         ("AZURE_SUBSCRIPTION_ID", "not-a-guid", "subscription GUID"),
-        ("FOUNDRY_PROJECT_ENDPOINT", "https://other.services.ai.azure.com/api/projects/northwind-orders", "existing Foundry account"),
-        ("FOUNDRY_PROJECT_ENDPOINT", "https://[", "existing Foundry account"),
+        ("FOUNDRY_PROJECT_ENDPOINT", "https://other.services.ai.azure.com/api/projects/northwind-orders", "Conflicting settings"),
+        ("FOUNDRY_PROJECT_ENDPOINT", "https://[", "Conflicting settings"),
         ("FOUNDRY_PROJECT_ENDPOINTS", "[]", "all four department"),
         ("FOUNDRY_PROJECT_ENDPOINTS", "{", "JSON object"),
         ("FOUNDRY_PROJECT_ENDPOINTS", "{}", "all four department"),
@@ -321,6 +328,15 @@ def test_reuse_rejects_inconsistent_inputs(key, value, message):
     env = valid_environment()
     env[key] = value
     assert any(message in error for error in module.validate_environment(env))
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://other.services.ai.azure.com/api/projects/nw-insurance-claims", "https://[",
+])
+def test_matching_aliases_still_reject_an_invalid_account_endpoint(endpoint):
+    env = valid_environment()
+    env["FOUNDRY_PROJECT_ENDPOINT"] = env["AZURE_AI_PROJECT_ENDPOINT"] = endpoint
+    assert any("existing Foundry account" in error for error in module.validate_environment(env))
 
 
 def test_department_map_cannot_change_the_orders_target():
@@ -369,7 +385,7 @@ def test_all_five_apps_have_explicit_routing_without_changing_agent_services():
 
 def test_rai_policy_uses_configured_subscription_and_foundry_group():
     config = yaml.safe_load((ROOT / "azure.yaml").read_text(encoding="utf-8"))
-    policy = config["services"]["triage"]["policies"][0]["raiPolicyName"]
+    policy = config["services"]["northwind-insurance-triage"]["policies"][0]["raiPolicyName"]
     assert policy == (
         "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_FOUNDRY_RESOURCE_GROUP}"
         "/providers/Microsoft.CognitiveServices/accounts/aisvc-zurlo-northwind"
@@ -577,7 +593,7 @@ def test_insurance_readiness_is_not_inferred_by_reuse_or_hosted_agents():
     assert "NORTHWIND_INSURANCE_AGENTS_READY" not in env
     env["NORTHWIND_INSURANCE_AGENTS_READY"] = "true"
     assert any("FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID" in error for error in module.validate_environment(env))
-    env["FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID"] = "northwind-insurance-orchestrator:1"
+    env["FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID"] = "northwind-insurance-orchestrator"
     assert module.validate_environment(env) == []
     env["ORDER_AGENTS_HOSTED"] = "false"
     assert any("Insurance readiness requires" in error for error in module.validate_environment(env))
@@ -600,7 +616,7 @@ def test_readiness_requires_a_deployed_project_even_in_greenfield_mode():
         "NORTHWIND_INSURANCE_AGENTS_READY": "true",
         "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID": "northwind-insurance-orchestrator:1",
     }
-    assert any("deployed Orders project endpoint" in error for error in module.validate_environment(env))
+    assert any("retained claims project endpoint" in error for error in module.validate_environment(env))
 
 
 @pytest.mark.parametrize("ready", ["false", "true"])
@@ -613,24 +629,23 @@ def test_insurance_never_targets_legacy_project_even_when_all_identifiers_agree(
         "ORDER_PROJECT_NAME": "northwind",
     })
     for key in ("FOUNDRY_PROJECT_ENDPOINT", "AZURE_AI_PROJECT_ENDPOINT", "AZURE_AI_PROJECT_ID", "FOUNDRY_PROJECT_ENDPOINTS"):
-        env[key] = env[key].replace("northwind-orders", "northwind")
-    assert any("retain ORDER_PROJECT_NAME=northwind-orders" in error for error in module.validate_environment(env))
+        env[key] = env[key].replace("nw-insurance-claims", "northwind")
+    assert any("INSURANCE_PROJECT_NAME=nw-insurance-claims" in error for error in module.validate_environment(env))
 
 
 @pytest.mark.parametrize("service", module.AGENT_SERVICES)
-def test_insurance_cannot_use_the_existing_retail_azd_agent_services(service):
+def test_insurance_azd_services_accept_only_the_insurance_profile(service):
     env = valid_environment()
     env["NORTHWIND_BUSINESS_DOMAIN"] = "insurance"
-    assert any("must not overwrite existing retail agents" in error for error in module.validate_environment(env, service))
-    assert any("--business-domain insurance" in error for error in module.validate_environment(env, service))
-    assert module.validate_environment(env) == []  # Scoped Container Apps code deployment is still allowed.
-    env["NORTHWIND_BUSINESS_DOMAIN"] = "retail"
     assert module.validate_environment(env, service) == []
+    assert module.validate_environment(env) == []
+    env["NORTHWIND_BUSINESS_DOMAIN"] = "retail"
+    assert any("insurance-only" in error for error in module.validate_environment(env, service))
 
 
 @pytest.mark.parametrize("service", module.AGENT_SERVICES)
-@pytest.mark.parametrize("name", ["${NORTHWIND_TRIAGE_AGENT_NAME}", "northwind-insurance-orchestrator", ""])
-def test_azd_guard_rejects_unresolved_or_insurance_name_in_retail_manifest(service, name):
+@pytest.mark.parametrize("name", ["${NORTHWIND_TRIAGE_AGENT_NAME}", "northwind-orchestrator", ""])
+def test_azd_guard_rejects_unresolved_or_retail_agent_names(service, name):
     assert module.validate_agent_manifest(service, {"name": name})
     assert module.validate_agent_manifest(service, {"name": module.AGENT_SERVICES[service]}) == []
 
@@ -639,12 +654,12 @@ def test_azd_guard_rejects_unresolved_or_insurance_name_in_retail_manifest(servi
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("NORTHWIND_BUSINESS_DOMAIN", "insurance"),
+        ("NORTHWIND_BUSINESS_DOMAIN", "retail"),
         ("NORTHWIND_BUSINESS_DOMAIN", "${NORTHWIND_BUSINESS_DOMAIN}"),
         ("NORTHWIND_INSURANCE_AGENTS_READY", "true"),
     ],
 )
-def test_azd_retail_name_cannot_disguise_insurance_runtime_or_readiness(service, key, value):
+def test_azd_insurance_name_cannot_disguise_retail_runtime_or_fleet_readiness(service, key, value):
     manifest = {
         "name": module.AGENT_SERVICES[service],
         "environment_variables": [{"name": key, "value": value}],
@@ -652,17 +667,17 @@ def test_azd_retail_name_cannot_disguise_insurance_runtime_or_readiness(service,
     assert module.validate_agent_manifest(service, manifest)
 
 
-def test_current_agent_manifests_are_compatible_with_the_retail_azd_contract():
+def test_current_agent_manifests_are_compatible_with_the_insurance_azd_contract():
     for service in module.AGENT_SERVICES:
         manifest = yaml.safe_load((ROOT / "agents" / service / "agent.yaml").read_text())
         assert module.validate_agent_manifest(service, manifest) == []
 
 
-def test_greenfield_retains_retail_defaults_and_explicit_readiness_false(template, parameter_defaults):
-    assert template["parameters"]["businessDomain"]["defaultValue"] == "retail"
+def test_greenfield_uses_insurance_defaults_and_explicit_readiness_false(template, parameter_defaults):
+    assert template["parameters"]["businessDomain"]["defaultValue"] == "insurance"
     assert template["parameters"]["insuranceAgentsReady"]["defaultValue"] == "false"
     parameters = parameter_defaults
-    assert parameters["businessDomain"]["value"] == "retail"
+    assert parameters["businessDomain"]["value"] == "insurance"
     assert parameters["insuranceAgentsReady"]["value"] == "false"
     assert parameters["insuranceOrchestratorAgentId"]["value"] == ""
     assert template["parameters"]["insuranceOrchestratorAgentId"]["defaultValue"] == ""
@@ -679,18 +694,11 @@ def test_greenfield_retains_retail_defaults_and_explicit_readiness_false(templat
     assert "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID" in serialized
 
 
-def test_manifest_preserves_retail_agent_names_and_blocks_insurance_packaging_and_deploy(template):
+def test_manifest_uses_insurance_agent_names_and_validates_before_packaging_and_deploy(template):
     config = yaml.safe_load((ROOT / "azure.yaml").read_text())
-    retail_names = {
-        "orchestrator": "northwind-orchestrator",
-        "triage": "northwind-triage",
-        "orderlookup": "northwind-order-lookup",
-        "policylookup": "northwind-policy-lookup",
-        "resolutiondraft": "northwind-resolution-draft",
-    }
-    for service, retail_name in retail_names.items():
-        agent = config["services"][service]
-        assert agent["name"] == retail_name
+    for service, insurance_name in module.AGENT_SERVICES.items():
+        agent = config["services"][insurance_name]
+        assert agent["name"] == insurance_name
         hook = agent["hooks"]["prepackage"]["run"]
         assert hook.index("--agent-service " + service) < hook.index("orders_agent_package.py")
         predeploy = agent["hooks"]["predeploy"]
@@ -698,9 +706,10 @@ def test_manifest_preserves_retail_agent_names_and_blocks_insurance_packaging_an
         assert "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in predeploy["run"]
         assert predeploy["continueOnError"] is False
         environment = {item["name"]: item["value"] for item in agent["environmentVariables"]}
-        assert environment["NORTHWIND_BUSINESS_DOMAIN"] == "${NORTHWIND_BUSINESS_DOMAIN}"
-        assert environment["NORTHWIND_INSURANCE_AGENTS_READY"] == "false"
-    assert template["parameters"]["orderProjectName"]["defaultValue"] == "northwind-orders"
+        assert environment["NORTHWIND_BUSINESS_DOMAIN"] == "insurance"
+        assert "NORTHWIND_INSURANCE_AGENTS_READY" not in environment
+        assert all(not name.startswith(("ORDERS_", "ORDER_")) for name in environment)
+    assert template["parameters"]["orderProjectName"]["defaultValue"] == "nw-insurance-claims"
 
 
 def test_reuse_constraints_match_required_preserved_inputs(template, parameter_defaults):

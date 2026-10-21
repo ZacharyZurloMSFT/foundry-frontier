@@ -11,11 +11,12 @@ from agents.hosted.scope import RequestScope, current_scope
 from agents.insurance.domain import ClaimActionDraft
 from agents.insurance.models import InsuranceTriageResult
 from scripts.orders_agent_package import entries
+from apps.api.app.insurance_config import INSURANCE_AGENT_NAMES, ROLE_DIRECTORIES
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV = {
     "NORTHWIND_BUSINESS_DOMAIN": "insurance",
-    "FOUNDRY_PROJECT_ENDPOINT": "https://existing.invalid/api/projects/northwind-orders",
+    "FOUNDRY_PROJECT_ENDPOINT": "https://existing.invalid/api/projects/nw-insurance-claims",
     "MODEL_DEPLOYMENT_NAME": "baseline",
     "MCP_TECH_LOOKUP_URL": "https://lookup.invalid/mcp",
     "MCP_WORK_ORDER_URL": "https://draft.invalid/mcp",
@@ -32,11 +33,13 @@ def test_canonical_insurance_prompts_and_packaging(role):
     assert archive["agents/insurance/domain.py"] == (ROOT / "apps" / "api" / "app" / "insurance_domain.py").read_bytes()
     assert archive["data/northwind/insurance-fixtures.json"] == (ROOT / "data" / "northwind" / "insurance-fixtures.json").read_bytes()
     assert archive["agents/hosted/tools.py"] == (ROOT / "agents" / "hosted" / "tools.py").read_bytes()
-    definition = yaml.safe_load((ROOT / "agents" / ("orchestrator" if role == "manager" else role) / "agent.yaml").read_text())
+    definition = yaml.safe_load((ROOT / "agents" / ROLE_DIRECTORIES[role] / "agent.yaml").read_text())
     variables = {item["name"]: item["value"] for item in definition["environment_variables"]}
-    assert not definition["name"].startswith("northwind-insurance-")
-    assert variables["NORTHWIND_BUSINESS_DOMAIN"] == "retail"
-    assert variables["NORTHWIND_INSURANCE_AGENTS_READY"] == "false"
+    assert definition["name"] == INSURANCE_AGENT_NAMES[role]
+    assert variables["NORTHWIND_BUSINESS_DOMAIN"] == "insurance"
+    assert variables["AGENT_ROLE"] == role
+    assert "NORTHWIND_INSURANCE_AGENTS_READY" not in variables
+    assert not any(name.startswith(("ORDERS_", "ORDER_")) for name in variables)
 
 
 def test_mcp_allowlists_not_retail_and_no_web_contract_sources():
@@ -68,10 +71,10 @@ def test_insurance_knowledge_is_explicit_and_never_uses_retail_corpus():
         **ENV, "ORDER_AGENT_ROLE": "policylookup", "AZURE_SEARCH_ENDPOINT": "https://existing.search.invalid",
         "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
         "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
-        "ORDERS_KB_CONNECTION": "northwind-insurance-kb-mcp",
+        "ORDERS_KB_CONNECTION": "nw-insurance-claims-kb-mcp",
     }
     spec = Settings.from_env(env).knowledge_spec()
-    assert spec["project_connection_id"] == "northwind-insurance-kb-mcp"
+    assert spec["project_connection_id"] == "nw-insurance-claims-kb-mcp"
     assert "/knowledgebases/northwind-insurance-kb/mcp?" in spec["url"]
     for key, value in (("AZURE_SEARCH_KNOWLEDGE_BASE", "northwind-kb"),
                        ("AZURE_SEARCH_INDEX", "northwind-knowledge"),

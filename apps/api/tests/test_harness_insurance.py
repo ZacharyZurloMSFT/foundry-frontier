@@ -11,6 +11,7 @@ from app.harness import insurance_tools, routes, runtime, store
 from app.harness.models import HarnessError, RunRequest
 from app.insurance_domain import ACTION_KIND, lookup_claim_record
 from app.settings import Settings
+from app.insurance_config import INSURANCE_PROJECTS
 from copilot.tools import ToolInvocation
 from copilot._jsonrpc import JsonRpcError
 from test_harness import Session
@@ -22,7 +23,10 @@ def config(monkeypatch):
         _env_file=None, NORTHWIND_BUSINESS_DOMAIN="insurance", COPILOT_HARNESS_ENABLED=True,
         NORTHWIND_INSURANCE_AGENTS_READY=True, ORDER_AGENTS_HOSTED=True,
         FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID="northwind-insurance-orchestrator",
-        FOUNDRY_PROJECT_ENDPOINT="https://unit.test/api/projects/northwind-orders",
+        FOUNDRY_PROJECT_ENDPOINT="https://unit.test/api/projects/nw-insurance-claims",
+        FOUNDRY_PROJECT_ENDPOINTS=json.dumps({
+            slug: f"https://unit.test/api/projects/{project}" for slug, project in INSURANCE_PROJECTS.items()
+        }),
         MCP_WORK_ORDER_URL="https://mcp.unit.test/mcp/", COSMOS_ENDPOINT="https://cosmos.unit.test",
     )
     for module in (runtime, routes, store, insurance):

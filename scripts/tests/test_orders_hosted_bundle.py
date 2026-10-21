@@ -26,6 +26,7 @@ def test_bundle_is_reproducible_and_excludes_local_configuration(tmp_path):
     shared = root / "apps" / "api" / "app" / "insurance_domain.py"
     shared.parent.mkdir(parents=True)
     shared.write_text("# canonical shared insurance implementation\n", encoding="utf-8")
+    shared.with_name("insurance_config.py").write_text("# canonical shared configuration\n", encoding="utf-8")
     (root / ".env").write_text("DO_NOT_PACKAGE=fixture\n", encoding="utf-8")
     (hosted / ".env").write_text("DO_NOT_PACKAGE=fixture\n", encoding="utf-8")
     (root / "agents" / "triage.yaml").write_text("name: northwind-triage\n", encoding="utf-8")
@@ -38,7 +39,10 @@ def test_bundle_is_reproducible_and_excludes_local_configuration(tmp_path):
     second = tmp_path / "second.zip"
     assert module.bundle(root, requirements, first) == module.bundle(root, requirements, second)
     with zipfile.ZipFile(first) as archive:
-        assert set(archive.namelist()) == {"main.py", "requirements.txt", "agents/insurance/domain.py", *module.PACKAGE_SOURCES}
+        assert set(archive.namelist()) == {
+            "main.py", "requirements.txt", "agents/insurance/domain.py",
+            "agents/insurance/config.py", "agents/hosted/build.json", *module.PACKAGE_SOURCES,
+        }
         assert archive.read("agents/insurance/domain.py") == shared.read_bytes()
 
 
@@ -51,6 +55,20 @@ def test_dry_run_preserves_submitted_journal(tmp_path):
     assert output.read_text(encoding="utf-8") == contents
 
 
+def test_uncertain_submission_cannot_replace_its_original_source_archive(tmp_path):
+    output = tmp_path / "insurance.json"
+    output.write_text(json.dumps({"submission_started": True, "source_sha256": "0" * 64}), encoding="utf-8")
+    archive = output.with_suffix(".zip")
+    archive.write_bytes(b"preserve the originally submitted bytes")
+    root = Path(__file__).resolve().parents[2]
+    with pytest.raises(ValueError, match="source differs"):
+        module.deploy(SimpleNamespace(
+            output=output, apply=True, requirements=root / "agents" / "hosted" / "requirements.txt",
+        ))
+    assert archive.read_bytes() == b"preserve the originally submitted bytes"
+    assert not output.with_suffix(".pending.zip").exists()
+
+
 def test_insurance_dry_run_uses_canonical_bundle_and_never_sets_readiness_or_roles(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[2]
     config = tmp_path / "config.json"
@@ -59,7 +77,7 @@ def test_insurance_dry_run_uses_canonical_bundle_and_never_sets_readiness_or_rol
     monkeypatch.setattr(module, "AzureCliCredential", lambda **_: pytest.fail("Dry run cannot authenticate"))
     module.deploy(SimpleNamespace(
         output=output, apply=False, config=config, role="manager", agent_name=None,
-        business_domain="insurance", project_endpoint="https://existing.invalid/api/projects/northwind-orders",
+        business_domain="insurance", project_endpoint="https://existing.invalid/api/projects/nw-insurance-claims",
         requirements=root / "agents" / "hosted" / "requirements.txt", grant_runtime_roles=False,
     ))
     report = json.loads(output.read_text())
@@ -107,7 +125,7 @@ def test_azd_identity_dry_run_records_source_without_authentication(tmp_path, mo
     module.deploy(SimpleNamespace(
         output=output, apply=False, config=config, role="manager", agent_name=None,
         business_domain="insurance", credential_source="azd",
-        project_endpoint="https://existing.invalid/api/projects/northwind-orders",
+        project_endpoint="https://existing.invalid/api/projects/nw-insurance-claims",
         requirements=root / "agents" / "hosted" / "requirements.txt", grant_runtime_roles=False,
     ))
     report = json.loads(output.read_text())
@@ -125,6 +143,6 @@ def test_insurance_wording_deployment_rejects_retail_knowledge(tmp_path):
         module.deploy(SimpleNamespace(
             output=tmp_path / "not-deployed.json", apply=False, config=config,
             role="policylookup", agent_name=None, business_domain="insurance", credential_source="azd",
-            project_endpoint="https://existing.invalid/api/projects/northwind-orders",
+            project_endpoint="https://existing.invalid/api/projects/nw-insurance-claims",
             requirements=root / "agents" / "hosted" / "requirements.txt",
         ))

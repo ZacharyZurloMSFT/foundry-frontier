@@ -1,9 +1,11 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 from app import orchestrator_client
 from app import repositories
 from app.settings import Settings
+from app.insurance_config import INSURANCE_PROJECTS
 
 
 @pytest.mark.asyncio
@@ -23,7 +25,10 @@ async def test_hosted_workflow_metadata_and_project_scoped_response_chain(monkey
         FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID="northwind-insurance-orchestrator",
     )
     if domain == "insurance":
-        settings.foundry_project_endpoint = "https://example.test/api/projects/northwind-orders"
+        settings.foundry_project_endpoint = "https://example.test/api/projects/nw-insurance-claims"
+        settings.foundry_project_endpoints = json.dumps({
+            slug: f"https://example.test/api/projects/{project}" for slug, project in INSURANCE_PROJECTS.items()
+        })
     monkeypatch.setattr(orchestrator_client, "get_settings", lambda: settings)
     monkeypatch.setattr(insurance, "get_settings", lambda: settings)
     monkeypatch.setattr(orchestrator_client, "_previous_response_by_key", {})
@@ -232,10 +237,13 @@ async def test_failed_turn_records_failed_workflow_without_saving_partial_answer
 async def test_specialist_once_uses_hosted_endpoint_or_prompt_reference(monkeypatch, domain, hosted):
     from app import insurance
     calls, clients = [], []
-    endpoint = "https://example.test/api/projects/northwind-orders"
+    endpoint = "https://example.test/api/projects/nw-insurance-claims" if domain == "insurance" else "https://example.test/api/projects/northwind-orders"
     settings = Settings(
         _env_file=None, NORTHWIND_BUSINESS_DOMAIN=domain, ORDER_AGENTS_HOSTED=hosted,
         FOUNDRY_PROJECT_ENDPOINT=endpoint, NORTHWIND_INSURANCE_AGENTS_READY=True,
+        FOUNDRY_PROJECT_ENDPOINTS=json.dumps({
+            slug: f"https://example.test/api/projects/{project}" for slug, project in INSURANCE_PROJECTS.items()
+        }),
         FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID="northwind-insurance-orchestrator",
         FOUNDRY_API_KEY="unit-test-only",
     )

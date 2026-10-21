@@ -3,8 +3,9 @@
 An end-to-end, production-shaped demo of **Azure AI Foundry** built on the
 fictional Northwind Insurance, a property-and-casualty insurer with
 **four departments**, each showcasing a different Foundry pillar. One
-shared Foundry account supports the retained retail demo and the separate
-insurance release. All insurance records and policy wordings are synthetic.
+shared Foundry account supports four insurance projects; the old Orders,
+employee-help-desk, claims-warranty and contact-center projects are retired.
+All insurance records and policy wordings are synthetic.
 
 - **Claims Concierge** (multi-agent + HITL): intake triage, policy/claim
   lookup, cited policy-wording guidance and proposed adjuster actions.
@@ -22,7 +23,7 @@ Insurance activation is explicit: `NORTHWIND_BUSINESS_DOMAIN=insurance`.
 Records and pending review drafts work independently of agent deployment.
 `NORTHWIND_INSURANCE_AGENTS_READY` stays `false` until the dedicated
 `northwind-insurance-*` fleet, isolated knowledge base and native
-`northwind-orders` endpoint have been deployed and verified. Unavailable
+`nw-insurance-claims` endpoint have been deployed and verified. Unavailable
 insurance inference returns a surfaced error instead of calling retail agents.
 The converted Copilot SDK harness uses insurance tools and pending-only
 human-review drafts. SDK/runtime availability is verified by real execution,
@@ -30,7 +31,7 @@ not inferred from an enabled flag.
 
 The first insurance release is deployed: the portal/API/MCP services are in
 Apps, the isolated 13-document knowledge base is in Data, and the five
-dedicated hosted agents are in the existing Orders project in AI. The claims
+dedicated hosted agents target the retained insurance claims project in AI. The claims
 manager uses supported named-agent endpoints for specialist delegation.
 The insurance experience release is now deployed: grounded employee/adjuster
 support, the real Copilot SDK harness, native Voice Live through a managed-
@@ -349,12 +350,12 @@ See [`docs/departments.md`](./docs/departments.md) for the full layout.
 - **Azure AI Content Understanding** — classifies + extracts data from
   warranty PDFs, damage photos, and structured intake forms
 - **Foundry Agent Service** — 5 independently hosted agents in the
-  `northwind-orders` project: triage, order-lookup, policy-lookup,
-  resolution-draft, and `northwind-orchestrator`.
+  `nw-insurance-claims` project: insurance triage, policy/claim lookup, policy
+  wording, claim-action draft, and `northwind-insurance-orchestrator`.
   Tool calls on the specialists are served by two
   tiny MCP Container Apps (`ca-mcp-tech-lookup`, `ca-mcp-work-order` — legacy
-  names from an earlier scaffold; semantically they serve `lookup_order` and
-  `propose_resolution`) plus the Search KB's MCP endpoint, so every tool
+  names from an earlier scaffold; insurance tools are `lookup_policy`,
+  `lookup_claim` and `draft_claim_action`) plus the Search KB's MCP endpoint, so every tool
   invocation surfaces as a first-class MCP tool call in Foundry
   Observability + App Insights. The Policy Lookup tab hits the same hosted
   orchestrator in single-turn mode.
@@ -370,7 +371,7 @@ See [`docs/departments.md`](./docs/departments.md) for the full layout.
   `evals/baseline.json`
 
 The API, web front-ends, and MCP services run on **Azure Container Apps**;
-the five Orders agents run in **Foundry hosted-agent sandboxes**. Cosmos and
+the five insurance agents run in **Foundry hosted-agent sandboxes**. Cosmos and
 Storage have public access disabled in the current deployment. Foundry,
 Search, and the demo front doors are publicly reachable with their respective
 access controls; do not describe this as an entirely private-network solution.
@@ -386,17 +387,12 @@ not successful turns.
 
 ## Existing project and learning lifecycle
 
-The native Foundry demo uses `northwind-orders` in the existing Foundry account.
-The existing web application remains on its original images and `northwind`
-project; it is not the surface for the new learning capabilities. Creating the
-new project does not migrate old response IDs, histories, or the account's
-default-project designation.
-
-The account's `defaultProject` update was accepted but not applied in this
-environment, including with API `2026-09-01`. The current default remains
-`nw-claims-warranty`. `scripts/migrate-orders-project.py` checks effective
-readback and fails rather than reporting a successful switch. Do not delete
-Claims or provision another account as an automatic workaround.
+The insurance demo targets `nw-insurance-claims` in the existing Foundry account,
+whose current default project is also `nw-insurance-claims`. The other retained
+projects are `nw-insurance-support`, `nw-insurance-documents`, and
+`nw-insurance-contact-center`. Retired projects are not fallback targets.
+Historical retail learning commands below describe previously prepared artifacts;
+they do not authorize recreating retired projects or rewriting approved receipts.
 
 Use native Foundry **Agents**, **Data**, **Evaluations**, and model fine-tuning
 surfaces. No custom lifecycle screens or training/review mutation endpoints
@@ -450,11 +446,53 @@ See [evaluation and learning commands](./evals/README.md) for the review,
 export, evaluation, and approval steps.
 
 All five hosted services use `scripts/orders_agent_package.py` to package an
-explicit 14-file allowlist before `azd` packaging. SDK deployments can use
-`scripts/deploy-orders-hosted.py`. Prefer this scoped command for Foundry-only
-work; a full `azd up` also redeploys the separate legacy web application.
+explicit source allowlist, the canonical insurance configuration/domain modules,
+and a per-file build manifest. Targeted code deployments use the literal
+`northwind-insurance-*` azd service names. The compatible
+`scripts/deploy-orders-hosted.py --business-domain insurance` path also records
+the exact uploaded ZIP, normalized configuration, prompt and manifest hashes;
+applying requires a clean committed tree and an explicit existing serving version.
 The shared development Python environment is not upgraded to the hosted
 runtime's dependency set; use an isolated environment for `agents/hosted/requirements.txt`.
+
+### Insurance configuration, verification and activation
+
+Primary runtime settings are `AGENT_ROLE`, `MODEL_DEPLOYMENT_NAME`,
+`AZURE_OPENAI_ENDPOINT`, `MODEL_GATEWAY_*`, `INSURANCE_KB_CONNECTION_NAME`,
+`INSURANCE_PROJECT_NAME`, `INSURANCE_PROJECT_ENDPOINT` and `AGENTS_HOSTED`.
+Roles are `orchestrator`, `triage`, `policy_claim_lookup`, `policy_wording` and
+`claim_action_draft`. Deprecated `ORDERS_*`/`ORDER_*` inputs remain aliases at
+the configuration boundary; equivalent values are accepted and conflicting
+values fail. New insurance manifests do not emit them. Prompts remain canonical
+under `agents/insurance`, never copied into application code.
+
+The existing `nw-insurance-claims-kb-mcp` connection targets
+`northwind-insurance-kb` and the `northwind-insurance-knowledge` index. Verify
+its project, RemoteTool category and target rather than trusting its name.
+Do not create another connection or republish the corpus to repair a name mismatch.
+
+`NORTHWIND_INSURANCE_AGENTS_READY` belongs only to the API activation guard,
+not the hosted agent definitions. Keep it false during a rollout. The API also
+requires all four explicit insurance department routes; a stale/missing route
+or a retail manager cannot pass the guard.
+
+After separately authorized, bounded synthetic smoke calls, retain the completed
+outer response IDs for readback. Internal model calls retain `store=false`.
+`scripts/verify-insurance-fleet.py` **does not start inference**: it checks the
+five deployment receipts/ZIPs, current serving versions, actual response
+source/config/prompt/model metadata, required tool calls, and exactly one
+workflow-bound non-executed pending draft through the API. It writes a new
+secret-free receipt, never overwriting prior evidence.
+
+`scripts/release-app.py release --insurance-mode configure` applies the
+allowlisted insurance route map with readiness false and removes deprecated
+API routing aliases. `--insurance-mode activate` additionally requires
+`--verification-receipt` and its independently recorded `--verification-sha256`,
+matching source, and a fresh live serving-version check. All normal release
+scope, digest, source metadata, revision/ETag and rollback guards still apply.
+Other flags, secrets, identity and ingress are preserved. On failed post-activation
+checks, disable inference; never blindly restore a stale true readiness flag
+from a snapshot pointing at deleted projects.
 
 ## Agent Harness (opt-in)
 
@@ -586,11 +624,11 @@ the retired ingestion worker.
 | `AZURE_CONTAINER_APPS_ENVIRONMENT_RESOURCE_GROUP` | `rg-northwind-apps` (defaults to `AZURE_APPS_RESOURCE_GROUP` when omitted) |
 | `AZURE_VNET_RESOURCE_GROUP` | `rg-northwind-networking` (defaults to `AZURE_NETWORKING_RESOURCE_GROUP` when omitted) |
 | `AZURE_COSMOS_PRIVATE_ENDPOINT_NAME` | `pe-zz-cosmos-northwind` (default) |
-| `ORDER_PROJECT_NAME` | `northwind-orders` |
-| `ORDER_AGENTS_HOSTED` | Preserve the current value (`true` for the hosted demo) |
-| `NORTHWIND_BUSINESS_DOMAIN` | `insurance`; `retail` remains the compatibility default |
+| `INSURANCE_PROJECT_NAME` | `nw-insurance-claims` |
+| `AGENTS_HOSTED` | `true` for the verified hosted fleet |
+| `NORTHWIND_BUSINESS_DOMAIN` | `insurance`; new provisioning uses this profile |
 | `NORTHWIND_INSURANCE_AGENTS_READY` | Preserve explicit verified readiness; `false` until native insurance rollout is verified |
-| `FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID` | Explicit deployed `northwind-insurance-*` manager ID/version; required when readiness is `true` |
+| `FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID` | `northwind-insurance-orchestrator`; immutable serving versions are verified separately |
 | `NORTHWIND_ENABLE_CU_INGEST` | `false`; reuse never recreates the retired worker |
 
 For an older transitional deployment only, explicitly select
@@ -600,7 +638,7 @@ For an older transitional deployment only, explicitly select
 dependencies still exist. A legacy label never activates these overrides.
 `NORTHWIND_EXISTING_RESOURCE_IDS` reports actual app attachments, environment
 subnet and private-endpoint subnet from live references, not inferred state
-from source labels. `AZURE_AI_PROJECT_ID` must identify `northwind-orders`
+from source labels. `AZURE_AI_PROJECT_ID` must identify `nw-insurance-claims`
 under the existing account in AI and match the selected subscription.
 
 #### Replacement endpoint change
@@ -611,8 +649,8 @@ recreation. The replacement run URLs are:
 | Output | Replacement URL |
 | --- | --- |
 | `API_URI` | `https://ca-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io` |
-| `MCP_TECH_LOOKUP_URL` | `https://ca-mcp-tech-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/` |
-| `MCP_WORK_ORDER_URL` | `https://ca-mcp-work-order.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/` |
+| `MCP_INSURANCE_LOOKUP_URL` | Resolve the approved insurance lookup app's current ingress; preserve its existing app |
+| `MCP_INSURANCE_REVIEW_URL` | Resolve the approved insurance review app's current ingress; preserve its existing app |
 | `WEB_TECH_URI` | `https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io` |
 | `WEB_VOICE_URI` | `https://ca-web-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io` |
 
@@ -628,13 +666,13 @@ reference-only adoption deployment has refreshed its live resource IDs.
 
 The insurance release uses `northwind-insurance-knowledge`,
 `northwind-insurance-knowledge-ks`, `northwind-insurance-kb` and the dedicated
-`northwind-insurance-kb-mcp` connection. Configured names do not prove
+`nw-insurance-claims-kb-mcp` connection in `nw-insurance-claims`. Configured names do not prove
 publishing or runtime verification has completed.
 
-Preserve the current azd outputs used as adoption inputs:
-`FOUNDRY_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINT`, `AZURE_AI_PROJECT_ENDPOINT`,
-`FOUNDRY_PROJECT_ENDPOINTS`, `ORDERS_OPENAI_ENDPOINT`, `AZURE_OPENAI_ENDPOINT`,
-`ORDERS_KB_CONNECTION_NAME`, `FOUNDRY_KB_CONNECTION_NAME`,
+Preserve the verified azd adoption inputs, correcting retired routing before use:
+`FOUNDRY_ENDPOINT`, `INSURANCE_PROJECT_ENDPOINT`, `AZURE_AI_PROJECT_ENDPOINT`,
+`FOUNDRY_PROJECT_ENDPOINTS`, `AZURE_OPENAI_ENDPOINT`,
+`INSURANCE_KB_CONNECTION_NAME`,
 `FOUNDRY_PLANNER_DEPLOYMENT`, `FOUNDRY_WORKER_DEPLOYMENT`,
 `FOUNDRY_PROMPT_AGENT_DEPLOYMENT`, `FOUNDRY_EMBEDDING_DEPLOYMENT`,
 `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `FOUNDRY_BAKEOFF_DEPLOYMENTS`,
@@ -642,13 +680,14 @@ Preserve the current azd outputs used as adoption inputs:
 `AZURE_SEARCH_KNOWLEDGE_SOURCE`, `COSMOS_DATABASE`,
 `STORAGE_CU_CONTAINER`, and `STORAGE_SEED_CONTAINER`.
 The preprovision validator rejects missing/blank values and inconsistent
-Orders endpoints rather than silently replacing them with defaults.
+insurance endpoints rather than silently replacing them with defaults. Deprecated
+input aliases remain supported, but conflicting old/new values are rejected.
 Existing optional agent-ID outputs are preserved, including empty placeholders.
 
 In reuse mode, `azd provision` deploys only a reference/adoption template.
 It reads the replacement UAMI client ID and live app ingress, retains existing
 Foundry/runtime outputs, and reports the effective account default project
-(`nw-claims-warranty` currently), **without changing it**. It does not
+(`nw-insurance-claims` currently), **without changing it**. It does not
 reconcile existing infrastructure configuration: no foundational services,
 RBAC, model deployments, connections, app settings/images, privacy/network
 settings, observability links, or seeded data are created or updated.
@@ -657,12 +696,12 @@ opening public access, fetching keys, or bootstrapping data/agents. They are
 not a migration or repair mechanism.
 
 All five `containerapp` services have explicit `resourceGroup` and
-`resourceName` routing to Apps. The `azure.ai.agent` services are unchanged:
-they remain retail and reject insurance-mode azd agent deployment. Use
+`resourceName` routing to Apps. The `azure.ai.agent` services declare the five
+literal insurance names and reject retail or retired-project routing. Use
 `scripts/deploy-orders-hosted.py --business-domain insurance` with an explicit
 credential source, per-role non-secret config and allowlisted source package
 for the separate insurance fleet.
-Its project remains `northwind-orders` in AI. Fresh provisioning emits `AZURE_APPS_RESOURCE_GROUP`
+Its project is `nw-insurance-claims` in AI. Fresh provisioning emits `AZURE_APPS_RESOURCE_GROUP`
 as the original single group, preserving greenfield deployment routing.
 Provisioning adoption alone leaves existing app images/settings and verified
 insurance readiness unchanged; a subsequent scoped `azd deploy` deliberately

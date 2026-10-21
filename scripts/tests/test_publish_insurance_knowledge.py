@@ -86,7 +86,7 @@ def test_dry_run_never_authenticates_or_contacts_cloud(monkeypatch, capsys):
     assert summary["documents"] == wordings + seeds
     assert summary["policy_wording_sections"] == wordings
     assert summary["seed_documents"] == seeds
-    assert summary["connection"] == "northwind-insurance-kb-mcp"
+    assert summary["connection"] == "nw-insurance-claims-kb-mcp"
     assert summary["project"] == module.PROJECT_ID
     assert "credentials" not in summary and "content" not in summary
 
@@ -240,7 +240,10 @@ def test_apply_and_reapply_touch_only_new_insurance_targets(cloud, capsys):
     assert len(cloud.docs) == sum(expected_counts())
     puts = [request for request in cloud.requests if request.method == "PUT"]
     assert len(puts) == 7  # First connection creation; repeated owned connection is unchanged.
-    assert all("northwind-insurance-" in str(request.url) for request in cloud.requests)
+    assert all(
+        module.PROJECT_ID in str(request.url) if request.url.host == "management.azure.com"
+        else "northwind-insurance-" in str(request.url) for request in cloud.requests
+    )
     assert all(request.method in ("GET", "PUT", "POST") for request in cloud.requests)
     for request in puts:
         body = json.loads(request.content)

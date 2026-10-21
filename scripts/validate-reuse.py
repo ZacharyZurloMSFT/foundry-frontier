@@ -9,6 +9,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from apps.api.app.insurance_config import (
+    ALIASES, INSURANCE_PROJECT, normalize_environment, valid_insurance_routes,
+)
 
 GROUP_KEYS = (
     "AZURE_APPS_RESOURCE_GROUP",
@@ -32,11 +36,11 @@ IDENTITY_KEYS = (
 )
 FOUNDRY_ACCOUNT_NAME = "aisvc-zurlo-northwind"
 AGENT_SERVICES = {
-    "orchestrator": "northwind-orchestrator",
-    "triage": "northwind-triage",
-    "orderlookup": "northwind-order-lookup",
-    "policylookup": "northwind-policy-lookup",
-    "resolutiondraft": "northwind-resolution-draft",
+    "orchestrator": "northwind-insurance-orchestrator",
+    "triage": "northwind-insurance-triage",
+    "orderlookup": "northwind-insurance-policy-claim-lookup",
+    "policylookup": "northwind-insurance-policy-wording",
+    "resolutiondraft": "northwind-insurance-claim-action-draft",
 }
 PRESERVED_KEYS = (
     "FOUNDRY_ENDPOINT",
@@ -84,19 +88,28 @@ def is_project_endpoint(value: str, project_name: str | None = None) -> bool:
 
 
 def validate_environment(env: Mapping[str, str], agent_service: str | None = None) -> list[str]:
+    try:
+        normalized = normalize_environment(env, warn=False)
+    except ValueError as exc:
+        return [str(exc)]
+    env = dict(env)
+    for primary, aliases in ALIASES.items():
+        if primary in normalized:
+            for alias in aliases:
+                env[alias] = normalized[primary]
     mode = env.get("NORTHWIND_REUSE_EXISTING_RESOURCES", "false")
     if mode not in ("true", "false"):
         return ["NORTHWIND_REUSE_EXISTING_RESOURCES must be exactly true or false."]
     ingestion = env.get("NORTHWIND_ENABLE_CU_INGEST", "false")
     if ingestion not in ("true", "false"):
         return ["NORTHWIND_ENABLE_CU_INGEST must be exactly true or false."]
-    domain = env.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
+    domain = env.get("NORTHWIND_BUSINESS_DOMAIN", "insurance")
     ready = env.get("NORTHWIND_INSURANCE_AGENTS_READY", "false")
     configuration_errors = []
     if domain not in ("retail", "insurance"):
         configuration_errors.append("NORTHWIND_BUSINESS_DOMAIN must be exactly retail or insurance.")
-    elif domain == "insurance" and env.get("ORDER_PROJECT_NAME", "northwind-orders") != "northwind-orders":
-        configuration_errors.append("Insurance deployment must retain ORDER_PROJECT_NAME=northwind-orders; do not target a legacy project.")
+    elif domain == "insurance" and env.get("ORDER_PROJECT_NAME", INSURANCE_PROJECT) != INSURANCE_PROJECT:
+        configuration_errors.append("Insurance deployment requires INSURANCE_PROJECT_NAME=nw-insurance-claims; retired projects are not valid targets.")
     if ready not in ("true", "false"):
         configuration_errors.append("NORTHWIND_INSURANCE_AGENTS_READY must be exactly true or false.")
     elif ready == "true" and (
@@ -105,19 +118,23 @@ def validate_environment(env: Mapping[str, str], agent_service: str | None = Non
         configuration_errors.append("Insurance readiness requires the insurance domain and ORDER_AGENTS_HOSTED=true.")
     if ready == "true":
         manager_id = env.get("FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID", "")
-        if manager_id != manager_id.strip() or not manager_id.startswith("northwind-insurance-"):
+        if manager_id != "northwind-insurance-orchestrator":
             configuration_errors.append(
                 "Insurance readiness requires an explicit FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID "
-                "with the northwind-insurance- prefix; do not reuse the retail manager ID."
+                "naming northwind-insurance-orchestrator; do not reuse the retail manager ID."
             )
         endpoint = env.get("FOUNDRY_PROJECT_ENDPOINT", "")
-        if not is_project_endpoint(endpoint, env.get("ORDER_PROJECT_NAME", "northwind-orders")):
-            configuration_errors.append("Insurance readiness requires the deployed Orders project endpoint.")
-    if agent_service is not None and domain == "insurance":
+        if not is_project_endpoint(endpoint, INSURANCE_PROJECT):
+            configuration_errors.append("Insurance readiness requires the retained claims project endpoint.")
+        try:
+            endpoints = json.loads(env.get("FOUNDRY_PROJECT_ENDPOINTS", ""))
+        except json.JSONDecodeError:
+            endpoints = None
+        if not valid_insurance_routes(endpoints, endpoint):
+            configuration_errors.append("Insurance readiness requires all four retained insurance department routes.")
+    if agent_service is not None and domain != "insurance":
         configuration_errors.append(
-            "Existing azd agent services retain retail agent.yaml names; insurance deployments "
-            "must not overwrite existing retail agents. Use scripts/deploy-orders-hosted.py "
-            "--business-domain insurance for the separate native insurance rollout."
+            "The active azd agent services are insurance-only; explicit insurance configuration is required."
         )
     if configuration_errors or mode == "false":
         return configuration_errors
@@ -188,6 +205,8 @@ def validate_environment(env: Mapping[str, str], agent_service: str | None = Non
             errors.append("The Order Concierge endpoint must resolve the Orders project.")
         elif any(not is_project_endpoint(endpoints[key]) for key in departments):
             errors.append("All department endpoints must resolve projects in the existing Foundry account.")
+        elif domain == "insurance" and not valid_insurance_routes(endpoints, project_endpoint):
+            errors.append("Insurance department endpoints must resolve all four retained insurance projects.")
     except json.JSONDecodeError:
         errors.append("FOUNDRY_PROJECT_ENDPOINTS must be a JSON object.")
     return errors
@@ -197,18 +216,19 @@ def validate_agent_manifest(agent_service: str, manifest: object) -> list[str]:
     expected = AGENT_SERVICES[agent_service]
     if not isinstance(manifest, dict) or manifest.get("name") != expected:
         return [
-            "Existing azd agent manifest must retain the literal retail name " + expected
-            + "; unresolved/domain-changing name placeholders are not supported. "
-            + "Use deploy-orders-hosted.py --business-domain insurance for separate insurance agents."
+            "The azd agent manifest must declare the literal insurance name " + expected
+            + "; unresolved/domain-changing name placeholders are not supported."
         ]
     variables = manifest.get("environment_variables", [])
     if not isinstance(variables, list) or any(not isinstance(item, dict) for item in variables):
         return ["Existing azd agent manifest environment_variables must be a list of named values."]
     for item in variables:
-        if item.get("name") == "NORTHWIND_BUSINESS_DOMAIN" and item.get("value") != "retail":
-            return ["Existing retail azd agent manifests must declare literal retail domain, not insurance or a placeholder."]
-        if item.get("name") == "NORTHWIND_INSURANCE_AGENTS_READY" and item.get("value") not in ("false", False):
-            return ["Existing retail azd agent manifests must not enable or infer insurance readiness."]
+        if item.get("name") == "NORTHWIND_BUSINESS_DOMAIN" and item.get("value") != "insurance":
+            return ["Active azd agent manifests must declare the literal insurance domain."]
+        if item.get("name") == "NORTHWIND_INSURANCE_AGENTS_READY":
+            return ["Fleet readiness belongs to the API release guard, not hosted agent manifests."]
+        if item.get("name", "").startswith(("ORDERS_", "ORDER_")):
+            return ["Insurance manifests must emit primary settings, not deprecated aliases."]
     return []
 
 

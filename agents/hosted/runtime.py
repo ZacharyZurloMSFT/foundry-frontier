@@ -59,7 +59,7 @@ class RequestMiddleware(AgentMiddleware):
         scope = current_scope.get()
         if scope.failures:
             raise ValueError(scope.failures[0])
-        if self.settings.role == "resolutiondraft":
+        if self.settings.role == "claim_action_draft":
             scope.require_workflow()
         if context.session is not None:
             bound = context.session.state.get("orders_workflow_id")
@@ -106,7 +106,7 @@ class RequestMiddleware(AgentMiddleware):
                     if content.type == "text" and content.text:
                         text.append(content.text)
                 if self.settings.role == "triage" or (
-                    self.settings.role in ("orderlookup", "policylookup", "resolutiondraft")
+                    self.settings.role in ("policy_claim_lookup", "policy_wording", "claim_action_draft")
                     and scope.tool_results == 0 and any(c.type == "text" for c in update.contents)
                 ):
                     held.append(update)
@@ -144,14 +144,14 @@ class RequestMiddleware(AgentMiddleware):
             raise RuntimeError(scope.failures[0])
         if self.settings.role == "triage":
             (InsuranceTriageResult if self.settings.business_domain == "insurance" else TriageResult).model_validate_json(text)
-        if self.settings.role in ("orderlookup", "policylookup") and not scope.tool_results:
+        if self.settings.role in ("policy_claim_lookup", "policy_wording") and not scope.tool_results:
             raise RuntimeError("Specialist did not use its required grounding tool")
-        if self.settings.role == "resolutiondraft" and scope.approval is None:
+        if self.settings.role == "claim_action_draft" and scope.approval is None:
             raise RuntimeError("No persisted resolution draft was confirmed")
 
 
 def account_openai_client(settings: Settings, credential, *, http_client=None) -> AsyncOpenAI:
-    variable = "ORDERS_MODEL_GATEWAY_ENDPOINT" if settings.uses_model_gateway else "ORDERS_OPENAI_ENDPOINT"
+    variable = "MODEL_GATEWAY_ENDPOINT" if settings.uses_model_gateway else "AZURE_OPENAI_ENDPOINT"
     endpoint = https_url(settings.env.get(variable, ""), variable)
     if not endpoint.rstrip("/").endswith("/openai/v1"):
         raise ValueError(f"{variable} must end in /openai/v1/")
@@ -183,22 +183,22 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
         raise ValueError("Gateway inference requires an identity-authenticated gateway client")
     if settings.role == "triage":
         if account_client is None:
-            raise ValueError("Triage requires an identity-authenticated ORDERS_OPENAI_ENDPOINT client")
+            raise ValueError("Triage requires an identity-authenticated AZURE_OPENAI_ENDPOINT client")
         client = OpenAIChatCompletionClient(model=settings.inference_model, async_client=account_client)
     elif settings.uses_model_gateway:
         client = OpenAIChatClient(model=settings.inference_model, async_client=account_client)
     else:
         client = FoundryChatClient(project_client=project, model=settings.model)
     tools = []
-    if settings.role == "manager":
+    if settings.role == "orchestrator":
         tools = specialist_tools(settings, project)
-    elif settings.role == "orderlookup":
+    elif settings.role == "policy_claim_lookup":
         spec = settings.mcp_spec()
         tools = [client.get_mcp_tool(
             name=spec["server_label"], url=spec["server_url"],
             allowed_tools=spec["allowed_tools"], approval_mode="never_require",
         )]
-    elif settings.role == "policylookup":
+    elif settings.role == "policy_wording":
         spec = settings.knowledge_spec()
         if settings.uses_model_gateway:
             # Account-level Responses cannot resolve a project-scoped connection.
@@ -208,7 +208,7 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
             spec.pop("project_connection_id")
             spec["headers"] = knowledge_headers
         tools = [client.get_mcp_tool(**spec)]
-    elif settings.role == "resolutiondraft":
+    elif settings.role == "claim_action_draft":
         tools = [proposal_tool(settings)]
     return Agent(
         client=client,

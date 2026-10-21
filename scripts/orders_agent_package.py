@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -20,12 +22,28 @@ PACKAGE_SOURCES = (
 
 
 def entries(root: Path, requirements: Path) -> dict[str, bytes]:
-    return {
+    contents = {
         "main.py": (root / "agents" / "orchestrator" / "main.py").read_bytes(),
         "requirements.txt": requirements.read_bytes(),
         **{name: root.joinpath(*name.split("/")).read_bytes() for name in PACKAGE_SOURCES},
         "agents/insurance/domain.py": (root / "apps" / "api" / "app" / "insurance_domain.py").read_bytes(),
+        "agents/insurance/config.py": (root / "apps" / "api" / "app" / "insurance_config.py").read_bytes(),
     }
+    source_commit = None
+    source_clean = False
+    if (root / ".git").exists():
+        source_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        source_clean = not subprocess.run(
+            ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    manifest = {
+        "schema_version": 1, "source_commit": source_commit, "source_clean": source_clean,
+        "files_sha256": {name: hashlib.sha256(content).hexdigest() for name, content in contents.items()},
+    }
+    contents["agents/hosted/build.json"] = json.dumps(manifest, sort_keys=True).encode()
+    return contents
 
 
 def bundle(root: Path, requirements: Path, destination: Path) -> str:

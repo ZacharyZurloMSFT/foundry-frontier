@@ -1,26 +1,24 @@
-name: northwind-order-lookup
+name: northwind-insurance-policy-claim-lookup
 kind: hosted
-description: Hosted specialist using canonical tech_lookup.yaml and the existing four-order MCP service.
+description: Read-only synthetic insurance policy and claim lookup through insurance MCP.
 protocols:
   - protocol: responses
     version: 2.0.0
 environment_variables:
   - name: NORTHWIND_BUSINESS_DOMAIN
-    value: retail
-  - name: NORTHWIND_INSURANCE_AGENTS_READY
-    value: "false"
-  - name: ORDER_AGENT_ROLE
-    value: orderlookup
+    value: insurance
+  - name: AGENT_ROLE
+    value: policy_claim_lookup
   - name: MODEL_DEPLOYMENT_NAME
     value: ${MODEL_DEPLOYMENT_NAME}
-  - name: ORDERS_MODEL_GATEWAY_ENDPOINT
-    value: ${ORDERS_MODEL_GATEWAY_ENDPOINT}
-  - name: ORDERS_MODEL_GATEWAY_MODEL
-    value: ${ORDERS_GATEWAY_SPECIALIST_MODEL}
-  - name: ORDERS_MODEL_GATEWAY_DEPLOYMENT
+  - name: MODEL_GATEWAY_ENDPOINT
+    value: ${MODEL_GATEWAY_ENDPOINT}
+  - name: MODEL_GATEWAY_MODEL
+    value: ${INSURANCE_GATEWAY_SPECIALIST_MODEL}
+  - name: MODEL_GATEWAY_DEPLOYMENT
     value: ${MODEL_DEPLOYMENT_NAME}
-  - name: MCP_TECH_LOOKUP_URL
-    value: ${MCP_TECH_LOOKUP_URL}
+  - name: MCP_INSURANCE_LOOKUP_URL
+    value: ${MCP_INSURANCE_LOOKUP_URL}
 resources:
   cpu: "1.0"
   memory: 2Gi

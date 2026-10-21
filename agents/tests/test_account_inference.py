@@ -73,9 +73,9 @@ def test_account_chat_inference_uses_identity_selected_model_and_no_storage(over
 
 
 def test_triage_cannot_silently_fall_back_to_project_inference():
-    with pytest.raises(ValueError, match="ORDERS_OPENAI_ENDPOINT"):
+    with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
         build_agent(config(), None)
-    with pytest.raises(ValueError, match="ORDERS_OPENAI_ENDPOINT"):
+    with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
         account_openai_client(config(ORDERS_OPENAI_ENDPOINT=""), None)
     with pytest.raises(ValueError, match="openai/v1"):
         account_openai_client(config(ORDERS_OPENAI_ENDPOINT="https://account.openai.azure.com/"), None)

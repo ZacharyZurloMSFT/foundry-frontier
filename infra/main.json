@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13235562850488182570"
+      "templateHash": "17571815157784907295"
     }
   },
   "parameters": {
@@ -35,9 +35,9 @@
     },
     "orderProjectName": {
       "type": "string",
-      "defaultValue": "northwind-orders",
+      "defaultValue": "nw-insurance-claims",
       "metadata": {
-        "description": "Order Concierge project within the existing shared Foundry account."
+        "description": "Claims project within the shared Foundry account. The legacy parameter name is retained for compatibility."
       }
     },
     "orderAgentsHosted": {
@@ -48,7 +48,7 @@
         "false"
       ],
       "metadata": {
-        "description": "Use independently hosted Order Concierge specialists after they have been deployed."
+        "description": "Use independently hosted insurance specialists after they have been deployed."
       }
     },
     "reuseExistingResources": {
@@ -135,13 +135,13 @@
     },
     "businessDomain": {
       "type": "string",
-      "defaultValue": "retail",
+      "defaultValue": "insurance",
       "allowedValues": [
         "retail",
         "insurance"
       ],
       "metadata": {
-        "description": "Explicit domain activation. Existing retail behavior remains the greenfield default."
+        "description": "Explicit domain selection. New deployments use the insurance profile."
       }
     },
     "insuranceAgentsReady": {
@@ -286,20 +286,20 @@
       "defaultValue": [
         {
           "slug": "employee-help-desk",
-          "projectName": "nw-employee-help-desk",
-          "displayName": "Northwind Employee Help Desk",
+          "projectName": "nw-insurance-support",
+          "displayName": "Northwind Employee & Adjuster Support",
           "description": "RAG-only Foundry project for HR/IT internal Q&A. Owns the nw-hr Search index and the northwind-hr-assistant prompt agent."
         },
         {
           "slug": "claims-warranty",
-          "projectName": "nw-claims-warranty",
-          "displayName": "Northwind Claims & Warranty Ops",
+          "projectName": "nw-insurance-documents",
+          "displayName": "Northwind Claims Document Intelligence",
           "description": "Content Understanding project for warranty PDFs, damage photos, and intake forms. Owns the nw-claims Search index, the northwind-claim-intake CU analyzer, and the northwind-claims-triage prompt agent."
         },
         {
           "slug": "contact-center",
-          "projectName": "nw-contact-center",
-          "displayName": "Northwind Customer Contact Center",
+          "projectName": "nw-insurance-contact-center",
+          "displayName": "Northwind Policyholder Contact Center",
           "description": "Voice Live front door project. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the Order Concierge orchestrator."
         }
       ],
@@ -984,7 +984,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10262746971174551545"
+              "templateHash": "17644690903470337000"
             }
           },
           "parameters": {
@@ -1103,15 +1103,15 @@
             },
             "indexName": {
               "type": "string",
-              "value": "northwind-knowledge"
+              "value": "northwind-insurance-knowledge"
             },
             "knowledgeSourceName": {
               "type": "string",
-              "value": "northwind-knowledge-ks"
+              "value": "northwind-insurance-knowledge-ks"
             },
             "knowledgeBaseName": {
               "type": "string",
-              "value": "northwind-kb"
+              "value": "northwind-insurance-kb"
             },
             "principalId": {
               "type": "string",
@@ -1537,7 +1537,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2824013190717055068"
+              "templateHash": "15648181647324079642"
             }
           },
           "parameters": {
@@ -1767,7 +1767,7 @@
               },
               "properties": {
                 "displayName": "[parameters('projectName')]",
-                "description": "Northwind Order Concierge demo Foundry project"
+                "description": "Northwind Insurance claims demo Foundry project"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiServicesName'))]",
@@ -2207,7 +2207,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14488735807841633820"
+              "templateHash": "15072011325252331138"
             }
           },
           "parameters": {
@@ -2246,7 +2246,7 @@
             },
             "orderProjectName": {
               "type": "string",
-              "defaultValue": "northwind-orders"
+              "defaultValue": "nw-insurance-claims"
             },
             "orderAgentsHosted": {
               "type": "bool",
@@ -2309,7 +2309,7 @@
             },
             "businessDomain": {
               "type": "string",
-              "defaultValue": "retail",
+              "defaultValue": "insurance",
               "allowedValues": [
                 "retail",
                 "insurance"
@@ -2431,7 +2431,7 @@
                     {
                       "name": "api",
                       "image": "[variables('placeholder')]",
-                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'ORDER_PROJECT_NAME', 'value', parameters('orderProjectName')), createObject('name', 'ORDER_AGENTS_HOSTED', 'value', string(parameters('orderAgentsHosted'))), createObject('name', 'NORTHWIND_BUSINESS_DOMAIN', 'value', parameters('businessDomain')), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'AZURE_SEARCH_INDEX', 'value', parameters('searchIndexName')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_BASE', 'value', parameters('searchKnowledgeBase')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_SOURCE', 'value', parameters('searchKnowledgeSource')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName')), createObject('name', 'FOUNDRY_BAKEOFF_DEPLOYMENTS', 'value', parameters('bakeoffDeployments'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_WORK_ORDER_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
+                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'INSURANCE_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'INSURANCE_PROJECT_NAME', 'value', parameters('orderProjectName')), createObject('name', 'AGENTS_HOSTED', 'value', string(parameters('orderAgentsHosted'))), createObject('name', 'NORTHWIND_BUSINESS_DOMAIN', 'value', parameters('businessDomain')), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'AZURE_SEARCH_INDEX', 'value', parameters('searchIndexName')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_BASE', 'value', parameters('searchKnowledgeBase')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_SOURCE', 'value', parameters('searchKnowledgeSource')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName')), createObject('name', 'FOUNDRY_BAKEOFF_DEPLOYMENTS', 'value', parameters('bakeoffDeployments'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_INSURANCE_REVIEW_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
                       "resources": {
                         "cpu": "[json('1.0')]",
                         "memory": "2Gi"
@@ -2599,15 +2599,15 @@
                           "value": "[parameters('foundryEndpoint')]"
                         },
                         {
-                          "name": "FOUNDRY_PROJECT_ENDPOINT",
+                          "name": "INSURANCE_PROJECT_ENDPOINT",
                           "value": "[parameters('foundryProjectEndpoint')]"
                         },
                         {
-                          "name": "ORDER_PROJECT_NAME",
+                          "name": "INSURANCE_PROJECT_NAME",
                           "value": "[parameters('orderProjectName')]"
                         },
                         {
-                          "name": "ORDER_AGENTS_HOSTED",
+                          "name": "AGENTS_HOSTED",
                           "value": "[string(parameters('orderAgentsHosted'))]"
                         },
                         {
@@ -3397,37 +3397,29 @@
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_ENDPOINT, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.aiServicesEndpoint.value)]"
     },
-    "FOUNDRY_PROJECT_ENDPOINT": {
+    "INSURANCE_PROJECT_NAME": {
+      "type": "string",
+      "value": "[parameters('orderProjectName')]"
+    },
+    "INSURANCE_PROJECT_ENDPOINT": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_PROJECT_ENDPOINT, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value)]"
     },
-    "ORDER_PROJECT_NAME": {
+    "AGENTS_HOSTED": {
       "type": "string",
-      "value": "[parameters('orderProjectName')]"
+      "value": "[parameters('orderAgentsHosted')]"
     },
     "ORDER_DEFAULT_PROJECT": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDER_DEFAULT_PROJECT, parameters('orderProjectName'))]"
     },
-    "ORDER_AGENTS_HOSTED": {
-      "type": "string",
-      "value": "[parameters('orderAgentsHosted')]"
-    },
     "NORTHWIND_BUSINESS_DOMAIN": {
       "type": "string",
       "value": "[parameters('businessDomain')]"
     },
-    "ORDERS_KB_CONNECTION_NAME": {
+    "INSURANCE_KB_CONNECTION_NAME": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDERS_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('orderProjectName')))]"
-    },
-    "FOUNDRY_KB_CONNECTION_NAME": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('orderProjectName')))]"
-    },
-    "ORDERS_OPENAI_ENDPOINT": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDERS_OPENAI_ENDPOINT, format('https://{0}{1}.openai.azure.com/openai/v1/', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken')))]"
     },
     "AZURE_AI_PROJECT_ENDPOINT": {
       "type": "string",
@@ -3507,7 +3499,7 @@
     },
     "AZURE_OPENAI_ENDPOINT": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_OPENAI_ENDPOINT, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.aiServicesEndpointOpenAI.value)]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDERS_OPENAI_ENDPOINT, format('https://{0}{1}.openai.azure.com/openai/v1/', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken')))]"
     },
     "COSMOS_ENDPOINT": {
       "type": "string",
@@ -3549,11 +3541,11 @@
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_VOICE_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webVoiceUri.value)]"
     },
-    "MCP_TECH_LOOKUP_URL": {
+    "MCP_INSURANCE_LOOKUP_URL": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_TECH_LOOKUP_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpTechLookupUrl.value)]"
     },
-    "MCP_WORK_ORDER_URL": {
+    "MCP_INSURANCE_REVIEW_URL": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_WORK_ORDER_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpWorkOrderUrl.value)]"
     },

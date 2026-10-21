@@ -10,8 +10,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .insurance_config import ALIASES, INSURANCE_PROJECT, normalize_environment
 
 # Search repo root and cwd for a .env; harmless if neither exists.
 # In the container the file lives at /app/app/settings.py (only 2 parents),
@@ -29,6 +31,36 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        def normalized(source):
+            def read():
+                values = dict(source())
+                raw = getattr(source, "env_vars", {})
+                selected = {}
+                for primary in ("INSURANCE_PROJECT_NAME", "INSURANCE_PROJECT_ENDPOINT",
+                                "AGENTS_HOSTED", "MCP_INSURANCE_REVIEW_URL"):
+                    for name in (primary, *ALIASES[primary]):
+                        if name.casefold() in raw and raw[name.casefold()] is not None:
+                            values[name] = raw[name.casefold()]
+                        if name in values:
+                            value = values.pop(name)
+                            if not isinstance(value, (str, bool)):
+                                raise ValueError(f"{name} must be a string or boolean")
+                            selected[name] = str(value).lower() if isinstance(value, bool) else value
+                return {**values, **normalize_environment(selected)}
+            return read
+        return tuple(normalized(source) for source in (
+            init_settings, env_settings, dotenv_settings, file_secret_settings,
+        ))
+
+    @model_validator(mode="after")
+    def insurance_project_default(self):
+        if self.business_domain == "insurance" and "order_project_name" not in self.model_fields_set:
+            self.order_project_name = INSURANCE_PROJECT
+        return self
+
     # Identity
     azure_client_id: str = Field(default="", alias="AZURE_CLIENT_ID")
     business_api_enabled: bool = Field(default=False, alias="NORTHWIND_BUSINESS_API_ENABLED")
@@ -39,9 +71,10 @@ class Settings(BaseSettings):
 
     # Foundry
     foundry_endpoint: str = Field(default="", alias="FOUNDRY_ENDPOINT")
-    foundry_project_endpoint: str = Field(default="", alias="FOUNDRY_PROJECT_ENDPOINT")
-    order_project_name: str = Field(default="northwind-orders", alias="ORDER_PROJECT_NAME")
-    order_agents_hosted: bool = Field(default=False, alias="ORDER_AGENTS_HOSTED")
+    foundry_project_endpoint: str = Field(default="", alias="INSURANCE_PROJECT_ENDPOINT")
+    foundry_project_endpoints: str = Field(default="", alias="FOUNDRY_PROJECT_ENDPOINTS")
+    order_project_name: str = Field(default="northwind-orders", alias="INSURANCE_PROJECT_NAME")
+    order_agents_hosted: bool = Field(default=False, alias="AGENTS_HOSTED")
     business_domain: Literal["retail", "insurance"] = Field(default="retail", alias="NORTHWIND_BUSINESS_DOMAIN")
     insurance_agents_ready: bool = Field(default=False, alias="NORTHWIND_INSURANCE_AGENTS_READY")
     insurance_orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID")
@@ -127,7 +160,7 @@ class Settings(BaseSettings):
     harness_model: str = Field(default="", alias="COPILOT_HARNESS_MODEL")
     harness_prompt_path: str = Field(default="", alias="COPILOT_HARNESS_PROMPT_PATH")
     harness_runtime_dir: str = Field(default="", alias="COPILOT_HARNESS_RUNTIME_DIR")
-    harness_resolution_mcp: str = Field(default="", alias="MCP_WORK_ORDER_URL")
+    harness_resolution_mcp: str = Field(default="", alias="MCP_INSURANCE_REVIEW_URL")
     harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
     harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")
     harness_concurrency: int = Field(default=2, ge=1, le=8, alias="COPILOT_HARNESS_MAX_CONCURRENT_RUNS")

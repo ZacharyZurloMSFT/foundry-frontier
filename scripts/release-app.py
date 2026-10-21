@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
@@ -11,9 +12,15 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from apps.api.app.insurance_config import (
+    ALIASES, INSURANCE_ACCOUNT_HOST, INSURANCE_AGENT_NAMES, INSURANCE_PROJECTS,
+    configuration_hash, insurance_routing, validate_fleet_receipt, valid_project_endpoint,
+)
 SUBSCRIPTION = "137c905b-7734-479e-acc5-ab8222462936"
 TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 RESOURCE_GROUP = "rg-northwind-apps"
@@ -24,6 +31,11 @@ APPS = {f"ca-{service}": service for service in SERVICES}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
 SHA = re.compile(r"[0-9a-f]{40}")
+ROUTING_NAMES = {
+    *insurance_routing(), "NORTHWIND_INSURANCE_AGENTS_READY",
+    *(alias for primary in ("INSURANCE_PROJECT_NAME", "INSURANCE_PROJECT_ENDPOINT", "AGENTS_HOSTED")
+      for alias in ALIASES[primary]),
+}
 
 
 class ReleaseError(RuntimeError):
@@ -104,7 +116,39 @@ def _valid_metadata(name: str, value: str) -> bool:
         return False
 
 
-def validate_release(args: argparse.Namespace) -> dict[str, str]:
+def verification_receipt(args: argparse.Namespace) -> dict:
+    path = getattr(args, "verification_receipt", None)
+    if path is None:
+        raise ValueError("Activation requires --verification-receipt and its independently recorded SHA-256")
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != getattr(args, "verification_sha256", None):
+        raise ValueError("Verification receipt SHA-256 does not match")
+    receipt = json.loads(data)
+    validate_fleet_receipt(receipt, args.git_sha)
+    return receipt
+
+
+def insurance_changes(args: argparse.Namespace) -> dict[str, str | None]:
+    mode = getattr(args, "insurance_mode", None)
+    if mode is None:
+        return {}
+    if args.app != "ca-api":
+        raise ValueError("Insurance routing changes are restricted to ca-api")
+    if mode == "disable":
+        return {"NORTHWIND_INSURANCE_AGENTS_READY": "false"}
+    if mode not in ("configure", "activate"):
+        raise ValueError("Unknown insurance release mode")
+    if mode == "activate":
+        verification_receipt(args)
+    changes: dict[str, str | None] = {name: None for name in ROUTING_NAMES}
+    changes.update(insurance_routing())
+    changes["NORTHWIND_INSURANCE_AGENTS_READY"] = "true" if mode == "activate" else "false"
+    return changes
+
+
+def validate_release(args: argparse.Namespace) -> dict[str, str | None]:
+    if getattr(args, "insurance_mode", None) is not None and args.app != "ca-api":
+        raise ValueError("Insurance routing changes are restricted to ca-api")
     if (args.subscription, args.tenant, args.resource_group) != (SUBSCRIPTION, TENANT, RESOURCE_GROUP):
         raise ValueError("Release scope is restricted to the existing Northwind apps resource group")
     if args.app not in APPS:
@@ -132,7 +176,7 @@ def validate_release(args: argparse.Namespace) -> dict[str, str]:
         raise ValueError("API releases require validated source SHA, timestamp and repository")
     if not args.revision.endswith(args.git_sha[:12]):
         raise ValueError("API revision does not match its build SHA")
-    return changes
+    return {**changes, **insurance_changes(args)}
 
 
 def _request(http, method: str, url: str, token, **kwargs) -> dict:
@@ -177,11 +221,46 @@ def _previous_metadata(container: dict, changes: dict) -> dict:
         entry = entries[0] if entries else None
         if entry is not None and (
             set(entry) - {"name", "value", "secretRef"} or entry.get("secretRef")
-            or not _valid_metadata(name, entry.get("value"))
+            or not (_valid_insurance_value(name, entry.get("value")) if name in ROUTING_NAMES
+                    else _valid_metadata(name, entry.get("value")))
         ):
             raise ReleaseError("Existing build metadata is not safe for a nonsecret rollback record")
         previous[name] = entry["value"] if entry else None
     return previous
+
+
+def _valid_insurance_value(name: str, value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    if not value:
+        return True
+    if name == "NORTHWIND_BUSINESS_DOMAIN":
+        return value in ("retail", "insurance")
+    if name in ("AGENTS_HOSTED", "ORDER_AGENTS_HOSTED", "NORTHWIND_INSURANCE_AGENTS_READY"):
+        return value in ("true", "false")
+    projects = {*INSURANCE_PROJECTS.values(), "northwind-orders", "nw-employee-help-desk",
+                "nw-claims-warranty", "nw-contact-center"}
+    if name in ("INSURANCE_PROJECT_NAME", "ORDER_PROJECT_NAME"):
+        return value in projects
+    if name == "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID":
+        return value in (INSURANCE_AGENT_NAMES["orchestrator"], "northwind-orchestrator")
+    if name == "FOUNDRY_PROJECT_ENDPOINTS":
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return False
+        return (isinstance(parsed, dict) and set(parsed) == set(INSURANCE_PROJECTS)
+                and all(_valid_insurance_value("INSURANCE_PROJECT_ENDPOINT", item) for item in parsed.values()))
+    try:
+        endpoint = urlsplit(value)
+        project = endpoint.path.rstrip("/").rsplit("/", 1)[-1]
+        return (
+            project in projects and endpoint.hostname in (
+                INSURANCE_ACCOUNT_HOST, INSURANCE_ACCOUNT_HOST.replace(".services.", ".cognitiveservices."),
+            ) and valid_project_endpoint(value, project)
+        )
+    except ValueError:
+        return False
 
 
 def _fqdn(properties: dict) -> str:
@@ -191,7 +270,8 @@ def _fqdn(properties: dict) -> str:
     return fqdn
 
 
-def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=time.monotonic) -> dict:
+def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=time.monotonic,
+            pre_activation=None) -> dict:
     changes = validate_release(args)
     resource = (f"/subscriptions/{args.subscription}/resourceGroups/{args.resource_group}"
                 f"/providers/Microsoft.App/containerApps/{args.app}")
@@ -212,7 +292,7 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
     if changes:
         container["env"] = [
             entry for entry in container.get("env", []) if entry.get("name") not in changes
-        ] + [{"name": name, "value": value} for name, value in changes.items()]
+        ] + [{"name": name, "value": value} for name, value in changes.items() if value is not None]
     template["revisionSuffix"] = args.revision
     expected = f"{args.app}--{args.revision}"
     result = {"app": args.app, "revision": expected, "image": args.image}
@@ -224,6 +304,9 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
     }
     if changes:
         rollback["previous_build_metadata"] = previous_metadata
+    if getattr(args, "insurance_mode", None):
+        rollback["insurance_mode"] = args.insurance_mode
+        rollback["restore_readiness"] = False
     args.rollback_file.parent.mkdir(parents=True, exist_ok=True)
     # Never persist the ARM template: even environment values can contain inline secrets.
     descriptor = os.open(args.rollback_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -238,6 +321,10 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
             or current.get("identity") != before.get("identity")):
         raise ReleaseError("App configuration drifted before mutation; rollback record retained")
     headers = {"If-Match": before["etag"]} if before.get("etag") else {}
+    if getattr(args, "insurance_mode", None) == "activate":
+        if pre_activation is None:
+            raise ReleaseError("Activation requires a fresh independent serving-version check")
+        pre_activation()
     _request(http, "PATCH", url, token, headers=headers, json={"properties": {"template": template}})
     deadline = clock() + args.timeout
     while clock() < deadline:
@@ -290,6 +377,9 @@ def parser() -> argparse.ArgumentParser:
     deploy.add_argument("--git-sha")
     deploy.add_argument("--deployed-at")
     deploy.add_argument("--github-repository")
+    deploy.add_argument("--insurance-mode", choices=("disable", "configure", "activate"))
+    deploy.add_argument("--verification-receipt", type=Path)
+    deploy.add_argument("--verification-sha256")
     deploy.add_argument("--timeout", type=int, default=600)
     deploy.add_argument("--apply", action="store_true")
     return result
@@ -302,7 +392,32 @@ def authenticated_release(args: argparse.Namespace) -> dict:
     try:
         with AzureCliCredential(tenant_id=args.tenant) as credential, httpx.Client(timeout=30) as http:
             token = get_bearer_token_provider(credential, "https://management.azure.com/.default")
-            return release(args, http, token)
+            def check_serving_versions():
+                receipt = verification_receipt(args)
+                ai_token = credential.get_token("https://ai.azure.com/.default").token
+                base = insurance_routing()["INSURANCE_PROJECT_ENDPOINT"]
+                for entry in receipt["agents"].values():
+                    url = f"{base}/agents/{entry['name']}"
+                    responses = [
+                        http.get(
+                            target, params={"api-version": "2025-11-15-preview"},
+                            headers={"Authorization": f"Bearer {ai_token}"}, follow_redirects=False,
+                        ) for target in (url, f"{url}/versions/{entry['version']}")
+                    ]
+                    if any(not response.is_success for response in responses):
+                        raise ReleaseError("Cannot independently verify current insurance serving versions")
+                    detail, version = (response.json() for response in responses)
+                    rules = (detail.get("agent_endpoint") or {}).get("version_selector", {}).get("version_selection_rules", [])
+                    definition = version.get("definition") or {}
+                    if (len(rules) != 1 or rules[0].get("agent_version") != entry["version"]
+                            or rules[0].get("traffic_percentage") != 100 or version.get("status") != "active"
+                            or definition.get("code_configuration", {}).get("content_hash") != entry["source_sha256"]
+                            or configuration_hash(definition.get("environment_variables") or {}) != entry["config_sha256"]
+                            or any(version.get("metadata", {}).get(key) != entry[key] for key in (
+                                "prompt_sha256", "source_manifest_sha256",
+                            ))):
+                        raise ReleaseError("Insurance fleet drifted after verification; activation refused")
+            return release(args, http, token, pre_activation=check_serving_versions)
     except AzureError:
         raise ReleaseError("Azure authentication failed; review the federated app identity") from None
 

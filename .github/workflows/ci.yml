@@ -45,8 +45,27 @@ jobs:
             scripts/tests/test_deployment_insurance_bundle.py \
             scripts/tests/test_bundle_harness_assets.py \
             scripts/tests/test_release_app.py \
+            scripts/tests/test_insurance_activation.py \
+            scripts/tests/test_orders_hosted_bundle.py \
+            scripts/tests/test_publish_insurance_knowledge.py \
             scripts/tests/test_actions_infra.py \
             scripts/tests/test_insurance_identity_setup.py -q
+  hosted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: agents/hosted/requirements.txt
+      - run: pip install -r agents/hosted/requirements.txt pytest pytest-asyncio
+      - name: Hosted runtime, canonical prompts and source provenance (no cloud/model calls)
+        env:
+          OTEL_SDK_DISABLED: "true"
+          APPLICATIONINSIGHTS_CONNECTION_STRING: ""
+        run: python -m pytest agents/tests -q
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -24,6 +24,10 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from fastapi import HTTPException
+
+from .insurance_config import valid_insurance_routes
+from .settings import get_settings
 
 # Candidate roots we might find the manifest under, in preference order.
 # 1) Bundled copy inside the image (apps/api/app/_northwind/company.yaml).
@@ -157,6 +161,8 @@ def resolve_department(header_value: str | None,
     for d in company["departments"]:
         if d["slug"] == slug:
             return d
+    if header_value and get_settings().business_domain == "insurance":
+        raise HTTPException(400, "Unknown insurance department")
     for d in company["departments"]:
         if d["slug"] == default_slug:
             return d
@@ -167,6 +173,12 @@ def resolve_department(header_value: str | None,
 
 @lru_cache
 def _foundry_project_endpoints() -> dict[str, str]:
+    settings = get_settings()
+    if settings.business_domain == "insurance":
+        parsed = _try_parse_endpoints_json(settings.foundry_project_endpoints)
+        if parsed is None or not valid_insurance_routes(parsed, settings.foundry_project_endpoint):
+            raise HTTPException(503, "Insurance routing must explicitly name all four retained insurance projects.")
+        return parsed
     raw = os.environ.get("FOUNDRY_PROJECT_ENDPOINTS", "").strip()
     if raw:
         parsed = _try_parse_endpoints_json(raw)
@@ -214,6 +226,10 @@ def foundry_project_endpoint_for(slug: str) -> str:
     """Return the Foundry project endpoint for the given department slug,
     falling back to Order Concierge / the single-project env var."""
     endpoints = _foundry_project_endpoints()
+    if get_settings().business_domain == "insurance":
+        if slug not in endpoints:
+            raise HTTPException(400, "Unknown insurance department")
+        return endpoints[slug]
     return (
         endpoints.get(slug)
         or endpoints.get(DEFAULT_DEPARTMENT_SLUG)

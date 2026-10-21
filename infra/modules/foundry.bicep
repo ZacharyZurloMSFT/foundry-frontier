@@ -116,7 +116,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
   identity: { type: 'SystemAssigned' }
   properties: {
     displayName: projectName
-    description: 'Northwind Order Concierge demo Foundry project'
+    description: 'Northwind Insurance claims demo Foundry project'
   }
   dependsOn: [ plannerDep, workerDep, promptAgentDep, embeddingDep ]
 }

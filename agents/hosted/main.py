@@ -60,7 +60,7 @@ def main():
     logging.getLogger(__name__).info("Northwind %s runtime configuration: %s",
                                    settings.business_domain, json.dumps(settings.metadata))
     knowledge_headers = None
-    if settings.uses_model_gateway and settings.role == "policylookup":
+    if settings.uses_model_gateway and settings.role == "policy_wording":
         with ConnectionCredential(
             managed_identity_client_id=settings.env.get("AZURE_CLIENT_ID") or None,
             exclude_interactive_browser_credential=True,

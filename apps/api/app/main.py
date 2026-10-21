@@ -27,7 +27,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi import Path as APIPath
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .bakeoff import ModelSpec, stream_bakeoff
@@ -98,14 +98,17 @@ app.add_middleware(
 async def stamp_department_middleware(request, call_next):
     """Read `X-Department` from every incoming request and record it in the
     observability context so every span created downstream carries the
-    active department slug + foundry_project. Silent fallback to Order
-    Concierge matches `resolve_department` semantics."""
+    active department slug + foundry_project. Invalid insurance departments
+    must not silently fall through to another project's handlers."""
     header = request.headers.get("x-department")
     try:
         dept = resolve_department(header)
         set_request_department(dept["slug"], dept["foundry_project"])
-    except Exception:  # noqa: BLE001 — never fail the request on stamping
-        pass
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    except (KeyError, RuntimeError, ValueError):
+        logging.getLogger(__name__).exception("Department context is unavailable")
+        return JSONResponse(status_code=503, content={"detail": "Department configuration is unavailable."})
     return await call_next(request)
 
 

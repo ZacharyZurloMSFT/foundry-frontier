@@ -35,13 +35,13 @@ company:
 platform_tabs:
   - id: agent_harness
     label: "Agent Harness"
-    hosted_in_project: northwind-orders
+    hosted_in_project: nw-insurance-claims
   - id: bakeoff
     label: "🏁 Model bake-off"
-    hosted_in_project: northwind-orders
+    hosted_in_project: nw-insurance-claims
   - id: safety
     label: "🛡 Try to jailbreak"
-    hosted_in_project: northwind-orders
+    hosted_in_project: nw-insurance-claims
 
 # Departments — order here is the order of tiles on the landing page.
 departments:
@@ -51,7 +51,7 @@ departments:
     pillar: multi_agent
     icon: "🚘"
     brand_color: "#0b6bcb"
-    foundry_project: northwind-orders
+    foundry_project: nw-insurance-claims
     search_index: northwind-insurance-knowledge
     cu_inbox_prefix: order-concierge
     enabled_tabs: [insurance_records, agent_chat, work_orders, hitl]
@@ -69,7 +69,7 @@ departments:
     pillar: rag
     icon: "📚"
     brand_color: "#2e7d32"
-    foundry_project: nw-employee-help-desk
+    foundry_project: nw-insurance-support
     search_index: nw-hr
     cu_inbox_prefix: employee-help-desk
     enabled_tabs: [hr_chat]
@@ -85,7 +85,7 @@ departments:
     pillar: content_understanding
     icon: "📄"
     brand_color: "#ef6c00"
-    foundry_project: nw-claims-warranty
+    foundry_project: nw-insurance-documents
     search_index: nw-claims
     cu_inbox_prefix: claims-warranty
     enabled_tabs: [claims_inbox]
@@ -101,7 +101,7 @@ departments:
     pillar: voice_live
     icon: "📞"
     brand_color: "#6a1b9a"
-    foundry_project: nw-contact-center
+    foundry_project: nw-insurance-contact-center
     search_index: nw-contact-center
     cu_inbox_prefix: contact-center
     enabled_tabs: [voice_console]

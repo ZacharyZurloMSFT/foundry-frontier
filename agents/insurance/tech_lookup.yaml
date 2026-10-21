@@ -15,6 +15,6 @@ instructions: |
 tools:
   - type: mcp
     server_label: northwind-insurance-policy-claim-lookup
-    server_url: ${MCP_TECH_LOOKUP_URL}
+    server_url: ${MCP_INSURANCE_LOOKUP_URL}
     require_approval: never
     allowed_tools: [lookup_policy, lookup_claim]

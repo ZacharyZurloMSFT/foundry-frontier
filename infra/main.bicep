@@ -13,9 +13,9 @@ param location string = 'canadacentral'
 @description('AI region — Foundry AI Services (Voice Live, Agent Service, models) and Azure AI Search. Private endpoints for these still land in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
 param aiLocation string = 'eastus2'
 
-@description('Order Concierge project within the existing shared Foundry account.')
-param orderProjectName string = 'northwind-orders'
-@description('Use independently hosted Order Concierge specialists after they have been deployed.')
+@description('Claims project within the shared Foundry account. The legacy parameter name is retained for compatibility.')
+param orderProjectName string = 'nw-insurance-claims'
+@description('Use independently hosted insurance specialists after they have been deployed.')
 @allowed(['true', 'false'])
 param orderAgentsHosted string = 'true'
 
@@ -42,9 +42,9 @@ param cosmosPrivateEndpointName string = 'pe-zz-cosmos-northwind'
 @description('Explicit greenfield-only opt-in for the retired ingestion worker. Content Understanding API capability does not require this workload.')
 @allowed(['true', 'false'])
 param enableCuIngest string = 'false'
-@description('Explicit domain activation. Existing retail behavior remains the greenfield default.')
+@description('Explicit domain selection. New deployments use the insurance profile.')
 @allowed(['retail', 'insurance'])
-param businessDomain string = 'retail'
+param businessDomain string = 'insurance'
 @description('Operator-confirmed deployment readiness, never inferred from packaged files.')
 @allowed(['true', 'false'])
 param insuranceAgentsReady string = 'false'
@@ -94,20 +94,20 @@ param harnessEnabled string = 'false'
 param additionalProjects array = [
   {
     slug: 'employee-help-desk'
-    projectName: 'nw-employee-help-desk'
-    displayName: 'Northwind Employee Help Desk'
+    projectName: 'nw-insurance-support'
+    displayName: 'Northwind Employee & Adjuster Support'
     description: 'RAG-only Foundry project for HR/IT internal Q&A. Owns the nw-hr Search index and the northwind-hr-assistant prompt agent.'
   }
   {
     slug: 'claims-warranty'
-    projectName: 'nw-claims-warranty'
-    displayName: 'Northwind Claims & Warranty Ops'
+    projectName: 'nw-insurance-documents'
+    displayName: 'Northwind Claims Document Intelligence'
     description: 'Content Understanding project for warranty PDFs, damage photos, and intake forms. Owns the nw-claims Search index, the northwind-claim-intake CU analyzer, and the northwind-claims-triage prompt agent.'
   }
   {
     slug: 'contact-center'
-    projectName: 'nw-contact-center'
-    displayName: 'Northwind Customer Contact Center'
+    projectName: 'nw-insurance-contact-center'
+    displayName: 'Northwind Policyholder Contact Center'
     description: 'Voice Live front door project. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the Order Concierge orchestrator.'
   }
 ]
@@ -381,16 +381,14 @@ output AZURE_MANAGED_IDENTITY_PRINCIPAL_ID string = reuseExisting ? reuse!.outpu
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = reuseExisting ? reuse!.outputs.settings.APPLICATIONINSIGHTS_CONNECTION_STRING : observability!.outputs.appInsightsConnectionString
 
 output FOUNDRY_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_ENDPOINT : foundry!.outputs.aiServicesEndpoint
-output FOUNDRY_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
-output ORDER_PROJECT_NAME string = orderProjectName
+output INSURANCE_PROJECT_NAME string = orderProjectName
+output INSURANCE_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
+output AGENTS_HOSTED string = orderAgentsHosted
 // Greenfield proposes the Orders default for a separately reviewed migration.
 // Adoption instead reports the effective account default without changing it.
 output ORDER_DEFAULT_PROJECT string = reuseExisting ? reuse!.outputs.settings.ORDER_DEFAULT_PROJECT : orderProjectName
-output ORDER_AGENTS_HOSTED string = orderAgentsHosted
 output NORTHWIND_BUSINESS_DOMAIN string = businessDomain
-output ORDERS_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.ORDERS_KB_CONNECTION_NAME : '${orderProjectName}-kb-mcp'
-output FOUNDRY_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_KB_CONNECTION_NAME : '${orderProjectName}-kb-mcp'
-output ORDERS_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.ORDERS_OPENAI_ENDPOINT : 'https://${abbrs.cognitiveServicesAccounts}${resourceToken}.openai.azure.com/openai/v1/'
+output INSURANCE_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.ORDERS_KB_CONNECTION_NAME : '${orderProjectName}-kb-mcp'
 // azd AI Agent extension (host: azure.ai.agent) resolves the Foundry project
 // via these exact env-var names during package/deploy/postdeploy.
 output AZURE_AI_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
@@ -443,7 +441,7 @@ output AZURE_SEARCH_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZ
 output AZURE_SEARCH_INDEX string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_INDEX : search!.outputs.indexName
 output AZURE_SEARCH_KNOWLEDGE_BASE string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_KNOWLEDGE_BASE : search!.outputs.knowledgeBaseName
 output AZURE_SEARCH_KNOWLEDGE_SOURCE string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_KNOWLEDGE_SOURCE : search!.outputs.knowledgeSourceName
-output AZURE_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_OPENAI_ENDPOINT : foundry!.outputs.aiServicesEndpointOpenAI
+output AZURE_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.ORDERS_OPENAI_ENDPOINT : 'https://${abbrs.cognitiveServicesAccounts}${resourceToken}.openai.azure.com/openai/v1/'
 
 output COSMOS_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.COSMOS_ENDPOINT : cosmos!.outputs.endpoint
 output COSMOS_DATABASE string = reuseExisting ? reuse!.outputs.settings.COSMOS_DATABASE : cosmos!.outputs.databaseName
@@ -461,8 +459,8 @@ output WEB_VOICE_URI string = reuseExisting ? reuse!.outputs.settings.WEB_VOICE_
 
 // MCP server URLs consumed by scripts/create-prompt-agents.py to render
 // the type: mcp tool blocks in agents/tech_lookup.yaml + work_order_draft.yaml.
-output MCP_TECH_LOOKUP_URL string = reuseExisting ? reuse!.outputs.settings.MCP_TECH_LOOKUP_URL : containerapps!.outputs.mcpTechLookupUrl
-output MCP_WORK_ORDER_URL string = reuseExisting ? reuse!.outputs.settings.MCP_WORK_ORDER_URL : containerapps!.outputs.mcpWorkOrderUrl
+output MCP_INSURANCE_LOOKUP_URL string = reuseExisting ? reuse!.outputs.settings.MCP_TECH_LOOKUP_URL : containerapps!.outputs.mcpTechLookupUrl
+output MCP_INSURANCE_REVIEW_URL string = reuseExisting ? reuse!.outputs.settings.MCP_WORK_ORDER_URL : containerapps!.outputs.mcpWorkOrderUrl
 
 output AZURE_LOG_ANALYTICS_RESOURCE_ID string = reuseExisting ? reuse!.outputs.settings.AZURE_LOG_ANALYTICS_RESOURCE_ID : observability!.outputs.logAnalyticsId
 output NORTHWIND_EXISTING_RESOURCE_IDS string = reuseExisting ? string(union(reuse!.outputs.resourceIds, {

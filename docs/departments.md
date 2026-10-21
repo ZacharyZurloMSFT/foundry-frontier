@@ -12,14 +12,14 @@ connections, evaluators, red-team runs, and Foundry Observability lens.
 
 | Department                    | Foundry pillar         | Foundry project            | Search index         | Prompt agents                                                              |
 | ----------------------------- | ---------------------- | -------------------------- | -------------------- | -------------------------------------------------------------------------- |
-| **Claims Concierge** (flagship) | Records + Multi-agent + HITL | `northwind` (legacy web), `northwind-orders` (native) | `northwind-insurance-knowledge` | Stable specialist names retained; insurance behavior requires authorised rollout |
-| **Employee & Adjuster Support** | Read-only Search + model RAG | Department namespace retained; shared model client | `nw-insurance-adjuster-support` | Server-validated verbatim evidence with title/version/source citations; no retail HR-agent fallback |
-| **Claims Document Intelligence** | Live Content Understanding | Shared AI Services account; department namespace retained | No automatic indexing | `northwindInsuranceClaimsV1`, actual document bytes and typed fields/confidence/source spans |
-| **Policyholder Contact Center** | Native Voice Live WSS | Shared AI Services account; `nw-contact-center` namespace retained | No voice RAG claim | Insurance intake, completed transcripts and explicitly confirmed claims handoff |
+| **Claims Concierge** (flagship) | Records + Multi-agent + HITL | `nw-insurance-claims` | `northwind-insurance-knowledge` | Five dedicated `northwind-insurance-*` hosted agents, gated by runtime verification |
+| **Employee & Adjuster Support** | Read-only Search + model RAG | `nw-insurance-support` | `nw-insurance-adjuster-support` | Server-validated verbatim evidence with title/version/source citations; no retail HR-agent fallback |
+| **Claims Document Intelligence** | Live Content Understanding | `nw-insurance-documents` | No automatic indexing | `northwind-claims-triage` prompt agent; `northwindInsuranceClaimsV1` analyzer |
+| **Policyholder Contact Center** | Native Voice Live WSS | `nw-insurance-contact-center` | No voice RAG claim | `northwind-intent-classifier`; insurance intake and explicitly confirmed claims handoff |
 
 Internal slugs `order-concierge`, `employee-help-desk`, `claims-warranty` and
-`contact-center` remain unchanged. Legacy web `northwind` and native
-`northwind-orders` are distinct projects, not renamed or merged.
+`contact-center` remain unchanged. The four old retail department projects are
+retired, not renamed or fallback targets. The account default is `nw-insurance-claims`.
 
 ## Active insurance surfaces and rollout boundary
 
@@ -38,8 +38,11 @@ unavailable until `/insurance/fixtures` reports `agent_runtime_ready: true`.
 The server's `NORTHWIND_BUSINESS_DOMAIN=insurance` and authorised
 `NORTHWIND_INSURANCE_AGENTS_READY` rollout remain the runtime boundary.
 Readiness also requires separately configured `northwind-insurance-*` native
-agents in `/api/projects/northwind-orders`; the legacy web
-`/api/projects/northwind` and old retail agent names are not compatible.
+agents in `/api/projects/nw-insurance-claims`, the matching manager, and all four
+explicit insurance department routes. Retired projects and old retail agent
+names are not compatible. The fleet flag is API-owned; hosted agent definitions
+do not declare it. Activation requires a matching source/config/prompt/runtime
+verification receipt, not merely an `active` agent status.
 The converted Copilot SDK harness preserves history and uses insurance
 lookup/policy/draft tools. `COPILOT_HARNESS_ENABLED` controls activation;
 configured dependencies are not labelled ready until a real SDK run completes.
@@ -75,7 +78,7 @@ are not referenced by the active insurance manifest.
 
 Insurance retrieval is isolated: index `northwind-insurance-knowledge`, knowledge
 source `northwind-insurance-knowledge-ks`, knowledge base `northwind-insurance-kb`
-and optional native `northwind-orders` connection `northwind-insurance-kb-mcp`.
+and the existing `nw-insurance-claims-kb-mcp` connection in `nw-insurance-claims`.
 The existing Search service may be reused, but the retail `northwind-knowledge`
 index and `northwind-kb` knowledge base remain unchanged and are not insurer
 corpora. Manifest names describe intended targets, not proof that cloud resources
@@ -116,9 +119,9 @@ via the `additionalProjects` param (defaulted in `infra/main.bicep`):
 
 ```bicep
 additionalProjects = [
-  { slug: 'employee-help-desk', projectName: 'nw-employee-help-desk', ... }
-  { slug: 'claims-warranty',    projectName: 'nw-claims-warranty',   ... }
-  { slug: 'contact-center',     projectName: 'nw-contact-center',    ... }
+  { slug: 'employee-help-desk', projectName: 'nw-insurance-support', ... }
+  { slug: 'claims-warranty',    projectName: 'nw-insurance-documents', ... }
+  { slug: 'contact-center',     projectName: 'nw-insurance-contact-center', ... }
 ]
 ```
 
@@ -172,7 +175,7 @@ of how many bake-off models are configured.
 department. Its explicit UI entry is available from the landing page and
 department navigation. Entering it preserves the selected department's chat
 state. Its insurance calls remain scoped to the stable `order-concierge`
-department and `northwind-orders`, even when opened from another department.
+department and `nw-insurance-claims`, even when opened from another department.
 
 The Python Copilot SDK runs in the API with four registered insurance tools
 and workflow-bound, pending-only action persistence. No additional Foundry
@@ -190,8 +193,9 @@ workspace visibility.
    `infra/main.bicep`.
 4. Add a `UI tab` entry: create a tab component under
    `apps/web-tech/src/tabs/` and wire it into `DEPT_TABS` in `App.tsx`.
-5. Run `azd provision && azd deploy` — postprovision picks up every
-   department automatically.
+5. Review the provisioning scope and deploy the selected services. Insurance
+   postprovision never runs legacy retail bootstrap; publishing, new prompt
+   agents, live verification and activation require their explicit rollout steps.
 
 ## Cross-department flow
 

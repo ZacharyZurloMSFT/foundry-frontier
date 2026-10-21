@@ -49,9 +49,11 @@ def test_promoted_triage_override_wins_without_changing_other_agents():
 def test_original_nonreserved_aliases_remain_supported():
     env = {**ENV, "ORDERS_MODEL_DEPLOYMENT": "legacy-baseline",
            "ORDERS_KB_CONNECTION_NAME": "legacy-connection"}
-    assert Settings.from_env(env).model == "existing-baseline"
-    assert Settings.from_env(env).knowledge_spec()["project_connection_id"] == "northwind-orders-kb-mcp"
+    with pytest.raises(ValueError, match="Conflicting settings for MODEL_DEPLOYMENT_NAME"):
+        Settings.from_env(env)
     env.pop("MODEL_DEPLOYMENT_NAME")
+    with pytest.raises(ValueError, match="Conflicting settings for INSURANCE_KB_CONNECTION_NAME"):
+        Settings.from_env(env)
     env.pop("ORDERS_KB_CONNECTION")
     config = Settings.from_env(env)
     assert config.model == "legacy-baseline"

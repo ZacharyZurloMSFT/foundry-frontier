@@ -9,6 +9,7 @@ import pytest
 from app import insurance, main, orchestrator_client, repositories
 from app.insurance_domain import ClaimActionDraft, InsuranceValidationError, fixtures, lookup_claim_record, lookup_policy_record
 from app.settings import Settings
+from app.insurance_config import INSURANCE_PROJECTS
 from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -24,6 +25,10 @@ def insurance_config(monkeypatch):
     monkeypatch.setenv("NORTHWIND_BUSINESS_DOMAIN", "insurance")
     settings = Settings(_env_file=None, NORTHWIND_BUSINESS_DOMAIN="insurance",
                         COSMOS_ENDPOINT="https://cosmos.invalid",
+                        FOUNDRY_PROJECT_ENDPOINTS=json.dumps({
+                            slug: f"https://existing.invalid/api/projects/{project}"
+                            for slug, project in INSURANCE_PROJECTS.items()
+                        }),
                         NORTHWIND_INSURANCE_AGENTS_READY=False)
     for module in (insurance, main, orchestrator_client, repositories):
         monkeypatch.setattr(module, "get_settings", lambda: settings)
@@ -188,7 +193,7 @@ def test_ready_requires_separate_agent_config_and_never_retail(insurance_config)
     assert not insurance.insurance_runtime_ready()
     insurance_config.insurance_agents_ready = True
     insurance_config.order_agents_hosted = True
-    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     insurance_config.insurance_orchestrator_agent_id = "northwind-orchestrator"
     assert not insurance.insurance_runtime_ready()
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
@@ -203,7 +208,7 @@ def test_ready_requires_separate_agent_config_and_never_retail(insurance_config)
 async def test_configured_insurance_inference_cannot_call_retail_agents(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
     insurance_config.order_agents_hosted = True
-    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
     called = AsyncMock(side_effect=AssertionError("Must never resolve a retail endpoint"))
     monkeypatch.setattr(orchestrator_client, "_project_client", called)
@@ -227,7 +232,7 @@ async def test_missing_approval_storage_never_returns_success(insurance_config):
 async def test_verified_chat_uses_insurance_stream_contract(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
     insurance_config.order_agents_hosted = True
-    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
     calls = []
     async def run(session, message):
@@ -246,7 +251,7 @@ async def test_verified_chat_uses_insurance_stream_contract(insurance_config, mo
 async def test_insurance_voice_handoff_validates_linked_ids(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
     insurance_config.order_agents_hosted = True
-    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
     calls = []
     async def run(session, message):

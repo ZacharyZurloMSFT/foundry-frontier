@@ -79,7 +79,7 @@ services:
                     run: |
                         set -e
                         python ../../scripts/bundle-insurance-assets.py --service mcp-work-order
-    orchestrator:
+    northwind-insurance-orchestrator:
         project: ./agents/orchestrator
         host: azure.ai.agent
         language: python
@@ -97,7 +97,7 @@ services:
                 cpu: "0.5"
                 memory: 1Gi
         description: |
-            Manager coordinating four independently hosted Northwind Orders specialists.
+            Manager coordinating four independently hosted Northwind Insurance specialists.
         hooks:
             prepackage:
                 shell: pwsh
@@ -114,26 +114,29 @@ services:
                     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 continueOnError: false
         environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - name: ORDERS_MODEL_DEPLOYMENT
+            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "insurance"}
+            - name: MODEL_DEPLOYMENT_NAME
               value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
-            - name: ORDER_AGENT_ROLE
-              value: manager
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_MANAGER_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}
+            - name: AGENT_ROLE
+              value: orchestrator
+            - {name: MODEL_GATEWAY_ENDPOINT, value: "${MODEL_GATEWAY_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_MODEL, value: "${INSURANCE_GATEWAY_ORCHESTRATOR_MODEL}"}
+            - {name: MODEL_GATEWAY_DEPLOYMENT, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}
+            - {name: INSURANCE_TRIAGE_AGENT_NAME, value: "northwind-insurance-triage"}
+            - {name: INSURANCE_LOOKUP_AGENT_NAME, value: "northwind-insurance-policy-claim-lookup"}
+            - {name: INSURANCE_POLICY_AGENT_NAME, value: "northwind-insurance-policy-wording"}
+            - {name: INSURANCE_DRAFT_AGENT_NAME, value: "northwind-insurance-claim-action-draft"}
         kind: hosted
-        name: northwind-orchestrator
+        name: northwind-insurance-orchestrator
         protocols:
             - protocol: responses
               version: 2.0.0
-    triage:
+    northwind-insurance-triage:
         project: ./agents/triage
         host: azure.ai.agent
         language: python
         kind: hosted
-        name: northwind-triage
+        name: northwind-insurance-triage
         policies:
             - type: rai_policy
               raiPolicyName: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_FOUNDRY_RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/aisvc-zurlo-northwind/raiPolicies/Microsoft.DefaultV2
@@ -160,20 +163,19 @@ services:
                     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 continueOnError: false
         environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: triage}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: ORDERS_OPENAI_ENDPOINT, value: "${ORDERS_OPENAI_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-    orderlookup:
+            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "insurance"}
+            - {name: AGENT_ROLE, value: triage}
+            - {name: MODEL_DEPLOYMENT_NAME, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: AZURE_OPENAI_ENDPOINT, value: "${AZURE_OPENAI_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_ENDPOINT, value: "${MODEL_GATEWAY_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_MODEL, value: "${INSURANCE_GATEWAY_SPECIALIST_MODEL}"}
+            - {name: MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+    northwind-insurance-policy-claim-lookup:
         project: ./agents/orderlookup
         host: azure.ai.agent
         language: python
         kind: hosted
-        name: northwind-order-lookup
+        name: northwind-insurance-policy-claim-lookup
         codeConfiguration:
             dependencyResolution: remote_build
             entryPoint: main.py
@@ -197,20 +199,19 @@ services:
                     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 continueOnError: false
         environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: orderlookup}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: MCP_TECH_LOOKUP_URL, value: "${MCP_TECH_LOOKUP_URL}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-    policylookup:
+            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "insurance"}
+            - {name: AGENT_ROLE, value: policy_claim_lookup}
+            - {name: MODEL_DEPLOYMENT_NAME, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: MCP_INSURANCE_LOOKUP_URL, value: "${MCP_INSURANCE_LOOKUP_URL}"}
+            - {name: MODEL_GATEWAY_ENDPOINT, value: "${MODEL_GATEWAY_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_MODEL, value: "${INSURANCE_GATEWAY_SPECIALIST_MODEL}"}
+            - {name: MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+    northwind-insurance-policy-wording:
         project: ./agents/policylookup
         host: azure.ai.agent
         language: python
         kind: hosted
-        name: northwind-policy-lookup
+        name: northwind-insurance-policy-wording
         codeConfiguration:
             dependencyResolution: remote_build
             entryPoint: main.py
@@ -234,22 +235,22 @@ services:
                     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 continueOnError: false
         environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: policylookup}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "insurance"}
+            - {name: AGENT_ROLE, value: policy_wording}
+            - {name: MODEL_DEPLOYMENT_NAME, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
             - {name: AZURE_SEARCH_ENDPOINT, value: "${AZURE_SEARCH_ENDPOINT}"}
             - {name: AZURE_SEARCH_KNOWLEDGE_BASE, value: "${AZURE_SEARCH_KNOWLEDGE_BASE}"}
-            - {name: ORDERS_KB_CONNECTION_NAME, value: "${ORDERS_KB_CONNECTION_NAME}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-    resolutiondraft:
+            - {name: AZURE_SEARCH_INDEX, value: "${AZURE_SEARCH_INDEX}"}
+            - {name: INSURANCE_KB_CONNECTION_NAME, value: "${INSURANCE_KB_CONNECTION_NAME}"}
+            - {name: MODEL_GATEWAY_ENDPOINT, value: "${MODEL_GATEWAY_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_MODEL, value: "${INSURANCE_GATEWAY_SPECIALIST_MODEL}"}
+            - {name: MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+    northwind-insurance-claim-action-draft:
         project: ./agents/resolutiondraft
         host: azure.ai.agent
         language: python
         kind: hosted
-        name: northwind-resolution-draft
+        name: northwind-insurance-claim-action-draft
         codeConfiguration:
             dependencyResolution: remote_build
             entryPoint: main.py
@@ -273,14 +274,13 @@ services:
                     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 continueOnError: false
         environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: resolutiondraft}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: MCP_WORK_ORDER_URL, value: "${MCP_WORK_ORDER_URL}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "insurance"}
+            - {name: AGENT_ROLE, value: claim_action_draft}
+            - {name: MODEL_DEPLOYMENT_NAME, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: MCP_INSURANCE_REVIEW_URL, value: "${MCP_INSURANCE_REVIEW_URL}"}
+            - {name: MODEL_GATEWAY_ENDPOINT, value: "${MODEL_GATEWAY_ENDPOINT}"}
+            - {name: MODEL_GATEWAY_MODEL, value: "${INSURANCE_GATEWAY_SPECIALIST_MODEL}"}
+            - {name: MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
     web-tech:
         project: ./apps/web-tech
         host: containerapp

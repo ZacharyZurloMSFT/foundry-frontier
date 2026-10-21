@@ -5,8 +5,10 @@ import argparse
 import hashlib
 import importlib
 import json
+import sys
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,6 +28,13 @@ from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import AzureCliCredential, AzureDeveloperCliCredential, get_bearer_token_provider
 from orders_agent_package import PACKAGE_SOURCES as PACKAGE_SOURCES, bundle
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agents.hosted.config import Settings
+from apps.api.app.insurance_config import (
+    INSURANCE_CONNECTION, INSURANCE_INDEX, INSURANCE_KB, INSURANCE_PROJECT,
+    ROLE_ALIASES, ROLE_DIRECTORIES, configuration_hash, normalize_environment,
+    normalize_role, valid_project_endpoint, validate_insurance_connection,
+)
 journal = importlib.import_module("run-orders-native-demo-evals")
 
 ROLES = {
@@ -75,7 +84,7 @@ def grant(http: httpx.Client, token_provider, subscription: str, scope: str,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--role", required=True, choices=ROLES)
+    parser.add_argument("--role", required=True, choices=(*ROLES, *ROLE_DIRECTORIES))
     parser.add_argument("--agent-name", help="Optional triage demo companion; baseline names remain the default")
     parser.add_argument("--project-endpoint", required=True)
     parser.add_argument("--project-arm-id", required=True)
@@ -87,6 +96,7 @@ def main():
     parser.add_argument("--config", required=True, type=Path, help="Non-secret per-role environment JSON")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--expected-version", help="Required serving version before changing an existing insurance endpoint")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--business-domain", choices=("retail", "insurance"))
     parser.add_argument("--grant-runtime-roles", action="store_true",
@@ -106,48 +116,62 @@ def deploy(args):
     pending_archive = args.output.with_suffix(".pending.zip")
     try:
         source_hash = bundle(root, args.requirements, pending_archive)
-        if (args.agent_name == "northwind-triage-ft-demo" and previous.get("submission_started")
-                and source_hash != previous.get("source_sha256")):
+        if previous.get("submission_started") and source_hash != previous.get("source_sha256"):
             raise ValueError("Candidate source differs; preserve the original package and version")
         pending_archive.replace(archive_path)
     finally:
         if pending_archive.exists():
             pending_archive.unlink()
     configuration = json.loads(args.config.read_text(encoding="utf-8"))
-    environment = {**configuration.get("common", {}), **configuration.get(args.role, {}),
-                   "ORDER_AGENT_ROLE": args.role}
+    role = normalize_role(args.role)
+    legacy_role = next((old for old, new in ROLE_ALIASES.items() if new == role), role)
+    if role in configuration and legacy_role != role and legacy_role in configuration:
+        if normalize_environment(configuration[role]) != normalize_environment(configuration[legacy_role]):
+            raise ValueError("Conflicting canonical and deprecated role configuration")
+    environment = {**configuration.get("common", {}),
+                   **configuration.get(role, configuration.get(legacy_role, {})), "AGENT_ROLE": role}
+    if any(not isinstance(value, str) for value in environment.values()):
+        raise ValueError("Agent environment values must be strings")
     domain = getattr(args, "business_domain", None) or environment.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
     if domain not in {"retail", "insurance"}:
         raise ValueError("NORTHWIND_BUSINESS_DOMAIN must be retail or insurance")
     environment["NORTHWIND_BUSINESS_DOMAIN"] = domain
     if environment.get("NORTHWIND_INSURANCE_AGENTS_READY", "false").lower() == "true":
         raise ValueError("An agent deployment cannot declare API fleet readiness; verify every specialist first.")
+    environment.pop("NORTHWIND_INSURANCE_AGENTS_READY", None)
     if any(name.startswith("FOUNDRY_") for name in environment):
         raise ValueError("FOUNDRY_* variables are platform-reserved")
-    if not environment.get("ORDERS_MODEL_DEPLOYMENT"):
-        raise ValueError("ORDERS_MODEL_DEPLOYMENT is required")
+    environment = normalize_environment(environment)
+    if not environment.get("MODEL_DEPLOYMENT_NAME"):
+        raise ValueError("MODEL_DEPLOYMENT_NAME is required")
     names = INSURANCE_ROLES if domain == "insurance" else ROLES
-    name = args.agent_name or names[args.role]
-    if name != names[args.role] and not (domain == "retail" and args.role == "triage" and name == "northwind-triage-ft-demo"):
+    name = args.agent_name or names[legacy_role]
+    if name != names[legacy_role] and not (domain == "retail" and role == "triage" and name == "northwind-triage-ft-demo"):
         raise ValueError("Only the separate northwind-triage-ft-demo companion may override an agent name")
     if domain == "insurance":
-        endpoint = urlsplit(args.project_endpoint)
-        if (endpoint.scheme != "https" or endpoint.path.rstrip("/") != "/api/projects/northwind-orders"
-                or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
-            raise ValueError("Insurance deployment must explicitly target the existing native northwind-orders project, not legacy web northwind.")
-        if args.apply and not args.project_arm_id.rstrip("/").endswith("/projects/northwind-orders"):
-            raise ValueError("Insurance project ARM ID must match the existing northwind-orders project.")
-        model = environment.get("TRIAGE_MODEL_DEPLOYMENT") or environment["ORDERS_MODEL_DEPLOYMENT"]
+        if not valid_project_endpoint(args.project_endpoint, INSURANCE_PROJECT):
+            raise ValueError("Insurance deployment must target the retained nw-insurance-claims project.")
+        if args.apply and not args.project_arm_id.rstrip("/").endswith(f"/projects/{INSURANCE_PROJECT}"):
+            raise ValueError("Insurance project ARM ID must match nw-insurance-claims.")
+        model = environment.get("TRIAGE_MODEL_DEPLOYMENT") or environment["MODEL_DEPLOYMENT_NAME"]
         if (environment.get("TRIAGE_MODEL_DEPLOYMENT") or "-ft-" in model.lower()) and (
                 not model.startswith("northwind-insurance-") or environment.get(
                     "NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED", "false").lower() != "true"):
             raise ValueError("A retail triage fine-tune is not an evaluated insurance model.")
-        if args.role == "policylookup":
-            connection = environment.get("ORDERS_KB_CONNECTION") or environment.get("ORDERS_KB_CONNECTION_NAME", "")
-            if (environment.get("AZURE_SEARCH_KNOWLEDGE_BASE") != "northwind-insurance-kb"
-                    or environment.get("AZURE_SEARCH_INDEX") != "northwind-insurance-knowledge"
-                    or connection.rsplit("/", 1)[-1] != "northwind-insurance-kb-mcp"):
+        if role == "policy_wording":
+            connection = environment.get("INSURANCE_KB_CONNECTION_NAME", "")
+            if (environment.get("AZURE_SEARCH_KNOWLEDGE_BASE") != INSURANCE_KB
+                    or environment.get("AZURE_SEARCH_INDEX") != INSURANCE_INDEX
+                    or connection != INSURANCE_CONNECTION):
                 raise ValueError("Insurance policy wording requires its explicit insurance KB, index and connection; no retail fallback.")
+    settings = Settings.from_env({**environment, "INSURANCE_PROJECT_ENDPOINT": args.project_endpoint})
+    environment = dict(settings.env)
+    config_hash = configuration_hash(environment)
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest_bytes = archive.read("agents/hosted/build.json")
+    source_manifest = json.loads(manifest_bytes)
+    if args.apply and (not source_manifest["source_clean"] or not source_manifest["source_commit"]):
+        raise ValueError("Apply requires a clean, committed source tree; uncommitted bytes cannot claim reviewed Git provenance.")
     credential_source = getattr(args, "credential_source", "cli")
     if credential_source not in {"cli", "azd"}:
         raise ValueError("credential source must be cli or azd")
@@ -155,7 +179,10 @@ def deploy(args):
             f"/subscriptions/{args.subscription.lower()}/"):
         raise ValueError("Project ARM ID must belong to the explicitly requested subscription.")
     report = {"agent": name, "project_endpoint": args.project_endpoint, "source_sha256": source_hash,
-              "model": environment.get("TRIAGE_MODEL_DEPLOYMENT") or environment["ORDERS_MODEL_DEPLOYMENT"],
+              "model": settings.model, "config_sha256": config_hash,
+              "prompt_sha256": settings.prompt_sha256, "role": role,
+              "source_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+              "source_commit": source_manifest["source_commit"],
               "applied": args.apply, "business_domain": domain,
               "credential_source": credential_source,
               "agent_runtime_ready": False, "roles_modified": bool(getattr(args, "grant_runtime_roles", False) and args.apply)}
@@ -170,10 +197,9 @@ def deploy(args):
             runtime="python_3_13", entry_point=["python", "main.py"], dependency_resolution="remote_build",
         ),
     )
-    config_hash = hashlib.sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()
     candidate = name == "northwind-triage-ft-demo"
     report["config_sha256"] = config_hash
-    if candidate and previous.get("submission_started"):
+    if previous.get("submission_started"):
         if any(previous.get(key) != report[key] for key in ("agent", "source_sha256", "config_sha256", "model")):
             raise ValueError("Existing candidate submission differs; do not create another version")
         report = previous
@@ -184,6 +210,21 @@ def deploy(args):
                              retry_total=0) as project:
             existing = None
             versions = []
+            before_endpoint = None
+            try:
+                before_endpoint = project.agents.get(name).as_dict().get("agent_endpoint")
+            except ResourceNotFoundError:
+                pass
+            if domain == "insurance" and before_endpoint is not None:
+                selector = (before_endpoint.get("version_selector") or {}).get("version_selection_rules") or []
+                if (len(selector) != 1
+                        or selector[0].get("agent_version") != getattr(args, "expected_version", None)
+                        or selector[0].get("traffic_percentage") != 100):
+                    raise ValueError("The serving version does not match --expected-version; review the endpoint before changing it.")
+            report["previous_endpoint"] = before_endpoint
+            if domain == "insurance" and role == "policy_wording":
+                connection = project.connections.get(INSURANCE_CONNECTION, include_credentials=False).as_dict()
+                validate_insurance_connection(connection, environment["AZURE_SEARCH_ENDPOINT"])
             try:
                 versions = list(project.agents.list_versions(name))
                 for version in versions:
@@ -197,7 +238,7 @@ def deploy(args):
                 pass
             if candidate and (len(versions) > 1 or (versions and existing is None)):
                 raise ValueError("Candidate already has a differing or failed version; no automatic replacement")
-            if candidate and existing is None and report.get("submission_started"):
+            if existing is None and report.get("submission_started") and previous.get("submission_started"):
                 raise RuntimeError("Uncertain prior candidate POST; reconcile manually, never resubmit")
             if existing is None:
                 report.update(submission_started=True, state="submission_started", submitted_at=journal.now())
@@ -207,7 +248,11 @@ def deploy(args):
                         agent_name=name, definition=definition, code=source,
                         description=f"Hosted Northwind {domain} {args.role}",
                         metadata={"source_sha256": source_hash, "config_sha256": config_hash,
-                                  "project": "northwind-orders", "business_domain": domain},
+                                  "project": urlsplit(args.project_endpoint).path.rstrip("/").rsplit("/", 1)[-1],
+                                  "business_domain": domain, "role": role,
+                                  "prompt_sha256": settings.prompt_sha256,
+                                  "source_manifest_sha256": report["source_manifest_sha256"],
+                                  "source_commit": source_manifest["source_commit"]},
                     )
             report.update(version=existing.version, state=existing.as_dict().get("status"))
             journal.atomic_json(args.output, report)
@@ -229,6 +274,10 @@ def deploy(args):
             else:
                 raise TimeoutError(f"Hosted version {name}:{existing.version} did not become active")
             identity = version.as_dict().get("instance_identity") or {}
+            actual_definition = version.as_dict().get("definition") or {}
+            if ((actual_definition.get("code_configuration") or {}).get("content_hash") != source_hash
+                    or actual_definition.get("environment_variables") != environment):
+                raise RuntimeError("Deployed content/configuration differs from the exact submitted artifact; endpoint unchanged.")
             principal = identity.get("principal_id")
             if not principal:
                 raise RuntimeError("Active hosted agent has no runtime principal ID")
@@ -237,8 +286,11 @@ def deploy(args):
                 with httpx.Client(timeout=120) as http:
                     grant(http, token_provider, args.subscription, account_scope, principal, OPENAI_USER)
                     grant(http, token_provider, args.subscription, args.project_arm_id, principal, FOUNDRY_USER)
-                    if args.role == "manager":
+                    if role == "orchestrator":
                         grant(http, token_provider, args.subscription, args.project_arm_id, principal, AGENT_CONSUMER)
+            current_endpoint = project.agents.get(name).as_dict().get("agent_endpoint")
+            if current_endpoint != before_endpoint:
+                raise RuntimeError("Agent endpoint changed during deployment; refusing to overwrite it.")
             project.agents.update_details(
                 agent_name=name,
                 agent_endpoint=AgentEndpointConfig(

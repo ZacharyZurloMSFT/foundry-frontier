@@ -21,6 +21,6 @@ instructions: |
 tools:
   - type: mcp
     server_label: northwind-insurance-claim-action-draft
-    server_url: ${MCP_WORK_ORDER_URL}
+    server_url: ${MCP_INSURANCE_REVIEW_URL}
     require_approval: never
     allowed_tools: [draft_claim_action]

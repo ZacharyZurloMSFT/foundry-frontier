@@ -11,7 +11,7 @@ param acrLoginServer string
 
 param foundryEndpoint string
 param foundryProjectEndpoint string
-param orderProjectName string = 'northwind-orders'
+param orderProjectName string = 'nw-insurance-claims'
 param orderAgentsHosted bool = false
 @description('JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. Order Concierge default = foundryProjectEndpoint.')
 param foundryProjectEndpoints string = ''
@@ -31,7 +31,7 @@ param bakeoffDeployments string = ''
 param harnessEnabled bool = false
 param enableCuIngest bool = false
 @allowed(['retail', 'insurance'])
-param businessDomain string = 'retail'
+param businessDomain string = 'insurance'
 param insuranceAgentsReady bool = false
 param insuranceOrchestratorAgentId string = ''
 param businessApiEnabled bool = false
@@ -70,9 +70,9 @@ var commonEnv = [
   { name: 'OTEL_SERVICE_NAME',                     value: 'northwind-copilot' }
   { name: 'OTEL_EXPORTER_OTLP_PROTOCOL',           value: 'http/protobuf' }
   { name: 'FOUNDRY_ENDPOINT',                      value: foundryEndpoint }
-  { name: 'FOUNDRY_PROJECT_ENDPOINT',              value: foundryProjectEndpoint }
-  { name: 'ORDER_PROJECT_NAME',                   value: orderProjectName }
-  { name: 'ORDER_AGENTS_HOSTED',                   value: string(orderAgentsHosted) }
+  { name: 'INSURANCE_PROJECT_ENDPOINT',            value: foundryProjectEndpoint }
+  { name: 'INSURANCE_PROJECT_NAME',                value: orderProjectName }
+  { name: 'AGENTS_HOSTED',                         value: string(orderAgentsHosted) }
   { name: 'NORTHWIND_BUSINESS_DOMAIN',             value: businessDomain }
   { name: 'NORTHWIND_INSURANCE_AGENTS_READY',      value: string(insuranceAgentsReady) }
   { name: 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', value: insuranceOrchestratorAgentId }
@@ -136,7 +136,7 @@ resource api 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'INSURANCE_AUTH_AUDIENCE', value: insuranceAuthAudience }
             { name: 'INSURANCE_AUTH_REQUIRED_SCOPE', value: insuranceAuthRequiredScope }
             { name: 'INSURANCE_AUTH_CLIENT_IDS', value: insuranceAuthClientIds }
-            { name: 'MCP_WORK_ORDER_URL', value: 'https://${mcpWorkOrder.properties.configuration.ingress.fqdn}/mcp/' }
+            { name: 'MCP_INSURANCE_REVIEW_URL', value: 'https://${mcpWorkOrder.properties.configuration.ingress.fqdn}/mcp/' }
           ])
           resources: { cpu: json('1.0'), memory: '2Gi' }
         }

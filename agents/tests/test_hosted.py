@@ -16,6 +16,7 @@ from agents.hosted.config import AGENTS_DIR, PROMPTS, Settings
 from agents.hosted.main import OrdersResponsesHost
 from agents.hosted.runtime import build_agent
 from agents.hosted.scope import RequestScope, current_scope
+from apps.api.app.insurance_config import INSURANCE_AGENT_NAMES, ROLE_DIRECTORIES
 
 BASE = {
     "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/northwind-orders",
@@ -156,7 +157,7 @@ async def hosted_request(config, project, body):
     account = project.get_openai_client(account=config.role == "triage") if (
         config.role == "triage" or config.uses_model_gateway
     ) else None
-    headers = {"api-key": "unit-test-only"} if config.uses_model_gateway and config.role == "policylookup" else None
+    headers = {"api-key": "unit-test-only"} if config.uses_model_gateway and config.role == "policy_wording" else None
     agent = build_agent(config, project, account_client=account, knowledge_headers=headers)
     server = OrdersResponsesHost(
         agent, config, store=InMemoryResponseProvider(),
@@ -181,13 +182,13 @@ async def hosted_request(config, project, body):
 @pytest.mark.parametrize("role", list(PROMPTS))
 def test_canonical_prompts_and_independent_definitions(role):
     config = settings(role)
-    definition_path = AGENTS_DIR / ("orchestrator" if role == "manager" else role) / "agent.yaml"
+    definition_path = AGENTS_DIR / ROLE_DIRECTORIES[role] / "agent.yaml"
     definition = yaml.safe_load(definition_path.read_text())
     assert definition["kind"] == "hosted"
-    assert definition["name"] == config.prompt["name"]
+    assert definition["name"] == INSURANCE_AGENT_NAMES[role]
     variables = {entry["name"]: entry["value"] for entry in definition["environment_variables"]}
-    assert variables["NORTHWIND_BUSINESS_DOMAIN"] == "retail"
-    assert variables["NORTHWIND_INSURANCE_AGENTS_READY"] == "false"
+    assert variables["NORTHWIND_BUSINESS_DOMAIN"] == "insurance"
+    assert "NORTHWIND_INSURANCE_AGENTS_READY" not in variables
     assert all(not v["name"].startswith("FOUNDRY_") for v in definition["environment_variables"])
     assert config.prompt["instructions"] == yaml.safe_load(
         (AGENTS_DIR / PROMPTS[role]).read_text(encoding="utf-8"))["instructions"]
@@ -218,7 +219,7 @@ def test_hosted_triage_invokes_selected_model_and_reports_route(override, expect
 
 
 def test_config_rejects_missing_model_and_invalid_endpoint():
-    with pytest.raises(ValueError, match="ORDERS_MODEL_DEPLOYMENT"):
+    with pytest.raises(ValueError, match="MODEL_DEPLOYMENT_NAME"):
         settings(ORDERS_MODEL_DEPLOYMENT="")
     with pytest.raises(ValueError, match="HTTPS"):
         settings(FOUNDRY_PROJECT_ENDPOINT="http://unsafe.invalid")
