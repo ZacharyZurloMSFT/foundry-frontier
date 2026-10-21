@@ -9,7 +9,7 @@ import pytest
 from apps.api.app.insurance_config import (
     INSURANCE_AGENT_NAMES, configuration_hash, insurance_routing, validate_fleet_receipt,
 )
-from test_release_app import Arm, SOURCE_SHA, arguments, execute, release_app
+from test_release_app import Arm, SOURCE_SHA, arguments, execute, release_app, workflow
 from test_release_app import record as rollback_record
 
 record = rollback_record
@@ -19,6 +19,24 @@ SPEC = importlib.util.spec_from_file_location(
 )
 verifier = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verifier)
+
+
+def test_workflow_insurance_mutations_are_explicit_api_only_and_evidence_gated():
+    config = workflow()
+    inputs = config["on"]["workflow_dispatch"]["inputs"]
+    assert inputs["insurance_mode"]["default"] == "preserve"
+    assert inputs["insurance_mode"]["options"] == ["preserve", "configure", "disable", "activate"]
+    deploy = config["jobs"]["deploy"]
+    scripts = "\n".join(step.get("run", "") for step in deploy["steps"])
+    assert 'test "$SERVICES_JSON" = \'["api"]\'' in scripts
+    assert 'test "$GITHUB_EVENT_NAME" = workflow_dispatch' in scripts
+    assert '--insurance-mode "$INSURANCE_RELEASE_MODE"' in scripts
+    assert "--verification-receipt .release-state/insurance-verification.json" in scripts
+    assert '--verification-sha256 "$INSURANCE_VERIFICATION_SHA256"' in scripts
+    artifact = next(step for step in deploy["steps"] if step.get("name") == "Preserve the exact verified activation evidence")
+    assert artifact["if"].startswith("success()")
+    assert artifact["with"]["include-hidden-files"] == "true"
+    assert deploy["steps"][-1]["if"] == "always()"
 
 
 def fleet_receipt():

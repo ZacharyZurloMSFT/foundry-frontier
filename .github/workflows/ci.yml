@@ -49,7 +49,14 @@ jobs:
             scripts/tests/test_orders_hosted_bundle.py \
             scripts/tests/test_publish_insurance_knowledge.py \
             scripts/tests/test_actions_infra.py \
-            scripts/tests/test_insurance_identity_setup.py -q
+            scripts/tests/test_insurance_identity_setup.py -q --junitxml=api-contracts.xml
+      - name: Preserve offline API and deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-contracts-${{ github.sha }}
+          path: api-contracts.xml
+          if-no-files-found: error
   hosted:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -65,7 +72,14 @@ jobs:
         env:
           OTEL_SDK_DISABLED: "true"
           APPLICATIONINSIGHTS_CONNECTION_STRING: ""
-        run: python -m pytest agents/tests -q
+        run: python -m pytest agents/tests -q --junitxml=hosted-contracts.xml
+      - name: Preserve offline hosted runtime and provenance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-contracts-${{ github.sha }}
+          path: hosted-contracts.xml
+          if-no-files-found: error
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15

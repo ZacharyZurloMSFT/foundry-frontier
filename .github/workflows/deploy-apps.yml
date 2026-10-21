@@ -17,6 +17,19 @@ on:
         description: Expected current main SHA (blank uses this workflow's SHA); successful main CI required
         type: string
         default: ""
+      insurance_mode:
+        description: API insurance routing guard (preserve for ordinary releases)
+        type: choice
+        options: [preserve, configure, disable, activate]
+        default: preserve
+      verification_receipt_json:
+        description: Secret-free verify-insurance-fleet.py receipt; required only for activate
+        type: string
+        default: ""
+      verification_sha256:
+        description: Independently recorded verification receipt SHA-256; required only for activate
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -137,6 +150,9 @@ jobs:
       VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
       VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE }}
       VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID }}
+      INSURANCE_RELEASE_MODE: ${{ inputs.insurance_mode || 'preserve' }}
+      INSURANCE_VERIFICATION_JSON: ${{ inputs.verification_receipt_json }}
+      INSURANCE_VERIFICATION_SHA256: ${{ inputs.verification_sha256 }}
     steps:
       - name: Recheck source after environment approval and validate exact Azure scope
         shell: bash
@@ -149,6 +165,14 @@ jobs:
           test "$AZURE_APPS_RESOURCE_GROUP" = rg-northwind-apps
           test "$ACR_NAME" = acrzurlonorthwind
           test -n "$AZURE_APPS_CLIENT_ID"
+          case "$INSURANCE_RELEASE_MODE" in
+            preserve) ;;
+            configure|disable|activate)
+              test "$GITHUB_EVENT_NAME" = workflow_dispatch
+              test "$SERVICES_JSON" = '["api"]'
+              ;;
+            *) exit 1 ;;
+          esac
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.sha }}
@@ -232,9 +256,28 @@ jobs:
               --rollback-file ".release-state/rollback-$service.json" --apply)
             if [[ "$service" == api ]]; then
               args+=(--git-sha "$SOURCE_SHA" --deployed-at "$DEPLOYED_AT" --github-repository "$GITHUB_REPOSITORY")
+              if [[ "$INSURANCE_RELEASE_MODE" != preserve ]]; then
+                args+=(--insurance-mode "$INSURANCE_RELEASE_MODE")
+              fi
+              if [[ "$INSURANCE_RELEASE_MODE" == activate ]]; then
+                test -n "$INSURANCE_VERIFICATION_JSON"
+                [[ "$INSURANCE_VERIFICATION_SHA256" =~ ^[0-9a-f]{64}$ ]]
+                printf '%s' "$INSURANCE_VERIFICATION_JSON" > .release-state/insurance-verification.json
+                args+=(--verification-receipt .release-state/insurance-verification.json
+                  --verification-sha256 "$INSURANCE_VERIFICATION_SHA256")
+              fi
             fi
             python scripts/release-app.py "${args[@]}"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+      - name: Preserve the exact verified activation evidence
+        if: success() && env.INSURANCE_RELEASE_MODE == 'activate'
+        uses: actions/upload-artifact@v4
+        with:
+          name: insurance-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release-state/insurance-verification.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Preserve secret-free rollback records even when readiness is unknown
         if: always()
         uses: actions/upload-artifact@v4

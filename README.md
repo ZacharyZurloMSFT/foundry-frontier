@@ -494,6 +494,16 @@ Other flags, secrets, identity and ingress are preserved. On failed post-activat
 checks, disable inference; never blindly restore a stale true readiness flag
 from a snapshot pointing at deleted projects.
 
+The existing **Scoped App Release** workflow exposes the same modes for an
+explicit `workflow_dispatch` selecting **api only**. Ordinary automatic releases
+default to `preserve`. Activation additionally accepts the secret-free receipt
+JSON and its independently recorded SHA-256, rechecks serving versions under the
+release identity, and retains that exact evidence as a GitHub artifact.
+Missing Foundry read permission blocks activation; it does not trigger a role
+grant. New runtime roles likewise require the deployer's explicit
+`--grant-runtime-roles` opt-in and the existing `--gateway-arm-id` when gateway
+access is needed.
+
 ## Insurance portal with Entra sign-in
 
 The insurer-branded portal is now the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting; adjusters and presenters additionally get an **AI workspace** (claims concierge, document intelligence, approvals, bake-off, safety). The Agent Harness UI has been removed from the web app for now. The portal passes its Entra access token to the AI workspace's API calls. Backend enforcement of that token on the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …) is not yet implemented.

@@ -54,6 +54,7 @@ INSURANCE_ROLES = {
 FOUNDRY_USER = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
 AGENT_CONSUMER = "eed3b665-ab3a-47b6-8f48-c9382fb1dad6"
+GATEWAY_MODELS_USER = "a6b68e3d-a1f0-4c60-8678-237c050cf4ea"
 
 
 def deployment_credential(source: str, tenant: str):
@@ -100,7 +101,8 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--business-domain", choices=("retail", "insurance"))
     parser.add_argument("--grant-runtime-roles", action="store_true",
-                        help="Explicit opt-in to legacy RBAC writes; existing roles are otherwise never changed")
+                        help="Explicit opt-in to scoped runtime RBAC; existing roles are otherwise never changed")
+    parser.add_argument("--gateway-arm-id", help="Existing gateway scope; required when explicitly granting gateway access")
     args = parser.parse_args()
     with journal.receipt_lock(args.output):
         deploy(args)
@@ -172,6 +174,11 @@ def deploy(args):
     source_manifest = json.loads(manifest_bytes)
     if args.apply and (not source_manifest["source_clean"] or not source_manifest["source_commit"]):
         raise ValueError("Apply requires a clean, committed source tree; uncommitted bytes cannot claim reviewed Git provenance.")
+    if args.apply and getattr(args, "grant_runtime_roles", False) and settings.uses_model_gateway:
+        group_scope = args.project_arm_id.split("/providers/Microsoft.CognitiveServices/", 1)[0]
+        expected_gateway = group_scope + "/providers/Microsoft.ApiManagement/service/ai-gateway-northwind"
+        if getattr(args, "gateway_arm_id", "") != expected_gateway:
+            raise ValueError("Explicit runtime grants require the existing Northwind gateway ARM ID in the AI group.")
     credential_source = getattr(args, "credential_source", "cli")
     if credential_source not in {"cli", "azd"}:
         raise ValueError("credential source must be cli or azd")
@@ -288,6 +295,8 @@ def deploy(args):
                     grant(http, token_provider, args.subscription, args.project_arm_id, principal, FOUNDRY_USER)
                     if role == "orchestrator":
                         grant(http, token_provider, args.subscription, args.project_arm_id, principal, AGENT_CONSUMER)
+                    if settings.uses_model_gateway:
+                        grant(http, token_provider, args.subscription, args.gateway_arm_id, principal, GATEWAY_MODELS_USER)
             current_endpoint = project.agents.get(name).as_dict().get("agent_endpoint")
             if current_endpoint != before_endpoint:
                 raise RuntimeError("Agent endpoint changed during deployment; refusing to overwrite it.")
