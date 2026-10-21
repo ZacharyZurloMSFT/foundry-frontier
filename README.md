@@ -456,6 +456,10 @@ work; a full `azd up` also redeploys the separate legacy web application.
 The shared development Python environment is not upgraded to the hosted
 runtime's dependency set; use an isolated environment for `agents/hosted/requirements.txt`.
 
+## Insurance portal with Entra sign-in
+
+The insurer-branded portal is now the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting; adjusters and presenters additionally get an **AI workspace** (claims concierge, document intelligence, approvals, bake-off, safety). The Agent Harness UI has been removed from the web app for now. The portal passes its Entra access token to the AI workspace's API calls. Backend enforcement of that token on the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …) is not yet implemented.
+
 ## Agent Harness (opt-in)
 
 The **Agent Harness** workspace is accessible from the landing page and each

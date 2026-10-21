@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ReactNode, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BusinessApi, BusinessError } from "./api";
 import { getInsuranceAuth, InsuranceAuth } from "./auth";
 import { BusinessConfig, businessTheme, readBusinessConfig } from "./config";
@@ -9,7 +9,8 @@ import ReportLoss from "./ReportLoss";
 import { ErrorNotice, Loading } from "./shared";
 import "./business.css";
 
-type AccountTab = "policies" | "claims" | "report";
+type AccountTab = "policies" | "claims" | "report" | "ai";
+const StaffWorkspace = lazy(() => import("./StaffWorkspace"));
 interface Intent { tab: AccountTab; revision: number }
 function useBusinessTheme() {
   useEffect(() => {
@@ -43,6 +44,18 @@ export function PublicHome({ onAccount, onCoverage, onHelp }: {
       <aside className="business-roadmap" aria-label="The claims journey"><span className="business-mark" aria-hidden="true">N</span><p className="business-eyebrow">Clarity at every step</p><h2>A report is the beginning.<br />Not a decision.</h2>
         <ol><li><strong>Tell us what happened</strong><span>Report a synthetic auto loss using your policy.</span></li><li><strong>Follow the next steps</strong><span>See requested evidence and case updates.</span></li><li><strong>Human-led review</strong><span>An adjuster manages the case, with a recorded timeline.</span></li></ol>
       </aside>
+    </section>
+    <section className="business-trust" aria-label="Why Northwind"><ul>
+      <li><strong>24/7</strong><span>Loss reporting online</span></li>
+      <li><strong>Human-led</strong><span>Every claim reviewed by a person</span></li>
+      <li><strong>Plain-English</strong><span>Policy wording with citations</span></li>
+      <li><strong>Secure</strong><span>Microsoft Entra sign-in</span></li></ul></section>
+    <section className="business-home-services" aria-labelledby="lines-title"><p className="business-eyebrow">Protection for what matters</p><h2 id="lines-title">Insurance for your life on the move</h2>
+      <div className="business-grid business-three">
+        <article className="business-panel"><span className="business-service-number">AUTO</span><h3>Auto protection</h3><p>Collision, comprehensive and liability coverage explained against your actual schedule.</p></article>
+        <article className="business-panel"><span className="business-service-number">CLAIMS</span><h3>Fast, fair claims</h3><p>Report a loss, add photos and estimates, and follow progress from first notice to resolution.</p></article>
+        <article className="business-panel"><span className="business-service-number">SUPPORT</span><h3>People when you need them</h3><p>Adjusters use AI to prepare cases faster; decisions always stay with a licensed human.</p></article>
+      </div>
     </section>
     <section className="business-home-services" aria-labelledby="services-title"><p className="business-eyebrow">Make yourself at home</p><h2 id="services-title">What can we help you with?</h2>
       <div className="business-grid business-three">
@@ -103,14 +116,17 @@ function AccountWorkspace({ api, auth, revision, intent }: { api: BusinessApi; a
   }, [api, revision, reload, onError]);
   if (loading) return <Loading>Verifying your account with the insurance service…</Loading>;
   if (!identity) return <><ErrorNotice error={error} /><button onClick={() => setReload(v => v + 1)}>Retry account verification</button><p>No records or roles are inferred from a demo persona.</p></>;
-  const activeTab = tab === "report" && identity.role !== "policyholder" ? "claims" : tab;
+  const isStaff = identity.role !== "policyholder";
+  const activeTab = tab === "report" && !isStaff ? tab : tab === "report" ? "claims" : tab === "ai" && !isStaff ? "policies" : tab;
   return <div className="business-stack">
     <div className="business-account-meta"><span>Server-authorized role: <strong>{identity.role}</strong></span><span>Run: <code>{identity.run_id}</code></span><span>Source: <code>{identity.source_version}</code></span></div>
     <nav aria-label="Account navigation" className="business-account-nav">
       <button aria-current={activeTab === "policies" ? "page" : undefined} onClick={() => setTab("policies")}>Policies</button>
       <button aria-current={activeTab === "claims" ? "page" : undefined} onClick={() => { setSelected(null); setCreatedNotice(""); setTab("claims"); }}>{identity.role === "policyholder" ? "My claims" : "Claim queue"}</button>
       {identity.role === "policyholder" && <button aria-current={activeTab === "report" ? "page" : undefined} onClick={() => { setPolicy(null); setTab("report"); }}>Report a loss</button>}
+      {isStaff && <button aria-current={activeTab === "ai" ? "page" : undefined} onClick={() => setTab("ai")}>AI workspace</button>}
     </nav>
+    {activeTab === "ai" && isStaff && <Suspense fallback={<Loading>Opening the AI workspace…</Loading>}><StaffWorkspace token={auth.token} /></Suspense>}
     {identity.role === "presenter" && <p className="business-callout">Presenter account · read-only access. Roles and assignments are provided by the server, not selected in this portal.</p>}
     {activeTab === "policies" && <Policies api={api} canReport={identity.role === "policyholder"} onReport={p => { setPolicy(p); setTab("report"); }} onError={onError} />}
     {activeTab === "claims" && <Claims api={api} identity={identity} selected={selected} onSelect={value => { setSelected(value); setCreatedNotice(""); }} createdNotice={createdNotice} onError={onError} />}
