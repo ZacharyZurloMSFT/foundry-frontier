@@ -169,12 +169,11 @@ the array to a name/version that appears there.
 The eval Tier-4 pipeline still keys metrics per-department regardless
 of how many bake-off models are configured.
 
-## Agent Harness platform workspace
+## Retained Agent Harness backend
 
-`agent_harness` in `company.yaml` describes a platform capability, not a fifth
-department. Its explicit UI entry is available from the landing page and
-department navigation. Entering it preserves the selected department's chat
-state. Its insurance calls remain scoped to the stable `order-concierge`
+`agent_harness` in `company.yaml` is historical capability metadata, not a fifth
+department. The current portal intentionally removes its UI entry. The retained
+backend's insurance calls remain scoped to the stable `order-concierge`
 department and `nw-insurance-claims`, even when opened from another department.
 
 The Python Copilot SDK runs in the API with four registered insurance tools

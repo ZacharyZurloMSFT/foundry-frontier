@@ -494,10 +494,14 @@ Other flags, secrets, identity and ingress are preserved. On failed post-activat
 checks, disable inference; never blindly restore a stale true readiness flag
 from a snapshot pointing at deleted projects.
 
-## Agent Harness (opt-in)
+## Insurance portal with Entra sign-in
 
-The **Agent Harness** workspace is accessible from the landing page and each
-department's sidebar. It runs the Python **GitHub Copilot SDK 1.0.14** with its
+The insurer-branded portal is now the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting; adjusters and presenters additionally get an **AI workspace** (claims concierge, document intelligence, approvals, bake-off, safety). The Agent Harness UI has been removed from the web app for now. The portal passes its Entra access token to the AI workspace's API calls. Backend enforcement of that token on the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …) is not yet implemented.
+
+## Agent Harness backend (retained compatibility)
+
+The current portal deliberately does not expose an Agent Harness workspace.
+The retained opt-in backend runs the Python **GitHub Copilot SDK 1.0.14** with its
 matching runtime inside FastAPI. In insurance mode the SDK chooses among
 triage, canonical policy/claim lookup, authoritative policy lookup and
 pending-only claim-action drafting. Retail mode retains its separate prompt

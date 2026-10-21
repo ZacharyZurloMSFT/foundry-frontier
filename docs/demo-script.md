@@ -12,6 +12,10 @@ flags are enabled, the web-voice front door. Check `/insurance/fixtures`:
 `agent_runtime_ready` must be true before presenting live inference. A deployment
 status of `active` or packaged source files alone do not prove readiness.
 Keep unavailable states visible rather than substituting recorded answers.
+The current portal defaults to the Entra-signed-in business experience. Enter
+the AI workspace through the server-assigned adjuster/presenter role. The legacy
+department shell is a separate explicit frontend opt-out, not a reason to relax
+identity controls. UI role gating is not backend authorization on legacy AI routes.
 
 The API fleet-ready guard is enabled only after a matching source/config/prompt/
 serving-version verification receipt. It is not a flag on every hosted agent.
@@ -20,7 +24,8 @@ own opt-in controls; this walkthrough does not authorize enabling them.
 
 ## One insurer, four departments
 
-Show the landing page:
+Show the available insurance departments in the authorized AI workspace (or
+the explicitly selected legacy department shell):
 
 - **Claims Concierge:** synthetic policy/claim records, five hosted agents and
   pending human-review drafts.
@@ -114,13 +119,10 @@ are immutable. New native evaluation runs, dataset uploads or training require
 their own approval and verified spend bounds; a deployment smoke is not a
 completed quality evaluation or production approval.
 
-## Optional harness comparison
+## Retained backend harness
 
-If its independent flag and real SDK runtime are ready, open Agent Harness and
-run a synthetic claims-status scenario. Inspect actual lookup/policy tool events
-and saved history. Contrast this application-owned orchestration with the
-Foundry-hosted Agent Framework manager; it is not another hosted agent.
-
-Reload history to show persistence without replaying model/tool calls.
-Reported token/cost values are execution observations, not a complete Azure
-billing total. No part of the demo authorizes autonomous insurance decisions.
+The current portal intentionally removes the Agent Harness UI. Backend SDK
+compatibility code and historical evidence remain, but this rollout does not
+restore that UI or enable its independent flag. Reported token/cost values are
+execution observations, not a complete Azure billing total. No part of the
+demo authorizes autonomous insurance decisions.

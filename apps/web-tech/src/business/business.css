@@ -194,3 +194,9 @@ html[data-theme="dark"][data-insurance-business="true"] {
   .business-lookup .business-actions { flex-wrap: wrap; }
   .business-lookup input { flex-basis: 100%; }
 }
+.business-trust ul { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; padding: 20px; background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 12px; }
+.business-trust li { display: flex; flex-direction: column; gap: 4px; }
+.business-trust strong { font-size: 1.25rem; color: var(--cp-accent); }
+.business-trust span { color: var(--cp-text-muted); font-size: 0.9rem; }
+.business-staff-workspace { border: 1px solid var(--cp-border); border-radius: 12px; overflow: hidden; min-height: 70vh; }
+@media (max-width: 720px) { .business-trust ul { grid-template-columns: 1fr 1fr; } }
