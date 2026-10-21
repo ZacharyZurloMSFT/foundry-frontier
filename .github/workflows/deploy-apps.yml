@@ -237,7 +237,7 @@ jobs:
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
       - name: Preserve secret-free rollback records even when readiness is unknown
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-rollback-${{ github.run_id }}-${{ github.run_attempt }}
           path: .release-state/rollback-*.json

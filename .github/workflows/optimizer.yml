@@ -71,7 +71,7 @@ jobs:
             All four eval tiers will re-run when you push a commit to this branch.
           branch: optimizer/${{ matrix.agent }}
           labels: optimizer, needs-review
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: optimizer-${{ matrix.agent }}
