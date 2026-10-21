@@ -12,6 +12,9 @@ from azure.identity import AzureCliCredential
 SUBSCRIPTION = "137c905b-7734-479e-acc5-ab8222462936"
 TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
+REPOSITORY_ID = 1421326484
+OWNER_ID = 21691488
+SUBJECT_PREFIX = f"repo:ZacharyZurloMSFT@{OWNER_ID}/foundry-frontier@{REPOSITORY_ID}"
 BASE = f"/subscriptions/{SUBSCRIPTION}"
 APPS = f"{BASE}/resourceGroups/rg-northwind-apps"
 NETWORK = f"{BASE}/resourceGroups/rg-northwind-networking"
@@ -77,6 +80,13 @@ def role_id(key: str) -> str:
     return f"{BASE}/providers/Microsoft.Authorization/roleDefinitions/{stable_id('role:' + key)}"
 
 
+def validate_oidc_policy(repo: dict, policy: dict) -> None:
+    if (repo.get("id") != REPOSITORY_ID or repo.get("owner", {}).get("id") != OWNER_ID
+            or policy.get("use_default") is not True or policy.get("use_immutable_subject") is not True
+            or policy.get("sub_claim_prefix") != SUBJECT_PREFIX):
+        raise ValueError("Repository identity or OIDC subject policy changed; review trust before activation.")
+
+
 def gh(path: str, method: str = "GET", body: dict | None = None) -> dict:
     args = ["gh", "api", path, "--method", method]
     if body is not None:
@@ -105,7 +115,7 @@ def preview() -> dict:
         "repository": REPOSITORY, "subscription": SUBSCRIPTION, "tenant": TENANT,
         "identities": [
             {"name": name, "environment": environment,
-             "federated_subject": f"repo:{REPOSITORY}:environment:{environment}"}
+             "federated_subject": f"{SUBJECT_PREFIX}:environment:{environment}"}
             for name, environment, _ in IDENTITIES.values()
         ],
         "role_definitions": ROLES,
@@ -122,6 +132,7 @@ def configure() -> dict:
     repo = gh(f"repos/{REPOSITORY}")
     if not repo.get("private") or repo.get("default_branch") != "main":
         raise ValueError("Expected the private approved main-branch repository.")
+    validate_oidc_policy(repo, gh(f"repos/{REPOSITORY}/actions/oidc/customization/sub"))
     permission = gh(f"repos/{REPOSITORY}/actions/permissions")
     if permission.get("enabled") is not False:
         raise ValueError("Keep repository Actions disabled until setup is complete.")
@@ -162,7 +173,7 @@ def configure() -> dict:
                 arm("PUT", identity_id + "/federatedIdentityCredentials/github-environment", "2023-01-31", {
                     "properties": {
                         "issuer": "https://token.actions.githubusercontent.com",
-                        "subject": f"repo:{REPOSITORY}:environment:{environment}",
+                        "subject": f"{SUBJECT_PREFIX}:environment:{environment}",
                         "audiences": ["api://AzureADTokenExchange"],
                     },
                 })

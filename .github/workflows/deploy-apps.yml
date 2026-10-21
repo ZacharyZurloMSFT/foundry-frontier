@@ -84,7 +84,7 @@ jobs:
               r.id < context.runId && r.head_repository?.id === repository.data.id);
             core.setOutput('sha', sha);
             core.setOutput('base', previous?.head_sha || '');
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.trust.outputs.sha }}
           fetch-depth: 0
@@ -149,7 +149,7 @@ jobs:
           test "$AZURE_APPS_RESOURCE_GROUP" = rg-northwind-apps
           test "$ACR_NAME" = acrzurlonorthwind
           test -n "$AZURE_APPS_CLIENT_ID"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
@@ -241,5 +241,6 @@ jobs:
         with:
           name: app-rollback-${{ github.run_id }}-${{ github.run_attempt }}
           path: .release-state/rollback-*.json
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14

@@ -521,6 +521,8 @@ def test_workflow_has_environment_scoped_oidc_shared_lock_and_immutable_builds()
     artifact = deploy["steps"][-1]
     assert artifact["if"] == "always()"
     assert artifact["with"]["path"] == ".release-state/rollback-*.json"
+    assert artifact["with"]["include-hidden-files"] == "true"
+    assert artifact["with"]["if-no-files-found"] == "error"
     assert artifact["with"]["retention-days"] == "14"
 
 

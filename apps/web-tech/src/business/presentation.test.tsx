@@ -19,8 +19,8 @@ describe("business portal presentation and boundaries", () => {
     vi.stubGlobal("window", { location: { href: "http://localhost:5173/" } });
     vi.stubEnv("VITE_INSURANCE_BUSINESS_ENABLED", "false");
     expect(renderToStaticMarkup(createElement(App))).toContain("Loading Northwind Insurance");
-    expect(insuranceBusinessEnabled(undefined)).toBe(false); expect(insuranceBusinessEnabled("false")).toBe(false);
-    expect(insuranceBusinessEnabled(true)).toBe(false); expect(insuranceBusinessEnabled("true")).toBe(true);
+    expect(insuranceBusinessEnabled(undefined)).toBe(true); expect(insuranceBusinessEnabled("false")).toBe(false);
+    expect(insuranceBusinessEnabled(false)).toBe(false); expect(insuranceBusinessEnabled("true")).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
   });
   it("renders a public insurance home with no fixture, agent, fake quote or purchase links", () => {

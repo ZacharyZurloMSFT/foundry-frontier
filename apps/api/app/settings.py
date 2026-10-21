@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     cu_timeout_seconds: int = Field(default=90, ge=1, le=180, alias="NORTHWIND_CU_TIMEOUT_SECONDS")
     cu_max_upload_bytes: int = Field(default=10485760, ge=1, le=10485760, alias="NORTHWIND_CU_MAX_UPLOAD_BYTES")
 
+    evidence_enabled: bool = Field(default=False, alias="NORTHWIND_EVIDENCE_ENABLED")
+    evidence_uploads_enabled: bool = Field(default=False, alias="NORTHWIND_EVIDENCE_UPLOADS_ENABLED")
+    evidence_extraction_enabled: bool = Field(default=False, alias="NORTHWIND_EVIDENCE_EXTRACTION_ENABLED")
+    evidence_worker_enabled: bool = Field(default=False, alias="NORTHWIND_EVIDENCE_WORKER_ENABLED")
+    evidence_worker_run_ids: str = Field(default="", alias="NORTHWIND_EVIDENCE_WORKER_RUN_IDS")
+    evidence_worker_lease_seconds: int = Field(default=60, ge=30, le=300, alias="NORTHWIND_EVIDENCE_WORKER_LEASE_SECONDS")
+    evidence_worker_batch_size: int = Field(default=5, ge=1, le=20, alias="NORTHWIND_EVIDENCE_WORKER_BATCH_SIZE")
+    evidence_worker_max_attempts: int = Field(default=3, ge=1, le=5, alias="NORTHWIND_EVIDENCE_WORKER_MAX_ATTEMPTS")
+
     voice_live_enabled: bool = Field(default=False, alias="VOICE_LIVE_ENABLED")
     voice_live_ready: bool = Field(default=False, alias="VOICE_LIVE_READY")
     voice_live_model: str = Field(default="", alias="VOICE_LIVE_MODEL")

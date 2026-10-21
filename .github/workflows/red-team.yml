@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/foundry-redteam
         with:
           target_agent: ${{ inputs.target_agent || 'northwind-orchestrator' }}
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/foundry-redteam
         with:
           target_agent: copilot-sdk

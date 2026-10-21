@@ -13,7 +13,7 @@ jobs:
   psrule:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Bicep CLI
         run: |
           curl -sLo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64

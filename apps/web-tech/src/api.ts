@@ -15,11 +15,16 @@ export function currentDepartmentSlug(): string {
  *  makes carries the active department. Existing routes ignore the
  *  header (Order Concierge default is preserved), but department-aware
  *  routes on the API pick it up. */
-export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {});
   if (!headers.has("X-Department")) headers.set("X-Department", currentDepartmentSlug());
+  if (tokenProvider && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${await tokenProvider()}`);
   return fetch(`${API_BASE}${path}`, { ...init, headers });
 }
+
+/** Set by the signed-in insurance portal so staff workspaces send the Entra access token. */
+let tokenProvider: (() => Promise<string>) | null = null;
+export function setApiTokenProvider(provider: (() => Promise<string>) | null) { tokenProvider = provider; }
 
 export interface StreamEvent {
   kind: string;
@@ -63,7 +68,7 @@ export async function* streamChat(sessionId: string | null, message: string): As
 }
 
 export async function* streamQA(question: string): AsyncGenerator<StreamEvent> {
-  const resp = await fetch(`${API_BASE}/qa`, {
+  const resp = await apiFetch(`/qa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
@@ -113,13 +118,13 @@ export async function* streamAgentChat(
 }
 
 export async function getHitl(): Promise<{ items: any[] }> {
-  const r = await fetch(`${API_BASE}/hitl`);
+  const r = await apiFetch(`/hitl`);
   if (!r.ok) throw new Error(`Approval queue failed (${r.status}).`);
   return r.json();
 }
 
 export async function decideHitl(hitl_id: string, workflow_id: string, decision: "approve" | "reject", note = "") {
-  const r = await fetch(`${API_BASE}/hitl/decide`, {
+  const r = await apiFetch(`/hitl/decide`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hitl_id, workflow_id, decision, note }),
@@ -130,20 +135,20 @@ export async function decideHitl(hitl_id: string, workflow_id: string, decision:
 }
 
 export async function getWorkOrders(): Promise<{ items: any[] }> {
-  const r = await fetch(`${API_BASE}/work-orders`);
+  const r = await apiFetch(`/work-orders`);
   if (!r.ok) throw new Error(`Reviewed drafts failed (${r.status}).`);
   return r.json();
 }
 
 export async function deleteWorkOrder(hitlId: string, workflowId: string): Promise<{ status: string }> {
-  const url = `${API_BASE}/work-orders/${encodeURIComponent(hitlId)}?workflow_id=${encodeURIComponent(workflowId)}`;
-  const r = await fetch(url, { method: "DELETE" });
+  const url = `/work-orders/${encodeURIComponent(hitlId)}?workflow_id=${encodeURIComponent(workflowId)}`;
+  const r = await apiFetch(url, { method: "DELETE" });
   if (!r.ok) throw new Error(`delete failed: ${r.status}`);
   return r.json();
 }
 
 export async function getBakeoffModels(): Promise<{ models: BakeoffModel[] }> {
-  const r = await fetch(`${API_BASE}/bakeoff/models`);
+  const r = await apiFetch(`/bakeoff/models`);
   if (!r.ok) throw new Error(`Model comparison configuration failed (${r.status}).`);
   return r.json();
 }
@@ -167,7 +172,7 @@ export interface BakeoffEvent {
 }
 
 export async function* streamBakeoff(message: string, system?: string): AsyncGenerator<BakeoffEvent> {
-  const resp = await fetch(`${API_BASE}/bakeoff/chat`, {
+  const resp = await apiFetch(`/bakeoff/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, system }),
@@ -206,12 +211,12 @@ export interface SafetyVerdict {
 }
 
 export async function getSafetyAttacks(): Promise<{ attacks: SafetyAttack[] }> {
-  const r = await fetch(`${API_BASE}/safety/attacks`);
+  const r = await apiFetch(`/safety/attacks`);
   return r.json();
 }
 
 export async function checkSafety(text: string): Promise<SafetyVerdict> {
-  const r = await fetch(`${API_BASE}/safety/check`, {
+  const r = await apiFetch(`/safety/check`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -241,12 +246,12 @@ export interface TraceReport {
 }
 
 export async function getBuild(): Promise<{ build: BuildInfo }> {
-  const r = await fetch(`${API_BASE}/build`);
+  const r = await apiFetch(`/build`);
   return r.json();
 }
 
 export async function getTrace(sessionId: string, minutes = 15): Promise<TraceReport> {
-  const r = await fetch(`${API_BASE}/traces/${encodeURIComponent(sessionId)}?minutes=${minutes}`);
+  const r = await apiFetch(`/traces/${encodeURIComponent(sessionId)}?minutes=${minutes}`);
   return r.json();
 }
 
