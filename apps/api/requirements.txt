@@ -17,7 +17,7 @@ azure-ai-projects>=2.3,<3
 # Foundry Agent Service + OpenAI
 openai>=2.46,<3
 github-copilot-sdk[telemetry]==1.0.14
-pyyaml>=6,<7
+pyyaml>=6.0.3,<7
 
 # Observability (transitively pulls compatible opentelemetry-api/sdk)
 azure-monitor-opentelemetry>=1.6
