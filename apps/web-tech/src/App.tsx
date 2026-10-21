@@ -8,14 +8,13 @@ import ClaimsInboxTab from "./tabs/ClaimsInboxTab";
 import ContactCenterTab from "./tabs/ContactCenterTab";
 import LandingPage from "./components/LandingPage";
 import { CostHUD } from "./components/TracePanel";
-import AgentHarnessTab from "./tabs/AgentHarnessTab";
 import InsuranceRecordsTab from "./tabs/InsuranceRecordsTab";
 import BakeoffTab from "./tabs/BakeoffTab";
 import SafetyTab from "./tabs/SafetyTab";
 import { InsuranceProvider } from "./InsuranceContext";
 
 const BusinessPortal = lazy(() => import("./business/BusinessPortal"));
-export const insuranceBusinessEnabled = (value: unknown) => value === "true";
+export const insuranceBusinessEnabled = (value: unknown) => value !== "false" && value !== false;
 
 /**
  * Every tab id maps to an enabled_tabs entry in company.yaml so the sidebar
@@ -47,11 +46,11 @@ const DEPT_TABS: Record<string, { id: TabId; label: string }> = {
 };
 
 interface ShellProps {
-  department: Department; onBack: () => void; onHarness: () => void;
+  department: Department; onBack: () => void;
   tabRequest: { id: TabId; version: number } | null;
 }
 
-function DepartmentShell({ department, onBack, onHarness, tabRequest }: ShellProps) {
+function DepartmentShell({ department, onBack, tabRequest }: ShellProps) {
   // Compute the sidebar tab list for this department. For Claims Concierge
   // we render the flagship FS_TABS. For anything else we translate its
   // enabled_tabs list through DEPT_TABS.
@@ -93,7 +92,6 @@ function DepartmentShell({ department, onBack, onHarness, tabRequest }: ShellPro
           </div>
         ))}
         <div className="sidebar-divider" />
-        <button className="tab" onClick={onHarness}>Agent Harness</button>
         <button className={`tab ${tab === "bakeoff" ? "active" : ""}`} onClick={() => setTab("bakeoff")}>Model bake-off</button>
         <button className={`tab ${tab === "safety" ? "active" : ""}`} onClick={() => setTab("safety")}>Safety</button>
       </div>
@@ -123,40 +121,23 @@ function DepartmentShell({ department, onBack, onHarness, tabRequest }: ShellPro
 
 function AppShell() {
   const { department, setDepartment, loading } = useCompany();
-  const [harness, setHarness] = useState(() => new URL(window.location.href).searchParams.get("section") === "agent-harness");
-  const [visitedHarness, setVisitedHarness] = useState(harness);
   const [tabRequest, setTabRequest] = useState<{ id: TabId; version: number } | null>(null);
-
-  function showHarness(show: boolean) {
-    setHarness(show);
-    if (show) setVisitedHarness(true);
-    const url = new URL(window.location.href);
-    if (show) url.searchParams.set("section", "agent-harness");
-    else url.searchParams.delete("section");
-    window.history.replaceState({}, "", url);
-  }
 
   if (loading) {
     return <div className="landing-empty">Loading Northwind Insurance…</div>;
   }
 
+  return department
+    ? <DepartmentShell key={department.slug} department={department} tabRequest={tabRequest}
+        onBack={() => { setDepartment(null); setTabRequest(null); }} />
+    : <LandingPage onPick={(d) => { setDepartment(d.slug); setTabRequest(null); }} />;
+}
+
+export function LegacyWorkspace() {
   return (
-    <>
-      <div style={{ display: harness ? "none" : "block" }}>
-        {department
-          ? <DepartmentShell key={department.slug} department={department} tabRequest={tabRequest}
-              onBack={() => { setDepartment(null); setTabRequest(null); }}
-              onHarness={() => showHarness(true)} />
-          : <LandingPage onPick={(d) => { setDepartment(d.slug); setTabRequest(null); }} onHarness={() => showHarness(true)} />}
-      </div>
-      {visitedHarness && <div style={{ display: harness ? "block" : "none" }}>
-        <AgentHarnessTab active={harness} onBack={() => showHarness(false)} onApprovals={() => {
-          setDepartment("order-concierge");
-          setTabRequest({ id: "hitl", version: Date.now() });
-          showHarness(false);
-        }} />
-      </div>}
-    </>
+    <CompanyProvider>
+      <InsuranceProvider><AppShell /></InsuranceProvider>
+    </CompanyProvider>
   );
 }
 
@@ -164,9 +145,5 @@ export default function App() {
   if (insuranceBusinessEnabled(import.meta.env.VITE_INSURANCE_BUSINESS_ENABLED)) {
     return <Suspense fallback={<div role="status">Loading Northwind Insurance…</div>}><BusinessPortal /></Suspense>;
   }
-  return (
-    <CompanyProvider>
-      <InsuranceProvider><AppShell /></InsuranceProvider>
-    </CompanyProvider>
-  );
+  return <LegacyWorkspace />;
 }

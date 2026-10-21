@@ -12,7 +12,6 @@ import { useCompany, Department } from "../CompanyContext";
 
 interface Props {
   onPick: (dept: Department) => void;
-  onHarness: () => void;
 }
 
 const PILLAR_LABEL: Record<string, string> = {
@@ -22,7 +21,7 @@ const PILLAR_LABEL: Record<string, string> = {
   voice_live: "Voice Live",
 };
 
-export default function LandingPage({ onPick, onHarness }: Props) {
+export default function LandingPage({ onPick }: Props) {
   const { company, loading, error } = useCompany();
 
   if (loading) return <div className="landing-empty">Loading Northwind Insurance…</div>;
@@ -59,12 +58,6 @@ export default function LandingPage({ onPick, onHarness }: Props) {
         ))}
       </div>
 
-      <div className="landing-platform">
-        <button className="harness-entry" onClick={onHarness}>
-          <strong>Agent Harness</strong>
-          <span>GitHub Copilot SDK + Azure Foundry · Live orchestration, tools, and human approvals</span>
-        </button>
-      </div>
       <div className="landing-footer">
         <span>Fictional insurer and synthetic records. Human review is required; no claim adjudication or payments are executed.</span>
         <span>Every department is its own Foundry project inside a shared AI Services account.</span>
