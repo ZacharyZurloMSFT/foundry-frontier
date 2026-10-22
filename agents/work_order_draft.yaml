@@ -48,8 +48,10 @@ tools:
     server_url: ${MCP_WORK_ORDER_URL}
     # `never` keeps the orchestrator's multi-agent flow unblocked. The
     # *real* HITL is the Cosmos `hitl_queue` write done inside the MCP
-    # tool (see apps/mcp-work-order/app/main.py) — pending drafts appear
-    # in the web-tech "Approvals" tab and via GET /hitl on the api.
+    # tool (see apps/mcp-work-order/app/main.py). The approvals screen and
+    # /hitl API that used to list these pending drafts were removed with the
+    # legacy department shell, so nothing in this repository approves or
+    # rejects them yet.
     #
     # For a portal-only demo where you want Foundry itself to pause and
     # render an approve/deny prompt in the trace panel *before* the tool

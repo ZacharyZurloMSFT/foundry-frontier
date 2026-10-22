@@ -8,7 +8,6 @@ brand_color: "#0b6bcb"
 foundry_project: northwind-orders
 search_index: northwind-insurance-knowledge
 cu_inbox_prefix: order-concierge
-enabled_tabs: [insurance_records, agent_chat, work_orders, hitl]
 customer_archetype: "Claims leaders, adjusters, policyholder servicing teams."
 
 # The flagship reuses the pre-existing top-level assets so `azd up` keeps
@@ -32,7 +31,3 @@ agents:
     - name: northwind-resolution-draft
       path: ../../../../agents/resolutiondraft
   prompt: []
-
-# Order Concierge owns the platform-wide bake-off + safety demos. This is a
-# demo-only decision; a future rev may spin a dedicated `nw-platform` project.
-hosts_platform_tabs: [bakeoff, safety]

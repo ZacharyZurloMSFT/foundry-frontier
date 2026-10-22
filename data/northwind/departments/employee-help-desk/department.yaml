@@ -8,7 +8,6 @@ brand_color: "#2e7d32"
 foundry_project: nw-employee-help-desk
 search_index: nw-hr
 cu_inbox_prefix: employee-help-desk
-enabled_tabs: [hr_chat]
 customer_archetype: "HR ops, IT service desk, adjuster enablement teams."
 
 seed_dir: seed

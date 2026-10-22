@@ -8,7 +8,6 @@ brand_color: "#ef6c00"
 foundry_project: nw-claims-warranty
 search_index: nw-claims
 cu_inbox_prefix: claims-warranty
-enabled_tabs: [claims_inbox]
 customer_archetype: "Claims processing, compliance, intake operations."
 
 seed_dir: seed

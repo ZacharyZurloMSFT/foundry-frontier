@@ -8,7 +8,6 @@ brand_color: "#6a1b9a"
 foundry_project: nw-contact-center
 search_index: nw-contact-center
 cu_inbox_prefix: contact-center
-enabled_tabs: [voice_console]
 customer_archetype: "Contact center director, CX / call intake leader."
 
 seed_dir: seed
@@ -23,13 +22,6 @@ agents:
   voice_live:
     system_prompt_path: prompts/voice-live-system.md
     greeting_path: prompts/greeting.md
-
-# Cross-project: on button press the console posts the running call summary
-# to POST /handoff on the API, which starts a northwind-orchestrator run
-# inside the Order Concierge project.
-handoff_target:
-  department: order-concierge
-  agent: northwind-orchestrator
 
 corpus_theme: |
   Fictional insurer call scripts, first notice of loss, claim status,

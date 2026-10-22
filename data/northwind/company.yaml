@@ -4,7 +4,6 @@
 # Each department listed here becomes:
 #   - a Foundry project inside the shared AI Services account
 #     (see infra/modules/foundry.bicep once the multi-project change lands)
-#   - a landing-page tile in the web-tech app
 #   - an AI Search index (nw-<slug>)
 #   - a Cosmos partition (department = <slug>)
 #   - a `cu-inbox/<slug>/` blob prefix
@@ -30,20 +29,7 @@ company:
     Four departments share Azure AI Foundry capabilities: grounded retrieval,
     document intelligence, Voice Live, orchestration, safety and observability.
 
-# Cross-cutting Foundry capabilities that live in the platform header nav
-# regardless of which department the SE is demoing.
-platform_tabs:
-  - id: agent_harness
-    label: "Agent Harness"
-    hosted_in_project: northwind-orders
-  - id: bakeoff
-    label: "🏁 Model bake-off"
-    hosted_in_project: northwind-orders
-  - id: safety
-    label: "🛡 Try to jailbreak"
-    hosted_in_project: northwind-orders
-
-# Departments — order here is the order of tiles on the landing page.
+# Departments. The order here is the order the bootstrap scripts process them.
 departments:
   - slug: order-concierge
     name: "Claims Concierge"
@@ -54,7 +40,6 @@ departments:
     foundry_project: northwind-orders
     search_index: northwind-insurance-knowledge
     cu_inbox_prefix: order-concierge
-    enabled_tabs: [insurance_records, agent_chat, work_orders, hitl]
     # Order Concierge is the flagship — it reuses the existing top-level dirs
     # until the physical move happens in a later phase.
     seed_dir: data/seed
@@ -72,7 +57,6 @@ departments:
     foundry_project: nw-employee-help-desk
     search_index: nw-hr
     cu_inbox_prefix: employee-help-desk
-    enabled_tabs: [hr_chat]
     seed_dir: data/northwind/departments/employee-help-desk/seed
     golden_path: data/northwind/departments/employee-help-desk/golden/dataset.jsonl
     prompts_dir: data/northwind/departments/employee-help-desk/prompts
@@ -88,7 +72,6 @@ departments:
     foundry_project: nw-claims-warranty
     search_index: nw-claims
     cu_inbox_prefix: claims-warranty
-    enabled_tabs: [claims_inbox]
     seed_dir: data/northwind/departments/claims-warranty/seed
     golden_path: data/northwind/departments/claims-warranty/golden/dataset.jsonl
     prompts_dir: data/northwind/departments/claims-warranty/prompts
@@ -104,7 +87,6 @@ departments:
     foundry_project: nw-contact-center
     search_index: nw-contact-center
     cu_inbox_prefix: contact-center
-    enabled_tabs: [voice_console]
     seed_dir: data/northwind/departments/contact-center/seed
     golden_path: data/northwind/departments/contact-center/golden/dataset.jsonl
     prompts_dir: data/northwind/departments/contact-center/prompts

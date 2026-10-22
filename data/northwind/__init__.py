@@ -32,13 +32,6 @@ _MANIFEST = Path(__file__).resolve().parent / "company.yaml"
 
 
 @dataclass(frozen=True)
-class PlatformTab:
-    id: str
-    label: str
-    hosted_in_project: str
-
-
-@dataclass(frozen=True)
 class Department:
     slug: str
     name: str
@@ -49,7 +42,6 @@ class Department:
     foundry_project: str
     search_index: str
     cu_inbox_prefix: str
-    enabled_tabs: tuple[str, ...]
     seed_dir: Path
     golden_path: Path
     prompts_dir: Path
@@ -64,7 +56,6 @@ class Company:
     tagline: str
     brand_color: str
     hero: str
-    platform_tabs: tuple[PlatformTab, ...]
     departments: tuple[Department, ...]
 
     def department(self, slug: str) -> Department:
@@ -92,7 +83,6 @@ def _department(raw: dict[str, Any]) -> Department:
         foundry_project=raw["foundry_project"],
         search_index=raw["search_index"],
         cu_inbox_prefix=raw.get("cu_inbox_prefix", raw["slug"]),
-        enabled_tabs=tuple(raw.get("enabled_tabs", [])),
         seed_dir=_abs(raw["seed_dir"]),  # type: ignore[arg-type]
         golden_path=_abs(raw["golden_path"]),  # type: ignore[arg-type]
         prompts_dir=_abs(raw["prompts_dir"]),  # type: ignore[arg-type]
@@ -108,7 +98,6 @@ def load_company(path: Path | None = None) -> Company:
         raw = yaml.safe_load(fh)
 
     company_raw = raw["company"]
-    tabs = tuple(PlatformTab(**t) for t in raw.get("platform_tabs", []))
     departments = tuple(_department(d) for d in raw["departments"])
     return Company(
         slug=company_raw["slug"],
@@ -116,7 +105,6 @@ def load_company(path: Path | None = None) -> Company:
         tagline=company_raw["tagline"],
         brand_color=company_raw.get("brand_color", ""),
         hero=company_raw.get("hero", ""),
-        platform_tabs=tabs,
         departments=departments,
     )
 
@@ -132,7 +120,6 @@ def list_departments() -> list[str]:
 __all__ = [
     "Company",
     "Department",
-    "PlatformTab",
     "load_company",
     "load_department",
     "list_departments",

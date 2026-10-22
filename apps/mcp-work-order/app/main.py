@@ -17,10 +17,11 @@ Draft MCP; keep the legacy infra name.
 
 Human-in-the-loop: this tool writes each draft to the Cosmos `hitl_queue`
 container (partition key /workflowId) with status='pending' and
-kind='resolution'. The web-tech Approvals tab (or any consumer of the
-/hitl API in apps/api) picks it up from there and posts approve/reject to
-/hitl/decide. Foundry sees a successful tool call returning the queue
-item; the actual approval loop lives outside the agent runtime.
+kind='resolution'. Foundry sees a successful tool call returning the queue
+item; the actual approval loop lives outside the agent runtime. The approvals
+screen and /hitl API in apps/api that used to approve or reject these items
+were removed with the legacy department shell, so pending items stay pending
+until a new reviewer surface is built.
 
 No auth on the MCP endpoint itself — it's a public demo. Cosmos writes go
 through the shared UAMI (`AZURE_CLIENT_ID`) which has the Cosmos DB
@@ -120,8 +121,7 @@ async def propose_resolution(workflow_id: str, draft: dict[str, Any], ctx: Conte
 
     Returns:
         JSON-encoded `{ status, hitl_id, workflow_id, draft }` payload. The
-        hitl_id is the Cosmos document id — approve/reject at
-        POST /hitl/decide on the api service.
+        hitl_id is the Cosmos document id of the pending queue item.
     """
     request = ctx.request_context.request
     bound_workflow = request.headers.get("x-harness-workflow") if request is not None else None

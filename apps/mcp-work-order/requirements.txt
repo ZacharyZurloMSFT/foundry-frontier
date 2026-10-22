@@ -1,7 +1,6 @@
 # Tiny MCP server: exposes propose_work_order to the Northwind prompt agent.
 # FastAPI mounts the streamable-HTTP MCP transport that Foundry connects to.
-# Writes drafts to the Cosmos hitl_queue container so the web-tech Approvals
-# tab (and any /hitl API consumer) can approve/reject.
+# Writes drafts to the Cosmos hitl_queue container as pending items for human review.
 fastapi>=0.115,<1
 uvicorn[standard]>=0.32,<1
 mcp>=1.9,<2

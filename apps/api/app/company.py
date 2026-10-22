@@ -90,10 +90,6 @@ def get_company_dict() -> dict[str, Any]:
             "tagline": c.tagline,
             "brand_color": c.brand_color,
             "hero": c.hero,
-            "platform_tabs": [
-                {"id": t.id, "label": t.label, "hosted_in_project": t.hosted_in_project}
-                for t in c.platform_tabs
-            ],
             "departments": [
                 {
                     "slug": d.slug, "name": d.name, "tagline": d.tagline,
@@ -101,7 +97,6 @@ def get_company_dict() -> dict[str, Any]:
                     "brand_color": d.brand_color,
                     "foundry_project": d.foundry_project,
                     "search_index": d.search_index,
-                    "enabled_tabs": list(d.enabled_tabs),
                     "customer_archetype": d.customer_archetype,
                 }
                 for d in c.departments
@@ -116,11 +111,6 @@ def get_company_dict() -> dict[str, Any]:
         "tagline": company["tagline"],
         "brand_color": company.get("brand_color", ""),
         "hero": company.get("hero", ""),
-        "platform_tabs": [
-            {"id": t["id"], "label": t["label"],
-             "hosted_in_project": t["hosted_in_project"]}
-            for t in raw.get("platform_tabs", [])
-        ],
         "departments": [
             {
                 "slug": d["slug"], "name": d["name"], "tagline": d["tagline"],
@@ -128,7 +118,6 @@ def get_company_dict() -> dict[str, Any]:
                 "brand_color": d.get("brand_color", ""),
                 "foundry_project": d["foundry_project"],
                 "search_index": d["search_index"],
-                "enabled_tabs": list(d.get("enabled_tabs", [])),
                 "customer_archetype": d.get("customer_archetype", ""),
             }
             for d in raw["departments"]
