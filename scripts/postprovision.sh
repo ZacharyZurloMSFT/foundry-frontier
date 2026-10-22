@@ -52,7 +52,6 @@ if [ -x "$ROOT/.venv/bin/python" ]; then PY="$ROOT/.venv/bin/python"; else PY="p
 "$PY" "$ROOT/data/seed/generate.py"
 "$PY" "$ROOT/data/seed/upload_blobs.py"
 "$PY" "$ROOT/scripts/create-vector-indexer.py"
-"$PY" "$ROOT/data/seed/seed_cosmos.py"
 "$PY" "$ROOT/scripts/create-department-indexes.py"
 "$PY" "$ROOT/scripts/create-knowledge-base.py"
 "$PY" "$ROOT/scripts/connect-knowledge-base.py"

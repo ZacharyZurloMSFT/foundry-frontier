@@ -40,25 +40,9 @@ class Settings(BaseSettings):
     # Foundry
     foundry_endpoint: str = Field(default="", alias="FOUNDRY_ENDPOINT")
     foundry_project_endpoint: str = Field(default="", alias="FOUNDRY_PROJECT_ENDPOINT")
-    order_project_name: str = Field(default="northwind-orders", alias="ORDER_PROJECT_NAME")
-    order_agents_hosted: bool = Field(default=False, alias="ORDER_AGENTS_HOSTED")
     business_domain: Literal["retail", "insurance"] = Field(default="retail", alias="NORTHWIND_BUSINESS_DOMAIN")
-    insurance_agents_ready: bool = Field(default=False, alias="NORTHWIND_INSURANCE_AGENTS_READY")
-    insurance_orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID")
     planner_deployment: str = Field(default="gpt-5.4", alias="FOUNDRY_PLANNER_DEPLOYMENT")
     worker_deployment: str = Field(default="gpt-5.4-mini", alias="FOUNDRY_WORKER_DEPLOYMENT")
-    # Hosted orchestrator agent id. In Foundry the id equals the agent name;
-    # set this to override the default of "northwind-orchestrator".
-    orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_ORCHESTRATOR_AGENT_ID")
-    # Prompt agent for policy/KB lookup ("Policy Lookup" tab / policy_lookup).
-    # Env var is legacy — the agent is northwind-policy-lookup.
-    manual_agent_id: str = Field(default="northwind-policy-lookup", alias="FOUNDRY_MANUAL_AGENT_ID")
-    # Prompt agent that looks up customer + order + shipment ("Order Lookup"
-    # tab). Env var is legacy — the agent is northwind-order-lookup.
-    tech_agent_id: str = Field(default="northwind-order-lookup", alias="FOUNDRY_TECH_AGENT_ID")
-    # Prompt agent that drafts structured customer resolutions ("Resolution
-    # Draft" tab). Env var is legacy — the agent is northwind-resolution-draft.
-    work_order_agent_id: str = Field(default="northwind-resolution-draft", alias="FOUNDRY_WORK_ORDER_AGENT_ID")
 
     # Search
     search_endpoint: str = Field(default="", alias="AZURE_SEARCH_ENDPOINT")
@@ -81,14 +65,6 @@ class Settings(BaseSettings):
     storage_key: str = Field(default="", alias="STORAGE_KEY")
     storage_connection_string: str = Field(default="", alias="STORAGE_CONNECTION_STRING")
     azure_search_key: str = Field(default="", alias="AZURE_SEARCH_KEY")
-
-    adjuster_support_enabled: bool = Field(default=False, alias="ADJUSTER_SUPPORT_ENABLED")
-    adjuster_support_index: str = Field(default="nw-insurance-adjuster-support", alias="ADJUSTER_SUPPORT_INDEX")
-    adjuster_support_search_endpoint: str = Field(default="", alias="ADJUSTER_SUPPORT_SEARCH_ENDPOINT")
-    adjuster_support_search_auth: Literal["entra_id", "query_key"] = Field(default="entra_id", alias="ADJUSTER_SUPPORT_SEARCH_AUTH")
-    adjuster_support_query_key: SecretStr = Field(default=SecretStr(""), alias="ADJUSTER_SUPPORT_SEARCH_QUERY_KEY")
-    adjuster_support_timeout: int = Field(default=60, ge=1, le=180, alias="ADJUSTER_SUPPORT_TIMEOUT_SECONDS")
-    adjuster_support_concurrency: int = Field(default=4, ge=1, le=16, alias="ADJUSTER_SUPPORT_MAX_CONCURRENT_REQUESTS")
 
     # Identity-bound assistants embedded in the connected portal. Disabled by default; a surface
     # must be listed explicitly (comma-separated) before it can be reached.
@@ -126,26 +102,7 @@ class Settings(BaseSettings):
     evidence_worker_batch_size: int = Field(default=5, ge=1, le=20, alias="NORTHWIND_EVIDENCE_WORKER_BATCH_SIZE")
     evidence_worker_max_attempts: int = Field(default=3, ge=1, le=5, alias="NORTHWIND_EVIDENCE_WORKER_MAX_ATTEMPTS")
 
-    voice_live_enabled: bool = Field(default=False, alias="VOICE_LIVE_ENABLED")
-    voice_live_ready: bool = Field(default=False, alias="VOICE_LIVE_READY")
-    voice_live_model: str = Field(default="", alias="VOICE_LIVE_MODEL")
-    voice_live_api_version: str = Field(default="", alias="VOICE_LIVE_API_VERSION")
-    voice_live_transcription_enabled: bool = Field(default=True, alias="VOICE_LIVE_TRANSCRIPTION_ENABLED")
-    voice_live_allowed_origins: str = Field(
-        default="https://ca-web-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,http://localhost:5173,http://localhost:5174",
-        alias="VOICE_LIVE_ALLOWED_ORIGINS",
-    )
-
     port: int = Field(default=8000, alias="PORT")
-
-    harness_enabled: bool = Field(default=False, alias="COPILOT_HARNESS_ENABLED")
-    harness_model: str = Field(default="", alias="COPILOT_HARNESS_MODEL")
-    harness_prompt_path: str = Field(default="", alias="COPILOT_HARNESS_PROMPT_PATH")
-    harness_runtime_dir: str = Field(default="", alias="COPILOT_HARNESS_RUNTIME_DIR")
-    harness_resolution_mcp: str = Field(default="", alias="MCP_WORK_ORDER_URL")
-    harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
-    harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")
-    harness_concurrency: int = Field(default=2, ge=1, le=8, alias="COPILOT_HARNESS_MAX_CONCURRENT_RUNS")
 
 
 @lru_cache

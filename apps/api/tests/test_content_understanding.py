@@ -1,14 +1,13 @@
 import base64
 import copy
 import json
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException
 
 from app import content_understanding as cu
 
@@ -312,74 +311,25 @@ def test_container_missing_pdf_and_nonexistent_repository_never_fabricate_bytes(
 
 
 @pytest.mark.asyncio
-async def test_container_extract_route_analyzes_actual_bundle_without_ancestor_index_error(container_sources):
+async def test_container_sample_bytes_are_analyzed_without_ancestor_index_error(container_sources):
     files, _ = container_sources
     cloud = Cloud(("Succeeded",))
+    row, source = cu.sample_bytes("nw-fnol-demo-2001.pdf")
     async with httpx.AsyncClient(transport=httpx.MockTransport(cloud.handle)) as upstream:
-        app = FastAPI()
-        app.include_router(cu.router)
-        app.dependency_overrides[cu.get_cu_service] = lambda: cu.CUService(CONFIG, upstream)
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.post("/claims/extract", json={"filename": "nw-fnol-demo-2001.pdf"})
-    assert response.status_code == 200
-    assert response.json()["extraction_mode"] == "live_cu"
+        result = await cu.CUService(CONFIG, upstream).analyze(source, "nw-fnol-demo-2001.pdf", row["media_type"], synthetic=True)
+    assert result["extraction_mode"] == "live_cu"
     post = next(request for request in cloud.requests if request.method == "POST")
     assert base64.b64decode(json.loads(post.content)["inputs"][0]["data"]) == files["/app/app/_northwind/claims-documents/nw-fnol-demo-2001.pdf"].read_bytes()
 
 
 @pytest.mark.asyncio
-async def test_default_off_samples_are_metadata_only_and_explicitly_unavailable(monkeypatch):
-    @asynccontextmanager
-    async def disabled():
-        raise cu.fail(503, "cu_disabled", "Live insurance CU is disabled.")
-        yield
-    monkeypatch.setattr(cu, "cu_service", disabled)
-    app = FastAPI()
-    app.include_router(cu.router)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-        response = await client.get("/claims/samples")
-    assert response.status_code == 200
-    assert response.json()["availability"]["available"] is False
-    assert all("extraction" not in row for row in response.json()["items"])
-
-
-@pytest.mark.asyncio
-async def test_raw_binary_upload_contract_and_stream_limit():
+async def test_service_analyzes_actual_packaged_sample_bytes():
     cloud = Cloud(("Succeeded",))
+    row, source = cu.sample_bytes("nw-fnol-demo-2001.pdf")
+    assert source.startswith(b"%PDF-")
     async with httpx.AsyncClient(transport=httpx.MockTransport(cloud.handle)) as upstream:
-        service = cu.CUService(replace(CONFIG, max_upload_bytes=64), upstream)
-        app = FastAPI()
-        app.include_router(cu.router)
-        app.dependency_overrides[cu.get_cu_service] = lambda: service
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.post("/claims/upload?filename=source.pdf", content=PDF, headers={"Content-Type": "application/pdf"})
-            assert response.status_code == 200 and response.json()["extraction"] == FIELDS
-            bad = await client.post("/claims/upload?filename=source.pdf", json={"url": "https://evil.example/file.pdf"})
-            assert bad.status_code == 415
-            async def chunks():
-                yield b"%PDF-" + b"x" * 32
-                yield b"x" * 32
-            oversized = await client.post("/claims/upload?filename=source.pdf", content=chunks(), headers={"Content-Type": "application/pdf"})
-            assert oversized.status_code == 413
-            deleted = await client.delete("/claims/results/live-op-19")
-            assert deleted.json()["compute_cancelled"] is False
-
-
-@pytest.mark.asyncio
-async def test_sample_route_analyzes_actual_packaged_bytes():
-    cloud = Cloud(("Succeeded",))
-    async with httpx.AsyncClient(transport=httpx.MockTransport(cloud.handle)) as upstream:
-        app = FastAPI()
-        app.include_router(cu.router)
-        app.dependency_overrides[cu.get_cu_service] = lambda: cu.CUService(CONFIG, upstream)
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
-            response = await client.post("/claims/extract", json={"filename": "nw-fnol-demo-2001.pdf"})
-            assert response.status_code == 200
-            assert response.json()["extraction"] == FIELDS
-            assert response.json()["source_mode"] == "synthetic_document"
-            source = await client.get("/claims/samples/nw-fnol-demo-2001.pdf/content")
-            assert source.content.startswith(b"%PDF-")
-            bad = await client.post("/claims/extract", json={"filename": "nw-fnol-demo-2001.pdf", "expected_extraction": {"claim_id": "CLM-2001"}})
-            assert bad.status_code == 422
+        result = await cu.CUService(CONFIG, upstream).analyze(source, "nw-fnol-demo-2001.pdf", row["media_type"], synthetic=True)
+    assert result["extraction"] == FIELDS
+    assert result["source_mode"] == "synthetic_document"
     post = next(r for r in cloud.requests if r.method == "POST")
-    assert base64.b64decode(json.loads(post.content)["inputs"][0]["data"]) == source.content
+    assert base64.b64decode(json.loads(post.content)["inputs"][0]["data"]) == source

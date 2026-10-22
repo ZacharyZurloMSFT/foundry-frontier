@@ -34,14 +34,14 @@ def changed_services(paths: list[str]) -> list[str]:
     selected = set()
     for path in paths:
         path = path.replace("\\", "/")
-        if path.startswith((".github/workflows/", "scripts/", "agents/copilot-harness/")):
+        if path.startswith((".github/workflows/", "scripts/")):
             return list(SERVICES)
         if path in ("azure.yaml", ".dockerignore"):
             return list(SERVICES)
         if path.startswith(("data/northwind/", "data/seed/generated/")):
             selected.update(("api", "mcp-tech-lookup", "mcp-work-order"))
         if path.startswith("agents/insurance/assistants/"):
-            selected.add("api")  # packaged into the API image by scripts/bundle-harness-assets.py
+            selected.add("api")  # packaged into the API image by scripts/bundle-assistant-assets.py
         if path == "apps/api/app/insurance_domain.py":
             selected.update(("mcp-tech-lookup", "mcp-work-order"))
         for service in SERVICES:

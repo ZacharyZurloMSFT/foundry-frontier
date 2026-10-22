@@ -51,9 +51,6 @@ try {
   # Bicep outputs. Dot-sourcing load-azd-env.ps1 fills that gap.
   . "$root/scripts/load-azd-env.ps1"
 
-  # Seed Cosmos immediately while the temporary public-access window is open.
-  & $py "$root/data/seed/seed_cosmos.py"
-
   & $py "$root/data/seed/generate.py"
   & $py "$root/data/seed/upload_blobs.py"
   & $py "$root/scripts/create-vector-indexer.py"

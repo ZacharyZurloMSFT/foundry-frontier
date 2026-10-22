@@ -187,7 +187,7 @@ jobs:
                 python data/seed/generate.py --domain insurance
                 python -c 'import shutil; dest = "apps/api/app/_northwind"; shutil.rmtree(dest, ignore_errors=True); shutil.copytree("data/northwind", dest)'
                 python scripts/bundle-insurance-assets.py --service api
-                python scripts/bundle-harness-assets.py
+                python scripts/bundle-assistant-assets.py
                 ;;
               mcp-*)
                 python scripts/bundle-insurance-assets.py --service "$service"

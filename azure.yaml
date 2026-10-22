@@ -25,7 +25,7 @@ services:
                         Copy-Item -Recurse -Force ../../data/northwind/* $dest/
                         python ../../scripts/bundle-insurance-assets.py --service api
                         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                        python ../../scripts/bundle-harness-assets.py
+                        python ../../scripts/bundle-assistant-assets.py
                         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 posix:
                     shell: sh
@@ -36,7 +36,7 @@ services:
                         mkdir -p "$dest"
                         cp -R ../../data/northwind/. "$dest/"
                         python ../../scripts/bundle-insurance-assets.py --service api
-                        python ../../scripts/bundle-harness-assets.py
+                        python ../../scripts/bundle-assistant-assets.py
     mcp-tech-lookup:
         project: ./apps/mcp-tech-lookup
         host: containerapp

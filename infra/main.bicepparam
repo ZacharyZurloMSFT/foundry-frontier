@@ -56,4 +56,3 @@ param existingSettings = {
   FOUNDRY_ORCHESTRATOR_AGENT_ID: readEnvironmentVariable('FOUNDRY_ORCHESTRATOR_AGENT_ID', '')
 }
 param principalId = readEnvironmentVariable('AZURE_PRINCIPAL_ID', '')
-param harnessEnabled = readEnvironmentVariable('COPILOT_HARNESS_ENABLED', 'false')

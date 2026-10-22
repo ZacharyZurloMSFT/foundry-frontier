@@ -16,9 +16,9 @@ from opentelemetry import trace
 
 from ..business.models import BusinessError
 from ..company import resolve_department
-from ..harness.diagnostics import log_failure
+from ..diagnostics import log_failure
+from ..foundry_client import _extract_output_text, _project_client
 from ..observability import get_tracer, set_request_department
-from ..orchestrator_client import _extract_output_text, _project_client
 from ..settings import get_settings
 from .grounding import Grounding
 from .guards import GuardFailure, parse_answer, vet_answer

@@ -37,7 +37,7 @@ resource ai 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
   }
 }
 
-@description('Optional extra Azure-direct model deployments to enable the "Model bake-off" tab. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }.')
+@description('Optional extra Azure-direct model deployments. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }. The Model bake-off screen that raced them was removed.')
 param bakeoffDeployments array = []
 
 resource plannerDep 'Microsoft.CognitiveServices/accounts/deployments@2025-04-01-preview' = {

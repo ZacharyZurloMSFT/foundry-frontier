@@ -13,7 +13,7 @@ param foundryEndpoint string
 param foundryProjectEndpoint string
 param orderProjectName string = 'northwind-orders'
 param orderAgentsHosted bool = false
-@description('JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. Order Concierge default = foundryProjectEndpoint.')
+@description('JSON string mapping department slug -> Foundry project endpoint, passed through as FOUNDRY_PROJECT_ENDPOINTS for the post-provision scripts. The API no longer parses it. Order Concierge default = foundryProjectEndpoint.')
 param foundryProjectEndpoints string = ''
 param plannerDeployment string
 param workerDeployment string
@@ -26,9 +26,8 @@ param searchKnowledgeSource string
 param cosmosEndpoint string
 param cosmosDatabaseName string
 param storageAccountName string
-@description('Comma-separated list of Azure-direct model deployments to expose to the /bakeoff endpoint on the API container.')
+@description('Comma-separated list of the Azure-direct model deployments, passed through as FOUNDRY_BAKEOFF_DEPLOYMENTS. The API no longer reads it; the bake-off endpoint was removed.')
 param bakeoffDeployments string = ''
-param harnessEnabled bool = false
 param enableCuIngest bool = false
 @allowed(['retail', 'insurance'])
 param businessDomain string = 'retail'
@@ -130,7 +129,6 @@ resource api 'Microsoft.App/containerApps@2024-10-02-preview' = {
           image: placeholder
           env: union(commonEnv, [
             { name: 'PORT', value: '8000' }
-            { name: 'COPILOT_HARNESS_ENABLED', value: string(harnessEnabled) }
             { name: 'NORTHWIND_BUSINESS_API_ENABLED', value: string(businessApiEnabled) }
             { name: 'INSURANCE_AUTH_TENANT_ID', value: insuranceAuthTenantId }
             { name: 'INSURANCE_AUTH_AUDIENCE', value: insuranceAuthAudience }

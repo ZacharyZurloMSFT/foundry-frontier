@@ -83,12 +83,8 @@ param embeddingModelName string = 'text-embedding-3-small'
 param embeddingModelVersion string = '1'
 param embeddingModelCapacity int = 120
 
-@description('Optional: extra Azure-direct model deployments for the "Model bake-off" tab. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. See docs/departments.md for the `azd env set BAKEOFFDEPLOYMENTS` override pattern. Bake-off with an empty array still works — it races the always-deployed planner + worker.')
+@description('Optional: extra Azure-direct model deployments. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. The Model bake-off screen that raced them was removed, so nothing in this repository reads them now.')
 param bakeoffDeployments array = []
-
-@description('Enable the bounded Copilot SDK synthetic-demo harness. Existing workflows are unaffected when disabled.')
-@allowed(['true', 'false'])
-param harnessEnabled string = 'false'
 
 @description('Additional Foundry projects — one per Northwind department beyond Order Concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`.')
 param additionalProjects array = [
@@ -326,7 +322,6 @@ module containerapps 'modules/containerapps.bicep' = if (!reuseExisting) {
     cosmosDatabaseName: reuseExisting ? '' : cosmos!.outputs.databaseName
     storageAccountName: reuseExisting ? '' : storage!.outputs.name
     bakeoffDeployments: reuseExisting ? '' : join(concat([foundry!.outputs.plannerDeploymentName, foundry!.outputs.workerDeploymentName], foundry!.outputs.bakeoffDeploymentNames), ',')
-    harnessEnabled: harnessEnabled == 'true'
     enableCuIngest: enableCuIngest == 'true'
     businessDomain: businessDomain
     insuranceAgentsReady: insuranceAgentsReady == 'true'
@@ -396,11 +391,11 @@ output ORDERS_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.O
 output AZURE_AI_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
 output AZURE_AI_PROJECT_ID string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_PROJECT_ID : foundry!.outputs.projectId
 
-// department-slug -> Foundry project endpoint map (JSON string). The API
-// reads FOUNDRY_PROJECT_ENDPOINTS at startup, parses it, and picks the
-// right endpoint per request based on the X-Department header. The
-// Order Concierge entry is always the flagship Orders project so
-// existing X-Department-less callers keep working.
+// department-slug -> Foundry project endpoint map (JSON string), emitted as
+// FOUNDRY_PROJECT_ENDPOINTS. The post-provision scripts (create-prompt-agents.py,
+// connect-knowledge-base.py) read it to place each department's agents; the API
+// no longer parses it. The Order Concierge entry is always the flagship Orders
+// project.
 //
 // Bicep's `string(union(...))` emits a Bicep-object representation, not
 // real JSON — the API's json.loads() rejects it. We hand-format the JSON
@@ -429,9 +424,9 @@ output FOUNDRY_ORCHESTRATOR_AGENT_ID string = reuseExisting ? reuse!.outputs.set
 // Foundry hosting expects this exact env-var name for the manager model.
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_MODEL_DEPLOYMENT_NAME : foundry!.outputs.plannerDeploymentName
 
-// Comma-joined list consumed by the API's bake-off endpoint
-// (FOUNDRY_BAKEOFF_DEPLOYMENTS). Includes the flagship planner + worker so
-// users always get a 3-way race even with an empty bakeoffDeployments param.
+// Comma-joined list of the Azure-direct model deployments (FOUNDRY_BAKEOFF_DEPLOYMENTS).
+// Includes the flagship planner + worker. The API endpoint that raced them was
+// removed; the output is kept for operators and the reuse profile.
 output FOUNDRY_BAKEOFF_DEPLOYMENTS string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_BAKEOFF_DEPLOYMENTS : join(
   concat(
     [foundry!.outputs.plannerDeploymentName, foundry!.outputs.workerDeploymentName],

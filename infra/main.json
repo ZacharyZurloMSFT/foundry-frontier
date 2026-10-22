@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8250591669852218361"
+      "templateHash": "9358397230239025667"
     }
   },
   "parameters": {
@@ -267,18 +267,7 @@
       "type": "array",
       "defaultValue": [],
       "metadata": {
-        "description": "Optional: extra Azure-direct model deployments for the \"Model bake-off\" tab. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. See docs/departments.md for the `azd env set BAKEOFFDEPLOYMENTS` override pattern. Bake-off with an empty array still works — it races the always-deployed planner + worker."
-      }
-    },
-    "harnessEnabled": {
-      "type": "string",
-      "defaultValue": "false",
-      "allowedValues": [
-        "true",
-        "false"
-      ],
-      "metadata": {
-        "description": "Enable the bounded Copilot SDK synthetic-demo harness. Existing workflows are unaffected when disabled."
+        "description": "Optional: extra Azure-direct model deployments. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. The Model bake-off screen that raced them was removed, so nothing in this repository reads them now."
       }
     },
     "additionalProjects": {
@@ -1537,7 +1526,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2824013190717055068"
+              "templateHash": "7510226565634896241"
             }
           },
           "parameters": {
@@ -1607,7 +1596,7 @@
               "type": "array",
               "defaultValue": [],
               "metadata": {
-                "description": "Optional extra Azure-direct model deployments to enable the \"Model bake-off\" tab. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }."
+                "description": "Optional extra Azure-direct model deployments. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }. The Model bake-off screen that raced them was removed."
               }
             },
             "additionalProjects": {
@@ -2169,9 +2158,6 @@
           "cosmosDatabaseName": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value))]",
           "storageAccountName": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.name.value))]",
           "bakeoffDeployments": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', join(concat(createArray(reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.plannerDeploymentName.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.workerDeploymentName.value), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.bakeoffDeploymentNames.value), ',')))]",
-          "harnessEnabled": {
-            "value": "[equals(parameters('harnessEnabled'), 'true')]"
-          },
           "enableCuIngest": {
             "value": "[equals(parameters('enableCuIngest'), 'true')]"
           },
@@ -2207,7 +2193,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9765530348483287619"
+              "templateHash": "11522642468534738352"
             }
           },
           "parameters": {
@@ -2256,7 +2242,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. Order Concierge default = foundryProjectEndpoint."
+                "description": "JSON string mapping department slug -> Foundry project endpoint, passed through as FOUNDRY_PROJECT_ENDPOINTS for the post-provision scripts. The API no longer parses it. Order Concierge default = foundryProjectEndpoint."
               }
             },
             "plannerDeployment": {
@@ -2296,12 +2282,8 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Comma-separated list of Azure-direct model deployments to expose to the /bakeoff endpoint on the API container."
+                "description": "Comma-separated list of the Azure-direct model deployments, passed through as FOUNDRY_BAKEOFF_DEPLOYMENTS. The API no longer reads it; the bake-off endpoint was removed."
               }
-            },
-            "harnessEnabled": {
-              "type": "bool",
-              "defaultValue": false
             },
             "enableCuIngest": {
               "type": "bool",
@@ -2431,7 +2413,7 @@
                     {
                       "name": "api",
                       "image": "[variables('placeholder')]",
-                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'ORDER_PROJECT_NAME', 'value', parameters('orderProjectName')), createObject('name', 'ORDER_AGENTS_HOSTED', 'value', string(parameters('orderAgentsHosted'))), createObject('name', 'NORTHWIND_BUSINESS_DOMAIN', 'value', parameters('businessDomain')), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'AZURE_SEARCH_INDEX', 'value', parameters('searchIndexName')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_BASE', 'value', parameters('searchKnowledgeBase')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_SOURCE', 'value', parameters('searchKnowledgeSource')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName')), createObject('name', 'FOUNDRY_BAKEOFF_DEPLOYMENTS', 'value', parameters('bakeoffDeployments'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_WORK_ORDER_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
+                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'ORDER_PROJECT_NAME', 'value', parameters('orderProjectName')), createObject('name', 'ORDER_AGENTS_HOSTED', 'value', string(parameters('orderAgentsHosted'))), createObject('name', 'NORTHWIND_BUSINESS_DOMAIN', 'value', parameters('businessDomain')), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'AZURE_SEARCH_INDEX', 'value', parameters('searchIndexName')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_BASE', 'value', parameters('searchKnowledgeBase')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_SOURCE', 'value', parameters('searchKnowledgeSource')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName')), createObject('name', 'FOUNDRY_BAKEOFF_DEPLOYMENTS', 'value', parameters('bakeoffDeployments'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_WORK_ORDER_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
                       "resources": {
                         "cpu": "[json('1.0')]",
                         "memory": "2Gi"

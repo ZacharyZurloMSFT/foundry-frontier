@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..orchestrator_client import _async_credential, _extract_output_text, _project_client
+from ..foundry_client import _async_credential, _extract_output_text, _project_client
 from ..settings import get_settings
 from .guards import GuardFailure, strip_fence, unsafe_determination
 from .models import Contract, DeltaEvent, DoneEvent, HelpSource, Provenance, SourcesEvent

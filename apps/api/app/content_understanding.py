@@ -11,17 +11,13 @@ import base64
 import hashlib
 import json
 import re
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from azure.core.exceptions import ClientAuthenticationError
-from azure.identity.aio import DefaultAzureCredential
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import HTTPException
 
 from .settings import get_settings
 
@@ -42,7 +38,6 @@ REVIEW_NOTICE = (
     "document, field confidence and source evidence. No coverage, fault, cause, "
     "fraud or payment determination; no records were updated."
 )
-router = APIRouter(prefix="/claims", tags=["insurance-content-understanding"])
 _analysis_slots = asyncio.Semaphore(2)
 
 
@@ -304,24 +299,6 @@ class CUService:
             raise fail(502, "cu_transport_error", "The API could not reach Content Understanding; no fallback extraction was used.") from None
 
 
-@asynccontextmanager
-async def cu_service():
-    config = CUConfig.from_settings()
-    config.check()
-    credential = None if config.api_key else DefaultAzureCredential(managed_identity_client_id=config.client_id or None)
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15), follow_redirects=False, trust_env=False) as client:
-            yield CUService(config, client, credential)
-    finally:
-        if credential:
-            await credential.close()
-
-
-async def get_cu_service():
-    async with cu_service() as service:
-        yield service
-
-
 def _document_locations():
     here = Path(__file__).resolve()
     bundle = here.parent / "_northwind"
@@ -374,78 +351,3 @@ def sample_bytes(filename: str) -> tuple[dict, bytes]:
     raise fail(503, "sample_bytes_unavailable", "The synthetic PDF bytes are not packaged; no fixture extraction was used.")
 
 
-class SampleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    filename: str = Field(min_length=1, max_length=160)
-
-
-@router.get("/samples")
-async def claims_samples() -> dict:
-    rows = document_catalog()
-    try:
-        async with cu_service() as service:
-            availability = await service.availability()
-    except HTTPException as exc:
-        availability = {"available": False, "status": "unavailable", "message": exc.detail["message"], "code": exc.detail["code"]}
-    except (httpx.HTTPError, TimeoutError, ClientAuthenticationError):
-        availability = {"available": False, "status": "unavailable", "message": "Live CU configuration could not be checked."}
-    return {"items": rows, "availability": availability, "notice": REVIEW_NOTICE}
-
-
-@router.get("/status")
-async def claims_status(service: CUService = Depends(get_cu_service)) -> dict:
-    try:
-        return await service.availability()
-    except (httpx.HTTPError, TimeoutError):
-        raise fail(503, "cu_unavailable", "Live CU configuration could not be checked.") from None
-
-
-@router.get("/samples/{filename}/content")
-async def claims_source(filename: str) -> Response:
-    _, data = sample_bytes(filename)
-    return Response(data, media_type="application/pdf", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
-
-
-@router.post("/extract")
-async def claims_extract(req: SampleRequest, service: CUService = Depends(get_cu_service)) -> dict:
-    row, data = sample_bytes(req.filename)
-    return await service.analyze(data, req.filename, row["media_type"], synthetic=True)
-
-
-@router.post("/upload")
-async def claims_upload(
-    request: Request, filename: str = Query(min_length=1, max_length=160),
-    service: CUService = Depends(get_cu_service),
-) -> dict:
-    """Raw bounded PDF/JPEG/PNG body; intentionally not multipart or a URL."""
-    safe_filename(filename)
-    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    if media_type not in MEDIA_TYPES.values():
-        raise fail(415, "unsupported_document", "Send raw PDF/JPEG/PNG bytes with the matching Content-Type, not multipart or JSON.")
-    limit = service.config.max_upload_bytes
-    length = request.headers.get("content-length")
-    if length is not None:
-        if not length.isdigit():
-            raise fail(400, "invalid_content_length", "Invalid Content-Length.")
-        if int(length) > limit:
-            raise fail(413, "document_too_large", f"Document limit is {limit} bytes.")
-    data = bytearray()
-    try:
-        async with asyncio.timeout(20):
-            async for chunk in request.stream():
-                if len(data) + len(chunk) > limit:
-                    raise fail(413, "document_too_large", f"Document limit is {limit} bytes.")
-                data.extend(chunk)
-    except TimeoutError:
-        raise fail(408, "upload_timeout", "Document upload timed out before analysis; no source was saved.") from None
-    return await service.analyze(bytes(data), filename, media_type)
-
-
-@router.delete("/results/{operation_id}")
-async def claims_delete_result(operation_id: str, service: CUService = Depends(get_cu_service)) -> dict:
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", operation_id):
-        raise fail(400, "invalid_operation_id", "Invalid operation ID.")
-    url = f"{service.endpoint}/contentunderstanding/analyzerResults/{operation_id}?api-version={API_VERSION}"
-    if not await service.delete_result(url):
-        raise fail(502, "cu_delete_unconfirmed", "CU result deletion was not confirmed.")
-    return {"status": "deletion_requested", "operation_id": operation_id, "compute_cancelled": False}

@@ -34,8 +34,7 @@ def main() -> int:
     endpoint = os.environ.get("FOUNDRY_PROJECT_ENDPOINT")
 
     files = list((REPO_ROOT / "agents").glob("*.yaml")) + \
-            list((REPO_ROOT / "evals" / "evaluators" / "rubrics").glob("*.prompty")) + \
-            list((REPO_ROOT / "agents" / "copilot-harness").glob("*.prompty"))
+            list((REPO_ROOT / "evals" / "evaluators" / "rubrics").glob("*.prompty"))
     if not files:
         print("no prompts found — nothing to publish.")
         return 0
@@ -52,8 +51,6 @@ def main() -> int:
     for f in files:
         content = f.read_text(encoding="utf-8")
         name = f.stem
-        if f.parent.name == "copilot-harness":
-            name = "northwind-copilot-harness"
         try:
             # SDK method name varies (upload_prompt / create_prompt / prompts.create);
             # try each until one sticks.
