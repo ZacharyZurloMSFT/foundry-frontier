@@ -478,6 +478,7 @@ def test_manual_service_allowlist_and_no_unchecked_sha():
 def test_business_frontend_defaults_disabled_but_enabled_configuration_must_be_complete():
     release_app.validate_frontend_environment({})
     release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "false"})
+    release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "true"})
     valid = {
         "VITE_INSURANCE_BUSINESS_ENABLED": "true",
         "VITE_INSURANCE_AUTH_TENANT_ID": release_app.TENANT,
