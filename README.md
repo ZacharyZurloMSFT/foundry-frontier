@@ -315,6 +315,8 @@ end-to-end blob reachability; rehearse data-plane access separately.
 App rollout and infra apply share a non-cancelling mutation concurrency group.
 
 Run `python scripts\configure-github-oidc.py` to preview the one-time setup.
+(The repository is public: `--apply` additionally needs the explicit
+`--allow-public-repository` opt-in; see `docs/api-management.md`, Repository visibility.)
 After explicit operator approval, `--apply` creates three dedicated managed
 identities, environment-bound OIDC trust, scoped role definitions/assignments,
 main-only GitHub environments, and nonsecret repository variables. No client

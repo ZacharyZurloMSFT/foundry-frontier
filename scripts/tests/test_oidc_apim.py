@@ -340,6 +340,45 @@ def test_only_apim_never_touches_existing_environments(monkeypatch):
     assert touched == set(APIM_ENVIRONMENTS)
 
 
+def test_a_public_repository_is_refused_unless_the_operator_opts_in():
+    private = {"private": True, "default_branch": "main"}
+    public = {"private": False, "default_branch": "main"}
+    setup.validate_repository(private)
+    setup.validate_repository(private, allow_public=True)
+    setup.validate_repository(public, allow_public=True)
+    with pytest.raises(ValueError, match="public.*--allow-public-repository"):
+        setup.validate_repository(public)
+    with pytest.raises(ValueError, match="public"):
+        setup.validate_repository({"default_branch": "main"})
+
+
+@pytest.mark.parametrize("repo", [
+    {"private": True, "default_branch": "develop"}, {"private": False, "default_branch": "develop"},
+    {"private": False}, {},
+])
+def test_opting_in_to_a_public_repository_never_relaxes_the_main_branch_check(repo):
+    for allow_public in (False, True):
+        with pytest.raises(ValueError, match="main-branch"):
+            setup.validate_repository(repo, allow_public=allow_public)
+
+
+def test_configure_checks_visibility_before_identity_and_before_any_azure_call(monkeypatch):
+    def github(path, method="GET", body=None):
+        if path == f"repos/{setup.REPOSITORY}":
+            return {"private": False, "default_branch": "main", "id": 1, "owner": {"id": 2}}
+        raise AssertionError(f"unexpected GitHub call {path}")
+    monkeypatch.setattr(setup, "gh", github)
+    monkeypatch.setattr(setup, "AzureCliCredential", lambda **_: pytest.fail("No Azure call before the trust checks"))
+    with pytest.raises(ValueError, match="public"):
+        setup.configure("apim")
+    # The opt-in passes the visibility check but the immutable repository identity is still enforced.
+    monkeypatch.setattr(setup, "gh", lambda path, *a, **k: (
+        {"private": False, "default_branch": "main", "id": 1, "owner": {"id": 2}}
+        if path == f"repos/{setup.REPOSITORY}" else {}))
+    with pytest.raises(ValueError, match="Repository identity"):
+        setup.configure("apim", allow_public_repository=True)
+
+
 def run_preview(*arguments):
     return subprocess.run([sys.executable, str(ROOT / "scripts" / "configure-github-oidc.py"), *arguments],
                           capture_output=True, text=True, check=False)
@@ -355,3 +394,6 @@ def test_command_line_previews_the_apim_selection_without_applying():
     assert preview["only"] == "apim" and len(preview["identities"]) == 2 and len(preview["role_bindings"]) == 2
     refused = run_preview("--only", "everything")
     assert refused.returncode == 2 and "invalid choice" in refused.stderr
+    opted_in = run_preview("--only", "apim", "--allow-public-repository")
+    assert opted_in.returncode == 0, opted_in.stderr
+    assert json.loads(opted_in.stdout) == preview, "the opt-in changes only what --apply may do, never the preview"
