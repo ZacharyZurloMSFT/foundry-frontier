@@ -92,7 +92,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
         run: python scripts/infra-release.py --compiled-template /tmp/storage-networking.json --source-sha "$SOURCE_SHA" --output release/infra-plan.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: infra-plan-${{ needs.source.outputs.sha }}
           path: release/infra-plan.json
@@ -146,7 +146,7 @@ jobs:
           NORTHWIND_INFRA_CONFIRM: ${{ inputs.confirm_apply }}
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
         run: python scripts/infra-release.py --compiled-template /tmp/storage-networking.json --source-sha "$SOURCE_SHA" --approved-plan approved/infra-plan.json --output release/infra-result.json --apply
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: infra-result-${{ github.run_id }}

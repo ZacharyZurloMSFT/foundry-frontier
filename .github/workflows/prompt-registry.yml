@@ -32,7 +32,7 @@ jobs:
           FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
           GIT_SHA: ${{ github.sha }}
         run: python scripts/publish-prompts.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: copilot-harness-prompt-${{ github.sha }}

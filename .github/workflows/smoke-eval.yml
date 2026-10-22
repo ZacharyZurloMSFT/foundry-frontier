@@ -54,7 +54,7 @@ jobs:
               owner: context.repo.owner, repo: context.repo.repo,
               issue_number: context.issue.number, body
             });
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-eval-results
