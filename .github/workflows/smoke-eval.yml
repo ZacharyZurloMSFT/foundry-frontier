@@ -34,7 +34,7 @@ jobs:
         run: python evals/smoke_eval.py --output smoke-results.json
       - name: Comment on PR
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

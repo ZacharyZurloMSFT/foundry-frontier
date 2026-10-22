@@ -38,7 +38,7 @@ jobs:
       operation: ${{ steps.source.outputs.operation }}
     steps:
       - id: source
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           OPERATION: ${{ inputs.operation }}
@@ -128,7 +128,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Recheck current main after approval
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           SOURCE_SHA: ${{ needs.source.outputs.sha }}
         with:

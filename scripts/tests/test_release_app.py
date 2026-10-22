@@ -517,7 +517,7 @@ def test_workflow_has_environment_scoped_oidc_shared_lock_and_immutable_builds()
     assert "reportlab==4.2.5" in text
     assert "retention-days" in text
     assert "NORTHWIND_DEPLOY_ENABLED" in data["jobs"]["verify"]["if"]
-    assert data["jobs"]["verify"]["steps"][0]["uses"] == "actions/github-script@v7"
+    assert data["jobs"]["verify"]["steps"][0]["uses"] == "actions/github-script@v9"
     artifact = deploy["steps"][-1]
     assert artifact["if"] == "always()"
     assert artifact["with"]["path"] == ".release-state/rollback-*.json"
