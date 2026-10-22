@@ -73,10 +73,13 @@ def plan(source_sha: str, base_sha: str | None, service: str | None = None) -> l
 
 
 def validate_frontend_environment(env: dict[str, str]) -> None:
-    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "false") not in ("true", "false"):
+    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") not in ("true", "false"):
         raise ValueError("Business frontend flag must be true or false")
-    if env.get("VITE_INSURANCE_BUSINESS_ENABLED") != "true":
+    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") != "true":
         return
+    names = ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID", "VITE_INSURANCE_AUTH_SCOPE", "VITE_INSURANCE_RUN_ID")
+    if not any(env.get(name) for name in names):
+        return  # Public branded pages only; sign-in stays unavailable until identity is configured.
     uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
     for name in ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID"):
         if not re.fullmatch(uuid, env.get(name, "")):
