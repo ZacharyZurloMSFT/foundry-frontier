@@ -76,7 +76,7 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_INFRA_PLAN_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -122,7 +122,7 @@ jobs:
           run-id: ${{ inputs.plan_run_id }}
           github-token: ${{ github.token }}
           path: approved
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_INFRA_APPLY_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
