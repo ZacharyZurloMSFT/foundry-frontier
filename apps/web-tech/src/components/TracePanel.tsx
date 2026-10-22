@@ -115,7 +115,7 @@ function BuildFooter({ build }: { build: TraceReport["build"] }) {
   );
 }
 
-function SpanTable({ spans }: { spans: TraceReport["spans"] }) {
+export function SpanTable({ spans }: { spans: TraceReport["spans"] }) {
   const rows = useMemo(() => spans.filter(s => s.agent || s.tool || s.model), [spans]);
   if (!rows.length) return <div className="empty">No agent/tool/model spans in this window.</div>;
   return (
@@ -134,7 +134,12 @@ function SpanTable({ spans }: { spans: TraceReport["spans"] }) {
             <td><code>{s.name}</code></td>
             <td>{s.agent || "—"}</td>
             <td>{s.tool || "—"}</td>
-            <td>{s.model || "—"}</td>
+            <td>
+              {s.model || "—"}
+              {s.model && s.gateway_model && (
+                <span className="route-badge" title={s.gateway_model}>AI Gateway</span>
+              )}
+            </td>
             <td className="num">{Math.round(s.duration_ms)}</td>
             <td className="num">{s.prompt_tokens || "—"}</td>
             <td className="num">{s.completion_tokens || "—"}</td>

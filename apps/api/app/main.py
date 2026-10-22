@@ -30,9 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from . import model_gateway  # noqa: E402
 from .bakeoff import ModelSpec, stream_bakeoff
 from .business.routes import router as business_router
-from .adjuster_support import SupportRequest, router as adjuster_router, support_chat
+from .adjuster_support import MODELS as SUPPORT_MODELS, SupportRequest, router as adjuster_router, support_chat
 from .company import (
     DEFAULT_DEPARTMENT_SLUG,
     foundry_project_endpoint_for,
@@ -49,6 +50,7 @@ from .observability import (
     build_info,
     configure_observability,
     set_request_department,
+    set_request_gateway,
 )
 from .orchestrator_client import ask_single_turn, run_agent_turn, run_turn
 from .repositories import (
@@ -73,8 +75,18 @@ configure_observability()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    settings = get_settings()
+    problem = model_gateway.configuration_problem(settings)
+    if problem:
+        logger.error("AI Gateway configuration problem: %s", problem)
+    elif model_gateway.gateway_enabled(settings):
+        logger.info("Model inference is routed through the AI Gateway (provider %s).",
+                    settings.ai_gateway_model_provider or "from AI_GATEWAY_MODEL_ALIASES")
     yield
-    await harness_runtime.stop()
+    try:
+        await harness_runtime.stop()
+    finally:
+        await model_gateway.close_gateway_clients()
 
 
 app = FastAPI(title="Northwind Copilot API", version="0.1.0", lifespan=lifespan)
@@ -107,6 +119,7 @@ async def stamp_department_middleware(request, call_next):
         set_request_department(dept["slug"], dept["foundry_project"])
     except Exception:  # noqa: BLE001 — never fail the request on stamping
         pass
+    set_request_gateway(model_gateway.route_for(get_settings()))
     return await call_next(request)
 
 
@@ -150,6 +163,15 @@ async def health() -> dict:
     return {"status": "ok", "settings_loaded": bool(get_settings().foundry_endpoint),
             "business_domain": get_settings().business_domain,
             "insurance_agent_runtime_ready": insurance_runtime_ready()}
+
+
+@app.get("/gateway/status")
+async def gateway_status() -> dict:
+    """Where model inference goes — the AI Gateway or Foundry directly — and
+    whether the gateway configuration is usable. Non-secret: the endpoint host,
+    provider, token scope and the deployment → gateway alias mapping only."""
+    deployments = [m.deployment for m in ModelSpec.resolve_all()] + list(SUPPORT_MODELS.values())
+    return model_gateway.status(get_settings(), deployments)
 
 
 # ── Company manifest + department routing (multi-project story) ────────────
@@ -533,8 +555,13 @@ async def safety_attacks() -> dict:
 async def safety_endpoint(req: SafetyCheckRequest) -> dict:
     """Run Foundry Guardrails (Microsoft.DefaultV2 policy attached to the
     configured deployment) on `text`. Falls back to a local heuristic if
-    the Foundry project isn't reachable so the demo tab always lights up."""
-    verdict = await safety_check(req.text)
+    the Foundry project isn't reachable so the demo tab always lights up.
+    A gateway that is required or selected but misconfigured is an explicit
+    503 instead: the check never silently bypasses the AI Gateway."""
+    try:
+        verdict = await safety_check(req.text)
+    except model_gateway.GatewayConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return verdict.to_dict()
 
 

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -45,6 +46,14 @@ INSURANCE_ROLES = {
 FOUNDRY_USER = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
 AGENT_CONSUMER = "eed3b665-ab3a-47b6-8f48-c9382fb1dad6"
+MODELS_USER = "a6b68e3d-a1f0-4c60-8678-237c050cf4ea"
+GATEWAY_RESOURCE_GROUP = "rg-northwind-ai"
+GATEWAY_NAME = "ai-gateway-northwind"
+MCP_GATEWAY_ROLES = ("orderlookup", "policylookup")
+# The live insurance fleet runs in nw-insurance-claims; northwind-orders is the original native project.
+INSURANCE_PROJECTS = ("northwind-orders", "nw-insurance-claims")
+GATEWAY_MODEL_SETTINGS = ("ORDERS_MODEL_GATEWAY_ENDPOINT", "ORDERS_MODEL_GATEWAY_MODEL",
+                          "ORDERS_MODEL_GATEWAY_DEPLOYMENT")
 
 
 def deployment_credential(source: str, tenant: str):
@@ -54,6 +63,65 @@ def deployment_credential(source: str, tenant: str):
     if source == "azd":
         return AzureDeveloperCliCredential(tenant_id=tenant, process_timeout=120)
     raise ValueError("credential source must be cli or azd")
+
+
+def env_flag(environment, name: str) -> bool:
+    # A typo must not silently disable a gateway control.
+    value = str(environment.get(name) or "").strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("", "false", "0", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be true, 1 or yes to enable (false, 0, no, off or empty to disable)")
+
+
+def gateway_scope(subscription: str) -> str:
+    return (f"/subscriptions/{subscription}/resourceGroups/{GATEWAY_RESOURCE_GROUP}"
+            f"/providers/Microsoft.ApiManagement/service/{GATEWAY_NAME}")
+
+
+def validate_gateway_environment(environment, role: str) -> None:
+    """Fail before any network call when the config cannot satisfy its own gateway requirements."""
+    if env_flag(environment, "AI_GATEWAY_REQUIRED"):
+        missing = [name for name in GATEWAY_MODEL_SETTINGS if not str(environment.get(name) or "").strip()]
+        if missing:
+            raise ValueError("AI_GATEWAY_REQUIRED is set: " + ", ".join(missing)
+                             + " must be configured; direct model inference is not permitted")
+    if env_flag(environment, "AI_GATEWAY_MCP_REQUIRED") and role in MCP_GATEWAY_ROLES:
+        raw = environment.get("ORDERS_MCP_GATEWAY")
+        try:
+            routes = json.loads(raw) if isinstance(raw, str) else None
+        except ValueError:
+            routes = None
+        if not isinstance(routes, dict):
+            raise ValueError("AI_GATEWAY_MCP_REQUIRED is set: ORDERS_MCP_GATEWAY must be a JSON object keyed by agent role")
+        entry = routes.get(role)
+        if not isinstance(entry, dict) or not str(entry.get("url") or "").strip():
+            raise ValueError(f"AI_GATEWAY_MCP_REQUIRED is set but ORDERS_MCP_GATEWAY has no {role} entry with a url; "
+                             "direct MCP traffic is not permitted")
+
+
+def runtime_grants(environment, role: str, project_arm_id: str, account_scope: str) -> list[tuple[str, str]]:
+    """(scope, role id) pairs granted to the hosted agent's runtime principal.
+
+    Default: Cognitive Services OpenAI User on the account, Foundry User on the project and, for
+    the manager, Agent Consumer. With AI_GATEWAY_REQUIRED, AI Gateway Models User on the gateway
+    replaces the OpenAI User grant. Gateway MCP needs no role: provider-executed MCP authenticates
+    with the runtime key of the tool server connection, so no agent holds AI Gateway Tools User
+    (which would let it call every published tool server).
+    """
+    models_via_gateway = env_flag(environment, "AI_GATEWAY_REQUIRED")
+    gateway = None
+    if models_via_gateway:
+        subscription = re.match(r"/subscriptions/([^/]+)/", account_scope, re.IGNORECASE)
+        if subscription is None:
+            raise ValueError("Cannot derive the gateway subscription from the Foundry account scope.")
+        gateway = gateway_scope(subscription.group(1))
+    grants = [(gateway, MODELS_USER) if models_via_gateway else (account_scope, OPENAI_USER),
+              (project_arm_id, FOUNDRY_USER)]
+    if role == "manager":
+        grants.append((project_arm_id, AGENT_CONSUMER))
+    return grants
 
 
 def grant(http: httpx.Client, token_provider, subscription: str, scope: str,
@@ -90,7 +158,9 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--business-domain", choices=("retail", "insurance"))
     parser.add_argument("--grant-runtime-roles", action="store_true",
-                        help="Explicit opt-in to legacy RBAC writes; existing roles are otherwise never changed")
+                        help="Explicit opt-in to RBAC writes: OpenAI User on the account by default; "
+                             "AI_GATEWAY_REQUIRED in the config swaps it for AI Gateway Models User on the "
+                             "gateway; existing roles are otherwise never changed")
     args = parser.parse_args()
     with journal.receipt_lock(args.output):
         deploy(args)
@@ -126,17 +196,22 @@ def deploy(args):
         raise ValueError("FOUNDRY_* variables are platform-reserved")
     if not environment.get("ORDERS_MODEL_DEPLOYMENT"):
         raise ValueError("ORDERS_MODEL_DEPLOYMENT is required")
+    validate_gateway_environment(environment, args.role)
     names = INSURANCE_ROLES if domain == "insurance" else ROLES
     name = args.agent_name or names[args.role]
     if name != names[args.role] and not (domain == "retail" and args.role == "triage" and name == "northwind-triage-ft-demo"):
         raise ValueError("Only the separate northwind-triage-ft-demo companion may override an agent name")
+    project_name = "northwind-orders"
     if domain == "insurance":
         endpoint = urlsplit(args.project_endpoint)
-        if (endpoint.scheme != "https" or endpoint.path.rstrip("/") != "/api/projects/northwind-orders"
+        project_name = endpoint.path.rstrip("/").rsplit("/", 1)[-1]
+        if (endpoint.scheme != "https" or project_name not in INSURANCE_PROJECTS
+                or endpoint.path.rstrip("/") != f"/api/projects/{project_name}"
                 or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
-            raise ValueError("Insurance deployment must explicitly target the existing native northwind-orders project, not legacy web northwind.")
-        if args.apply and not args.project_arm_id.rstrip("/").endswith("/projects/northwind-orders"):
-            raise ValueError("Insurance project ARM ID must match the existing northwind-orders project.")
+            raise ValueError("Insurance deployment must explicitly target an existing native insurance project "
+                             f"({', '.join(INSURANCE_PROJECTS)}), not legacy web northwind.")
+        if args.apply and not args.project_arm_id.rstrip("/").endswith(f"/projects/{project_name}"):
+            raise ValueError(f"Insurance project ARM ID must match the existing {project_name} project.")
         model = environment.get("TRIAGE_MODEL_DEPLOYMENT") or environment["ORDERS_MODEL_DEPLOYMENT"]
         if (environment.get("TRIAGE_MODEL_DEPLOYMENT") or "-ft-" in model.lower()) and (
                 not model.startswith("northwind-insurance-") or environment.get(
@@ -159,6 +234,10 @@ def deploy(args):
               "applied": args.apply, "business_domain": domain,
               "credential_source": credential_source,
               "agent_runtime_ready": False, "roles_modified": bool(getattr(args, "grant_runtime_roles", False) and args.apply)}
+    gateway_routing = {"models_required": env_flag(environment, "AI_GATEWAY_REQUIRED"),
+                       "mcp_required": env_flag(environment, "AI_GATEWAY_MCP_REQUIRED") and args.role in MCP_GATEWAY_ROLES}
+    if any(gateway_routing.values()):
+        report["ai_gateway"] = gateway_routing
     if not args.apply:
         journal.atomic_json(args.output, report)
         print(json.dumps(report, indent=2))
@@ -207,7 +286,7 @@ def deploy(args):
                         agent_name=name, definition=definition, code=source,
                         description=f"Hosted Northwind {domain} {args.role}",
                         metadata={"source_sha256": source_hash, "config_sha256": config_hash,
-                                  "project": "northwind-orders", "business_domain": domain},
+                                  "project": project_name, "business_domain": domain},
                     )
             report.update(version=existing.version, state=existing.as_dict().get("status"))
             journal.atomic_json(args.output, report)
@@ -234,11 +313,13 @@ def deploy(args):
                 raise RuntimeError("Active hosted agent has no runtime principal ID")
             account_scope = args.project_arm_id.rsplit("/projects/", 1)[0]
             if getattr(args, "grant_runtime_roles", False):
+                grants = runtime_grants(environment, args.role, args.project_arm_id, account_scope)
                 with httpx.Client(timeout=120) as http:
-                    grant(http, token_provider, args.subscription, account_scope, principal, OPENAI_USER)
-                    grant(http, token_provider, args.subscription, args.project_arm_id, principal, FOUNDRY_USER)
-                    if args.role == "manager":
-                        grant(http, token_provider, args.subscription, args.project_arm_id, principal, AGENT_CONSUMER)
+                    for scope, role_id in grants:
+                        grant(http, token_provider, args.subscription, scope, principal, role_id)
+                if "ai_gateway" in report:
+                    report["ai_gateway"]["runtime_grants"] = [{"scope": scope, "role_id": role_id}
+                                                              for scope, role_id in grants]
             project.agents.update_details(
                 agent_name=name,
                 agent_endpoint=AgentEndpointConfig(

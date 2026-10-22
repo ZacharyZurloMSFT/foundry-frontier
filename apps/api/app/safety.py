@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import model_gateway
 from .observability import get_tracer
 from .settings import get_settings
 
@@ -192,39 +193,58 @@ def _parse_filter_error(exc: Exception) -> dict[str, Any] | None:
     return None
 
 
+async def _guardrail_completion(client, model: str, text: str):
+    # Ask the model to actually answer. The Guardrail runs on
+    # the INPUT server-side; if it blocks, we get a 400 with
+    # content_filter_result (caught by the caller). If it allows, we
+    # capture the model's real reply so the demo tab can show
+    # "this is what would have leaked" for a passed input vs.
+    # "this is what the guardrail refused to run" for a blocked
+    # one.
+    return await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system",
+             "content": ("You are the Northwind Order Concierge "
+                         "assistant. Answer the user's question "
+                         "helpfully and concisely.")},
+            {"role": "user", "content": text},
+        ],
+        max_completion_tokens=400, temperature=0.2,
+    )
+
+
 async def _guardrail_check(text: str) -> SafetyVerdict | None:
     """Call the guardrail-attached deployment. Returns a SafetyVerdict when
     the call succeeds (either allowed or blocked with detail). Returns None
-    to signal "no Foundry configured; use heuristic fallback"."""
+    to signal "no Foundry configured; use heuristic fallback".
+
+    With the AI Gateway configured the call goes through it, with the
+    deployment's gateway alias as the model. Gateway misconfiguration
+    (``GatewayConfigError``, including ``AI_GATEWAY_REQUIRED`` without a usable
+    gateway) is raised rather than hidden behind the heuristic or a direct
+    Foundry call."""
     s = get_settings()
-    if not s.foundry_project_endpoint:
+    model_gateway.require_gateway(s)
+    via_gateway = model_gateway.gateway_enabled(s)
+    if not via_gateway and not s.foundry_project_endpoint:
         return None
     pii, redacted = _pii_scan(text)
     deployment = _guardrail_deployment()
+    route = " via AI Gateway" if via_gateway else ""
 
     with tracer.start_as_current_span("safety.guardrail_check") as span:
         span.set_attribute("guardrail_deployment", deployment)
+        model_gateway.stamp_span(span, s, deployment)
         try:
-            async with _project_client() as project:
-                client = project.get_openai_client()
-                # Ask the model to actually answer. The Guardrail runs on
-                # the INPUT server-side; if it blocks, we get a 400 with
-                # content_filter_result (caught below). If it allows, we
-                # capture the model's real reply so the demo tab can show
-                # "this is what would have leaked" for a passed input vs.
-                # "this is what the guardrail refused to run" for a blocked
-                # one.
-                resp = await client.chat.completions.create(
-                    model=deployment,
-                    messages=[
-                        {"role": "system",
-                         "content": ("You are the Northwind Order Concierge "
-                                     "assistant. Answer the user's question "
-                                     "helpfully and concisely.")},
-                        {"role": "user", "content": text},
-                    ],
-                    max_completion_tokens=400, temperature=0.2,
-                )
+            if via_gateway:
+                alias = model_gateway.gateway_alias(s, deployment)
+                resp = await _guardrail_completion(model_gateway.get_gateway_client(s), alias, text)
+            else:
+                async with _project_client() as project:
+                    resp = await _guardrail_completion(project.get_openai_client(), deployment, text)
+        except model_gateway.GatewayConfigError:
+            raise
         except Exception as exc:  # noqa: BLE001
             cfr = _parse_filter_error(exc)
             if cfr:
@@ -244,7 +264,7 @@ async def _guardrail_check(text: str) -> SafetyVerdict | None:
                     allowed=False, shields=shields, categories=cats,
                     protected_material=any(k.startswith("protected_material") for k in cats),
                     pii_findings=pii, redacted_text=redacted,
-                    engine="foundry-guardrails (input filter)",
+                    engine=f"foundry-guardrails (input filter){route}",
                     guardrail="Microsoft.DefaultV2",
                     model_deployment=deployment,
                     blocked_reason=(
@@ -292,7 +312,7 @@ async def _guardrail_check(text: str) -> SafetyVerdict | None:
             merged.get(k, {}).get("filtered") for k in
             ("protected_material_text", "protected_material_code")),
         pii_findings=pii, redacted_text=redacted,
-        engine="foundry-guardrails",
+        engine=f"foundry-guardrails{route}",
         guardrail="Microsoft.DefaultV2",
         model_response=model_response,
         model_deployment=deployment,

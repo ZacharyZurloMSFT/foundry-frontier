@@ -72,6 +72,12 @@ APPINSIGHTS_WORKSPACE_ID=<log-analytics-workspace-guid>
 # B6 human-readable build stamp shown in the sidebar
 GIT_SHA=session-2-local
 BUILD_ENV=local
+
+# AI Gateway routing (off by default). Needs `az login` as an identity holding
+# the "AI Gateway Models User" role on ai-gateway-northwind. See docs/ai-gateway.md.
+AI_GATEWAY_MODEL_ENDPOINT=https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/
+AI_GATEWAY_MODEL_PROVIDER=aisvc-zurlo-northwind
+# AI_GATEWAY_REQUIRED=true   # refuse direct Foundry model calls
 ```
 
 ## Common gotchas

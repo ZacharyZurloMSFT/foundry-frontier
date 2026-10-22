@@ -35,7 +35,7 @@ Ten Container Apps sit in one shared Container Apps environment. Two stacks run 
 
 | Container App | Stack | What it is | Published as |
 | --- | --- | --- | --- |
-| `ca-api` | `northwind` | FastAPI orchestrator: 63 HTTP operations + the Voice Live WebSocket | `northwind-api`, `northwind-voice` |
+| `ca-api` | `northwind` | FastAPI orchestrator: 64 HTTP operations + the Voice Live WebSocket | `northwind-api`, `northwind-voice` |
 | `ca-mcp-tech-lookup` | `northwind` | FastMCP server (`lookup_order`) | `northwind-mcp-tech-lookup` |
 | `ca-mcp-work-order` | `northwind` | FastMCP server (`propose_resolution`, HITL queue) | `northwind-mcp-work-order` |
 | `ca-insurance-api` | `insurance` | Same API image, insurance deployment | `insurance-api`, `insurance-voice` |
@@ -53,7 +53,7 @@ Foundry hosted-agent endpoints (served by Foundry), the model gateway
 `ai-gateway-northwind` (separate instance in `rg-northwind-ai`), and data planes
 (Cosmos, Search, Storage).
 
-### The REST API surface (63 operations, 61 paths)
+### The REST API surface (64 operations, 62 paths)
 
 Generated from the application itself by `scripts/export-openapi.py`; the full table is
 [`infra/live/apim/specs/northwind-api.operations.md`](../infra/live/apim/specs/northwind-api.operations.md).
@@ -61,7 +61,7 @@ Generated from the application itself by `scripts/export-openapi.py`; the full t
 | Group | Operations | Notes |
 | --- | --- | --- |
 | `insurance-business` | 24 | `/api/v1/*`, Entra delegated token (scope `access_as_user`) |
-| `core` | 21 | chat, session, handoff, company/departments, bake-off, HITL and work orders, safety, traces, health, voice session ticket |
+| `core` | 22 | chat, session, handoff, company/departments, bake-off, HITL and work orders, safety, traces, health, model gateway status, voice session ticket |
 | `insurance-content-understanding` | 6 | claims document analysis |
 | `synthetic-insurance` | 5 | fixtures and records |
 | `adjuster-support`, `Agent Harness` | 3 + 3 | |
@@ -82,7 +82,7 @@ flowchart LR
     CI[CI evals / red team]
   end
   subgraph APIM[apim-northwind]
-    R["/{stack}  REST (63 ops)"]
+    R["/{stack}  REST (64 ops)"]
     V["/{stack}/voice/realtime  WebSocket"]
     M["/{stack}/mcp/tech-lookup · work-order"]
   end
@@ -134,7 +134,7 @@ outputs or pipeline logs. The pipeline's apply identity cannot call `listSecrets
 
 - Standard v2 supports WebSocket APIs; Consumption does not. No dedicated IP on v2 tiers.
 - Overlapping path prefixes route correctly (longest wins); OpenAPI 3.1 imports as is
-  (all 63 operations). OpenAPI 3.1 is import-only.
+  (all 64 operations). OpenAPI 3.1 is import-only.
 - The native `type: mcp` API is a preview, APIM-hosted tool server with a different ARM
   contract than documented. The gateway instead uses **GA plain HTTP passthrough** APIs
   with `rewrite-uri` to `/mcp/`; initialize, `tools/list` and `tools/call` work and

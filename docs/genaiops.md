@@ -50,6 +50,16 @@ flowchart LR
 **Fail-fast principle:** cheap tiers run first so obvious breakage never burns
 Azure quota. Only the tier that catches the failure runs to completion.
 
+### Gateway routing and the tiers
+
+When the API app and agents are routed through the AI Gateway (see
+[`ai-gateway.md`](./ai-gateway.md)), Tier 2 `/chat` traffic and the Tier 4
+re-scored traces exercise the gateway automatically. The evaluator judge
+calls, Foundry safety evaluators, Red Team runs and the GitHub Models smoke
+tier are out of scope and still call their services directly. A gateway
+failure (401/403/404/429) is an evaluation failure, never a skipped
+evaluator, and `evals/baseline.json` only changes with reviewer approval.
+
 ## Progressive delivery
 
 | Env         | Trigger                          | GitHub Environment | Reviewers        | Region             |

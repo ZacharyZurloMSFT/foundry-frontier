@@ -123,6 +123,9 @@ services:
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_MANAGER_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}
+            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
+            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
+            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
         kind: hosted
         name: northwind-orchestrator
         protocols:
@@ -168,6 +171,9 @@ services:
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
+            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
+            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
     orderlookup:
         project: ./agents/orderlookup
         host: azure.ai.agent
@@ -206,6 +212,9 @@ services:
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
+            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
+            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
     policylookup:
         project: ./agents/policylookup
         host: azure.ai.agent
@@ -245,6 +254,9 @@ services:
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
+            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
+            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
     resolutiondraft:
         project: ./agents/resolutiondraft
         host: azure.ai.agent
@@ -283,6 +295,9 @@ services:
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
+            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
+            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
+            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
     web-tech:
         project: ./apps/web-tech
         host: containerapp

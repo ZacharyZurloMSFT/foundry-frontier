@@ -52,9 +52,21 @@ def pending_approval(value: Any, workflow_id: str) -> dict:
     return result
 
 
+class GatewayBearerAuth(httpx.Auth):
+    """Fetch a fresh Entra token per request so a long-lived agent never holds an expired one."""
+
+    def __init__(self, token_provider):
+        self.token_provider = token_provider
+
+    async def async_auth_flow(self, request):
+        request.headers["Authorization"] = f"Bearer {await self.token_provider()}"
+        yield request
+
+
 async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
                             tool_name: str = "propose_resolution",
-                            gateway_headers: Mapping[str, str] | None = None) -> dict:
+                            gateway_headers: Mapping[str, str] | None = None, *,
+                            auth: httpx.Auth | None = None) -> dict:
     headers = {"x-orders-workflow": workflow_id}
     if workflow_id.startswith("wf-harness-"):
         headers["x-harness-workflow"] = workflow_id
@@ -62,7 +74,7 @@ async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
         # Credentials only travel over HTTPS, and can never override the workflow binding.
         https_url(url, "MCP endpoint")
         headers = {**gateway_headers, **headers}
-    async with httpx.AsyncClient(headers=headers, timeout=60, follow_redirects=False) as http:
+    async with httpx.AsyncClient(headers=headers, auth=auth, timeout=60, follow_redirects=False) as http:
         async with streamable_http_client(url, http_client=http) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -80,10 +92,14 @@ async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
                 return pending_approval(data, workflow_id)
 
 
-def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None = None):
+def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None = None, *, token_provider=None):
     spec = settings.mcp_spec()
-    # Only forwarded when configured, leaving the call unchanged for ungated MCP servers.
-    gateway = {"gateway_headers": gateway_headers} if gateway_headers else {}
+    gateway = settings.mcp_entry
+    if gateway is not None and token_provider is None:
+        raise ValueError("Gateway work-order MCP requires an identity token provider for the gateway scope")
+    auth = GatewayBearerAuth(token_provider) if gateway is not None else None
+    # API Management credentials are only forwarded when configured, leaving the call unchanged otherwise.
+    apim = {"gateway_headers": gateway_headers} if gateway_headers else {}
 
     if settings.business_domain == "insurance":
         @tool(name="draft_claim_action", approval_mode="never_require",
@@ -96,7 +112,11 @@ def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None 
                 if scope.approval["draft"] != proposed:
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
-            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **gateway)
+            if gateway is None:
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **apim)
+            else:
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
+                                                 gateway.tool_prefix + "draft_claim_action", auth=auth)
             if (result.get("draft") != proposed or result.get("kind") != "insurance_claim_action"
                     or result.get("execution_status") != "not_executed" or result.get("synthetic") is not True):
                 raise RuntimeError("Insurance MCP did not confirm a non-executed synthetic draft")
@@ -116,7 +136,11 @@ def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None 
                 if scope.approval["draft"] != proposed:
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
-            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, **gateway)
+            if gateway is None:
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, **apim)
+            else:
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
+                                                 gateway.tool_prefix + "propose_resolution", auth=auth)
             if result.get("draft") != proposed:
                 raise RuntimeError("Resolution MCP persisted a different draft")
             scope.approval = pending_approval(result, workflow)

@@ -722,6 +722,7 @@ docs/                 Architecture, demo script
 - [Demo script (10 minutes)](./docs/demo-script.md)
 - [**Why Foundry — vs OpenAI Assistants, Bedrock, Vertex, LangChain**](./docs/differentiators.md)
 - [**GenAIOps through GitHub**](./docs/genaiops.md)
+- [**AI Gateway routing (models + MCP) and rollout runbook**](./docs/ai-gateway.md)
 - [Evaluation strategy](./evals/README.md)
 
 ## What makes this demo hard to beat
@@ -747,4 +748,8 @@ endpoints. They (and the API) can be put behind the opt-in API Management
 gateway: MCP callers then present a subscription key (for Foundry agents,
 through a project connection) and `NORTHWIND_GATEWAY_AUTH_REQUIRED=true` makes
 the apps accept only calls relayed by the gateway. See
-[API Management](./docs/api-management.md).
+[API Management](./docs/api-management.md). The separate AI Gateway tier
+(`ai-gateway-northwind`) fronts model inference and the read-only lookup and
+knowledge MCP servers; it does not forward the workflow headers the work-order
+servers bind to, so those go through API Management instead. See
+[`docs/ai-gateway.md`](./docs/ai-gateway.md).

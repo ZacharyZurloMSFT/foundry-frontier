@@ -56,7 +56,16 @@ jobs:
             scripts/tests/test_create_prompt_agents_gateway.py \
             scripts/tests/test_apim_smoke.py \
             scripts/tests/test_gateway_identity.py \
-            scripts/tests/test_oidc_apim.py -q
+            scripts/tests/test_oidc_apim.py \
+            scripts/tests/test_ai_gateway_common.py \
+            scripts/tests/test_ai_gateway_release.py \
+            scripts/tests/test_ai_gateway_grants.py \
+            scripts/tests/test_ai_gateway_enforce.py \
+            scripts/tests/test_model_gateway_connection.py \
+            scripts/tests/test_mcp_gateway_connection.py \
+            scripts/tests/test_prompt_agents_gateway.py \
+            scripts/tests/test_validate_reuse_gateway.py \
+            scripts/tests/test_deploy_hosted_gateway_grants.py -q
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15

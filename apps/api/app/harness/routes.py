@@ -9,6 +9,7 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 
+from .. import model_gateway
 from ..observability import get_tracer, set_request_department
 from ..settings import get_settings
 from .diagnostics import log_failure
@@ -101,6 +102,7 @@ async def run(request: Request, body: RunRequest) -> StreamingResponse:
             with get_tracer("northwind.harness").start_as_current_span("harness.run", attributes={
                 "session_id": run_id, "workflow_id": wid, "harness": "copilot-sdk",
                 "model": model, "prompt_sha.copilot-harness": prompt_sha,
+                **model_gateway.span_attributes(settings, model),
             }, record_exception=False, set_status_on_exception=False):
                 async with asyncio.timeout(settings.harness_timeout):
                     events = runtime.run(run_id, wid, body.message, store)
