@@ -112,6 +112,22 @@ def role_id(key: str) -> str:
     return f"{BASE}/providers/Microsoft.Authorization/roleDefinitions/{stable_id('role:' + key)}"
 
 
+def validate_repository(repo: dict, *, allow_public: bool = False) -> None:
+    """The trust is bound to the approved main-branch repository; a public one needs an explicit opt-in.
+
+    The opt-in relaxes only the visibility check. The immutable repository and owner IDs, the immutable OIDC
+    subject and the main-only environments are still enforced, so a renamed, recreated or forked repository
+    cannot obtain these identities.
+    """
+    if repo.get("default_branch") != "main":
+        raise ValueError("Expected the approved main-branch repository.")
+    if not repo.get("private") and not allow_public:
+        raise ValueError(
+            "The repository is public. Review the public-repository notes in docs/api-management.md "
+            "and re-run with --allow-public-repository to accept OIDC trust on a public repository."
+        )
+
+
 def validate_oidc_policy(repo: dict, policy: dict) -> None:
     if (repo.get("id") != REPOSITORY_ID or repo.get("owner", {}).get("id") != OWNER_ID
             or policy.get("use_default") is not True or policy.get("use_immutable_subject") is not True
@@ -204,10 +220,9 @@ def preview(only: str | None = None) -> dict:
     }
 
 
-def configure(only: str | None = None) -> dict:
+def configure(only: str | None = None, *, allow_public_repository: bool = False) -> dict:
     repo = gh(f"repos/{REPOSITORY}")
-    if not repo.get("private") or repo.get("default_branch") != "main":
-        raise ValueError("Expected the private approved main-branch repository.")
+    validate_repository(repo, allow_public=allow_public_repository)
     validate_oidc_policy(repo, gh(f"repos/{REPOSITORY}/actions/oidc/customization/sub"))
     check_preconditions(only)
     credential = AzureCliCredential(tenant_id=TENANT, process_timeout=120)
@@ -277,5 +292,10 @@ if __name__ == "__main__":
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--only", choices=sorted(ONLY),
                         help="Touch just this subsystem's identities, roles, bindings and variables")
+    parser.add_argument("--allow-public-repository", action="store_true",
+                        help="Accept OIDC trust on a public repository (the default refuses; see docs/api-management.md)")
     args = parser.parse_args()
-    print(json.dumps(configure(args.only) if args.apply else preview(args.only), indent=2))
+    print(json.dumps(
+        configure(args.only, allow_public_repository=args.allow_public_repository) if args.apply else preview(args.only),
+        indent=2,
+    ))

@@ -21,6 +21,8 @@ REGISTRY = "acrzurlonorthwind.azurecr.io"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
 SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech", "web-voice")
 APPS = {f"ca-{service}": service for service in SERVICES}
+# Insurance-branded deployments reuse the api/web-tech images with their own configuration.
+RELEASE_APPS = {**APPS, "ca-insurance-api": "api", "ca-insurance-portal": "web-tech"}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -110,9 +112,9 @@ def _valid_metadata(name: str, value: str) -> bool:
 def validate_release(args: argparse.Namespace) -> dict[str, str]:
     if (args.subscription, args.tenant, args.resource_group) != (SUBSCRIPTION, TENANT, RESOURCE_GROUP):
         raise ValueError("Release scope is restricted to the existing Northwind apps resource group")
-    if args.app not in APPS:
+    if args.app not in RELEASE_APPS:
         raise ValueError("Unknown Container App")
-    image_pattern = rf"{re.escape(REGISTRY)}/{APPS[args.app]}@sha256:[0-9a-f]{{64}}"
+    image_pattern = rf"{re.escape(REGISTRY)}/{RELEASE_APPS[args.app]}@sha256:[0-9a-f]{{64}}"
     if not re.fullmatch(image_pattern, args.image):
         raise ValueError("Image must be the app's approved ACR repository pinned by SHA-256 digest")
     if not re.fullmatch(r"gha-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{12}", args.revision):
@@ -124,7 +126,7 @@ def validate_release(args: argparse.Namespace) -> dict[str, str]:
     if args.expected_revision == f"{args.app}--{args.revision}":
         raise ValueError("Refusing to reuse the currently deployed revision suffix")
     metadata = (args.git_sha, args.deployed_at, args.github_repository)
-    if args.app != "ca-api":
+    if RELEASE_APPS[args.app] != "api":
         if any(value is not None for value in metadata):
             raise ValueError("Only the API may receive build metadata environment changes")
         return {}
@@ -261,7 +263,7 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
                 and revision.get("healthState") == "Healthy"
                 and revision.get("provisioningState") == "Provisioned"
                 and revision.get("runningState") == "Running"):
-            path = "/health" if args.app == "ca-api" else "/healthz" if "mcp-" in args.app else "/"
+            path = "/health" if RELEASE_APPS[args.app] == "api" else "/healthz" if "mcp-" in args.app else "/"
             try:
                 smoke = http.get(f"https://{_fqdn(current)}{path}", follow_redirects=False)
             except httpx.RequestError:
@@ -285,7 +287,7 @@ def parser() -> argparse.ArgumentParser:
     deploy.add_argument("--subscription", required=True)
     deploy.add_argument("--tenant", required=True)
     deploy.add_argument("--resource-group", required=True)
-    deploy.add_argument("--app", choices=APPS, required=True)
+    deploy.add_argument("--app", choices=RELEASE_APPS, required=True)
     deploy.add_argument("--image", required=True)
     deploy.add_argument("--revision", required=True)
     deploy.add_argument("--expected-revision", required=True)
