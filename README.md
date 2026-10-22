@@ -747,7 +747,8 @@ simple so Foundry can reach them without wiring bearer tokens or private
 endpoints. They (and the API) can be put behind the opt-in API Management
 gateway: MCP callers then present a subscription key (for Foundry agents,
 through a project connection) and `NORTHWIND_GATEWAY_AUTH_REQUIRED=true` makes
-the apps accept only calls relayed by the gateway. See
+the apps accept only calls relayed by the gateway. In the live environment the northwind
+stack already runs locked down this way; the insurance stack does not yet. See
 [API Management](./docs/api-management.md). The separate AI Gateway tier
 (`ai-gateway-northwind`) fronts model inference and the read-only lookup and
 knowledge MCP servers; it does not forward the workflow headers the work-order
