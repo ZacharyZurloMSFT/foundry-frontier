@@ -7,10 +7,18 @@ the repository ships the definition, the guarded release pipeline and the cut-ov
 tooling, but nothing changes in Azure until an operator runs the steps in
 [Rollout runbook](#rollout-runbook).
 
-> Status when this was written: `apim-northwind` is empty (no APIs, products, backends
-> or named values). The definition was validated with live read-only what-if (51 creates,
-> 0 modifications or deletions) and every rendered policy was accepted by the live service
-> on scratch APIs that were then deleted. Nothing from this change has been applied.
+> **Status (2026-10-22).**
+> - Done: merged in #59; the five repo-managed apps were released on the new images (guard
+>   deployed, **off**); the gateway identity exists (APIM system-assigned managed identity and
+>   the secretless `northwind-gateway` Entra application, whose client ID is now the template
+>   default for `gatewayAudience`).
+> - Verified live on a scratch API (since deleted): the real policy fragment obtains the
+>   managed-identity token and preserves the caller's `Authorization` header, and the real
+>   guard code accepts that token (checked against Microsoft's live signing keys) while
+>   rejecting a wrong principal or audience.
+> - Blocked: runbook step 2 (pipeline OIDC identities), see
+>   [Known blocker](#known-blocker-repository-visibility). `apim-northwind` is therefore
+>   still empty; nothing has been applied to it.
 
 ## What exists in `rg-northwind-apps`
 
@@ -179,16 +187,20 @@ previews by default and only changes things with `--apply`. Order matters.
    This creates `id-gh-northwind-apim-plan` / `-apply`, two custom roles scoped to the
    resource group, environments `northwind-apim-plan` / `northwind-apim-apply` pinned to
    `main`, and the variables including `NORTHWIND_APIM_ENABLED`. Add required reviewers
-   to `northwind-apim-apply` in the repository settings.
-3. **Create the gateway token identity:**
+   to `northwind-apim-apply` in the repository settings. Run it as the repository owner
+   (`ZacharyZurloMSFT`): it needs admin on the repository, and the Enterprise Managed
+   User account has read-only access. It currently refuses to run, see
+   [Known blocker](#known-blocker-repository-visibility).
+3. **Create the gateway token identity** (done for this environment on 2026-10-22; re-running
+   previews no actions and prints the values):
    ```powershell
    python scripts/configure-gateway-identity.py                    # preview
    python scripts/configure-gateway-identity.py --apply
    ```
-   Copy `gateway_audience` from the output into `gatewayAudience` in
-   `infra/live/apim-apis.bicep` via a reviewed PR (the release guard accepts only empty, a
-   GUID or `api://<GUID>`). Keep `apim_principal_id` for step 8. Until `gatewayAudience` is
-   set, the gateway forwards without a token and the guard cannot yet be enabled.
+   The `gateway_audience` it prints is the default of `gatewayAudience` in
+   `infra/live/apim-apis.bicep` (the release guard accepts only empty, a GUID or
+   `api://<GUID>`). Keep `apim_principal_id` for step 8. Without a `gatewayAudience` the
+   gateway forwards without a token and the guard cannot be enabled.
 4. **Plan and apply the API Management definition.** In GitHub Actions run
    `Scoped API Management`: the plan runs after CI on `main`, or dispatch it with
    `operation=plan` and the full `main` SHA. Review the summary (first run: 51 creations,
@@ -236,6 +248,19 @@ previews by default and only changes things with `--apply`. Order matters.
    really answers 401 (an image without the guard would silently ignore the variables).
    Each change writes a rollback record (non-secret values only) under `release/`.
 
+### Known blocker: repository visibility
+
+`configure-github-oidc.py` refuses to run (`Expected the private approved main-branch
+repository.`) because GitHub reports `ZacharyZurloMSFT/foundry-frontier` as **public**, while
+the script and the README assume a private repository. The check is a deliberate trust
+control and was not bypassed, and the repository's visibility was not changed. Decide one of:
+
+- make the repository private again (then run step 2 unchanged); or
+- accept OIDC trust on a public repository and relax that one check in a reviewed change.
+  Mitigations already in place: the subject claim uses immutable repository and owner IDs,
+  the environments are pinned to `main`, and fork pull requests cannot obtain these tokens.
+  What changes is that workflow logs, plan artifacts and step summaries become world-readable.
+
 ### Rollback
 
 - Fastest: `python scripts/configure-gateway-apps.py --stack insurance --guard disable --apply`.
@@ -256,9 +281,10 @@ previews by default and only changes things with `--apply`. Order matters.
 
 ## Not verified live yet
 
-These need the operator steps above and are intentionally not simulated:
+These need the remaining operator steps and are intentionally not simulated:
 Foundry project-connection authentication against the gateway, unbuffered NDJSON streaming
 through APIM (`apim-smoke.py --stream-check` is opt-in because it costs a model call), and
-the end-to-end managed-identity token plus guard path (needs the identity and deployed
-images). The guard itself, the policies, the allow-list and the release pipeline are
-covered by unit tests, and the policies and plan were validated against the live service.
+the guard enabled on a live Container App under real gateway traffic. Already verified live:
+the managed-identity token and its acceptance by the real guard (see Status). The guard,
+the policies, the allow-list and the release pipeline are also covered by unit tests, and the
+policies and plan were validated against the live service.

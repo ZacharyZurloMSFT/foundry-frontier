@@ -112,7 +112,9 @@ def test_parameter_defaults_describe_both_live_stacks(template):
     params = template["parameters"]
     assert params["apimName"]["defaultValue"] == "apim-northwind"
     assert params["appInsightsName"]["defaultValue"] == "appi-zurlo-northwind"
-    assert params["gatewayAudience"]["defaultValue"] == ""
+    assert re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", params["gatewayAudience"]["defaultValue"]), (
+        "the gateway token needs the northwind-gateway application's client ID; clearing it silently disables lock-down"
+    )
     assert params["businessAuth"]["defaultValue"] == {}
     stacks = params["stacks"]["defaultValue"]
     assert [stack["name"] for stack in stacks] == ["northwind", "insurance"]
