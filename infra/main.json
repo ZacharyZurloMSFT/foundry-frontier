@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13235562850488182570"
+      "templateHash": "10527275629368849892"
     }
   },
   "parameters": {
@@ -189,6 +189,24 @@
       "type": "string",
       "defaultValue": ""
     },
+    "gatewayUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Origin of the API Management gateway (https://<name>.azure-api.net). When set, API_URI and the MCP URLs point at the gateway instead of the Container Apps. Empty keeps the direct URLs."
+      }
+    },
+    "gatewayStack": {
+      "type": "string",
+      "defaultValue": "northwind",
+      "allowedValues": [
+        "northwind",
+        "insurance"
+      ],
+      "metadata": {
+        "description": "Gateway API stack that fronts the Container Apps this environment manages."
+      }
+    },
     "existingSettings": {
       "type": "object",
       "defaultValue": {},
@@ -332,6 +350,7 @@
     "resourceToken": "zurlo-northwind",
     "compactToken": "[replace(variables('resourceToken'), '-', '')]",
     "reuseExisting": "[equals(parameters('reuseExistingResources'), 'true')]",
+    "gatewayBase": "[if(empty(parameters('gatewayUrl')), '', format('{0}/{1}', parameters('gatewayUrl'), parameters('gatewayStack')))]",
     "existingLogAnalyticsGroup": "[if(empty(parameters('logAnalyticsResourceGroupName')), parameters('appsResourceGroupName'), parameters('logAnalyticsResourceGroupName'))]",
     "existingEnvironmentGroup": "[if(empty(parameters('containerAppsEnvironmentResourceGroupName')), parameters('appsResourceGroupName'), parameters('containerAppsEnvironmentResourceGroupName'))]",
     "existingVnetGroup": "[if(empty(parameters('vnetResourceGroupName')), parameters('networkingResourceGroupName'), parameters('vnetResourceGroupName'))]"
@@ -3537,9 +3556,17 @@
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_CONTAINER_REGISTRY_NAME, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'acr'), '2025-04-01').outputs.name.value)]"
     },
+    "NORTHWIND_GATEWAY_URL": {
+      "type": "string",
+      "value": "[parameters('gatewayUrl')]"
+    },
+    "NORTHWIND_GATEWAY_STACK": {
+      "type": "string",
+      "value": "[parameters('gatewayStack')]"
+    },
     "API_URI": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.API_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.apiUri.value)]"
+      "value": "[if(not(empty(variables('gatewayBase'))), variables('gatewayBase'), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.API_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.apiUri.value))]"
     },
     "WEB_TECH_URI": {
       "type": "string",
@@ -3551,11 +3578,11 @@
     },
     "MCP_TECH_LOOKUP_URL": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_TECH_LOOKUP_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpTechLookupUrl.value)]"
+      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/tech-lookup', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_TECH_LOOKUP_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpTechLookupUrl.value))]"
     },
     "MCP_WORK_ORDER_URL": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_WORK_ORDER_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpWorkOrderUrl.value)]"
+      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/work-order', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_WORK_ORDER_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpWorkOrderUrl.value))]"
     },
     "AZURE_LOG_ANALYTICS_RESOURCE_ID": {
       "type": "string",
