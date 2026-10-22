@@ -13,8 +13,8 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   second followed #61, which added `GET /gateway/status`, so both REST APIs now have 64
 >   operations. Both ran through the guarded `scripts/apim-release.py` from a clean LF checkout
 >   of `main` (same allow-list, plan-hash equality and SHA confirmation as the pipeline)
->   because the pipeline's OIDC setup is blocked, see
->   [Known blocker](#known-blocker-repository-visibility).
+>   because the pipeline's OIDC identities did not exist yet, see
+>   [Repository visibility](#repository-visibility).
 > - **Identity:** the APIM system-assigned managed identity and the secretless
 >   `northwind-gateway` Entra application exist; the application's client ID is the template
 >   default for `gatewayAudience`. The five repo-managed apps run images that contain the guard.
@@ -38,8 +38,9 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   authenticates to the gateway, both as a prompt-agent MCP tool through a project connection
 >   and through the hosted-agent code path.
 > - **Not done:** the insurance stack is still reachable directly, because its SPAs, five hosted
->   agents and the AI Gateway registrations call it directly, and the pipeline OIDC identities
->   are blocked. See [Remaining steps](#remaining-steps) and
+>   agents and the AI Gateway registrations call it directly. The pipeline OIDC identities need
+>   the owner-approved `--allow-public-repository` run, see [Repository visibility](#repository-visibility).
+>   See [Remaining steps](#remaining-steps) and
 >   [what is not verified](#not-verified-live-yet).
 
 ## What exists in `rg-northwind-apps`
@@ -207,16 +208,18 @@ previews by default and only changes things with `--apply`. Order matters.
    step 8, or the guard step will refuse to confirm.
 2. **Create the pipeline identities** (needs GitHub admin and Azure RBAC rights):
    ```powershell
-   python scripts/configure-github-oidc.py --only apim            # preview
-   python scripts/configure-github-oidc.py --only apim --apply
+   python scripts/configure-github-oidc.py --only apim --allow-public-repository            # preview
+   python scripts/configure-github-oidc.py --only apim --allow-public-repository --apply
    ```
    This creates `id-gh-northwind-apim-plan` / `-apply`, two custom roles scoped to the
    resource group, environments `northwind-apim-plan` / `northwind-apim-apply` pinned to
    `main`, and the variables including `NORTHWIND_APIM_ENABLED`. Add required reviewers
-   to `northwind-apim-apply` in the repository settings. Run it as the repository owner
-   (`ZacharyZurloMSFT`): it needs admin on the repository, and the Enterprise Managed
-   User account has read-only access. It currently refuses to run, see
-   [Known blocker](#known-blocker-repository-visibility).
+   to `northwind-apim-apply` in the repository settings, and do it **after** the script: it
+   rewrites each environment's branch policy and a later run would not preserve reviewers.
+   Run it as the repository owner (`ZacharyZurloMSFT`): it needs admin on the repository, and
+   the Enterprise Managed User account has read-only access. The repository is public, so the
+   script refuses without `--allow-public-repository`, see
+   [Repository visibility](#repository-visibility).
 3. **Create the gateway token identity** (done for this environment on 2026-10-22; re-running
    previews no actions and prints the values):
    ```powershell
@@ -308,22 +311,31 @@ previews by default and only changes things with `--apply`. Order matters.
    **Do not lock an app before everything that calls it has moved**, see
    [Remaining steps](#remaining-steps).
 
-### Known blocker: repository visibility
+### Repository visibility
 
-`configure-github-oidc.py` refuses to run (`Expected the private approved main-branch
-repository.`) because GitHub reports `ZacharyZurloMSFT/foundry-frontier` as **public**, while
-the script and the README assume a private repository. The check is a deliberate trust
-control and was not bypassed, and the repository's visibility was not changed. Decide one of:
+`ZacharyZurloMSFT/foundry-frontier` is **public**, while `configure-github-oidc.py` was written for
+a private repository and used to refuse (`Expected the private approved main-branch repository.`).
+On 2026-10-22 the owner approved accepting OIDC trust on the public repository, so the check is
+now an explicit opt-in: without `--allow-public-repository` the script still refuses. The opt-in
+relaxes **only** the visibility check. These are unchanged and still enforced:
 
-- make the repository private again (then run step 2 unchanged); or
-- accept OIDC trust on a public repository and relax that one check in a reviewed change.
-  Mitigations already in place: the subject claim uses immutable repository and owner IDs,
-  the environments are pinned to `main`, and fork pull requests cannot obtain these tokens.
-  What changes is that workflow logs, plan artifacts and step summaries become world-readable.
+- the immutable repository and owner IDs and the immutable OIDC subject (`validate_oidc_policy`):
+  a renamed, recreated or forked repository cannot obtain these identities;
+- the `main` default branch;
+- environments pinned to the `main` branch before any Azure trust exists, so only workflows
+  running on `main` can use them. Pull requests, including fork pull requests, cannot obtain
+  these tokens; dispatching the workflows needs write access;
+- apply identities that cannot read secrets (`listSecrets`) and are limited to an allow-list of
+  resource types in one resource group.
 
-Interim path used on 2026-10-22 (no Azure trust is created, so the check's intent is not
-affected): compile and apply the same boundary locally with the same guarded script, from a
-clean LF checkout of the merged commit so the template matches what CI would compile:
+What changes with a public repository: workflow logs, plan artifacts and step summaries are
+world-readable. They carry resource names and plan hashes only; the plan envelope never
+contains property values, and no secret is ever passed through the workflows. Making the
+repository private again needs no code change: run the script without the flag.
+
+Before the pipeline existed, the same boundary was applied locally with the same guarded script
+(on 2026-10-22, twice), from a clean LF checkout of the merged commit so the template matches
+what CI would compile. The procedure stays valid as a fallback:
 
 ```powershell
 git -c core.autocrlf=false worktree add --detach $env:TEMP\apim-src <main sha>
@@ -381,7 +393,7 @@ reversible.
 
 | Step | Why it is not done | How to finish |
 | --- | --- | --- |
-| Pipeline identities and the first pipeline apply | The repository is public and `configure-github-oidc.py` refuses to run, see [Known blocker](#known-blocker-repository-visibility). Until `NORTHWIND_APIM_ENABLED` exists, `deploy-apim.yml` is skipped. | Decide the visibility question, then runbook step 2. |
+| Pipeline identities and the first pipeline apply | The check that refused a public repository is now an explicit opt-in (owner-approved 2026-10-22), see [Repository visibility](#repository-visibility). Until `NORTHWIND_APIM_ENABLED` exists, `deploy-apim.yml` is skipped. | Runbook step 2 with `--allow-public-repository`, then plan and apply from Actions. |
 | Lock the insurance stack (`ca-insurance-*`) | It is the active stack. Its images were built by hand before the guard existed (the script refuses to confirm), its SPAs and five hosted agents still call it directly, and the AI Gateway registers `ca-insurance-lookup` and `ca-insurance-review` as direct tool servers with no credential, so locking would break all of them. | Release the apps from `main`, rebuild the SPAs with `VITE_API_BASE_URL=<gateway>/insurance`, redeploy the hosted agents (`MCP_GATEWAY_CONNECTION`, runbook steps 6 and 7), decide the AI Gateway registrations ([ai-gateway.md](./ai-gateway.md#findings-to-act-on), finding 8), then step 8 with `--stack insurance`. |
 | Run the northwind harness | It is `unavailable` there (it needs the verified insurance agent configuration), so its gateway settings could not be exercised. | Enable the insurance agent runtime on `ca-api`, then run a harness request and check it reaches the MCP apps through the gateway. |
 
