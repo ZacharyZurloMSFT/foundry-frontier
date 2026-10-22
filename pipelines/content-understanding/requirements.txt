@@ -1,7 +1,7 @@
 fastapi>=0.143.0,<1
 uvicorn[standard]>=0.54.0,<1
 httpx>=0.28.1,<1
-pydantic-settings>=2.7,<3
+pydantic-settings>=2.16.0,<3
 azure-identity>=1.26.0
 azure-storage-blob>=12.24
 azure-cosmos>=4.9
