@@ -1,7 +1,8 @@
 # Copilot coding agent setup steps.
 # These run in the Copilot sandbox before it works on any issue labeled
-# `copilot-fix` (the drift detector + red-team pipelines add that label
-# automatically). Keeps the agent from thrashing on missing tools.
+# `copilot-fix` (the `eval-regression` issue template applies that label; issues
+# are filed by hand now that the drift detector is retired).
+# Keeps the agent from thrashing on missing tools.
 name: copilot-setup-steps
 on: workflow_dispatch
 jobs:

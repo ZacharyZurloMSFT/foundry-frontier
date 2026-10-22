@@ -68,7 +68,7 @@ jobs:
             - Report: attached as workflow artifact
             - Prompt file: `agents/${{ matrix.agent }}.yaml`
 
-            All four eval tiers will re-run when you push a commit to this branch.
+            The PR checks (CI and the Tier-1 smoke eval) will re-run when you push a commit to this branch.
           branch: optimizer/${{ matrix.agent }}
           labels: optimizer, needs-review
       - uses: actions/upload-artifact@v7

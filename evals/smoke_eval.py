@@ -2,7 +2,7 @@
 
 Zero Azure credentials, zero cost, ~10s wall-time. The point is to catch
 obvious prompt breakage (blank output, malformed JSON from triage, missing
-required fields) before we spend Foundry quota on the Tier-2 golden set.
+required fields) before we spend Foundry quota on live evaluation.
 
 The endpoint contract: POST to https://models.github.ai/inference/chat/completions
 with the GITHUB_TOKEN as bearer, OpenAI-compatible request body. Set

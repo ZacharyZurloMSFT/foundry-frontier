@@ -55,7 +55,7 @@ def native_plan(manifest_path: Path, predictions_path: Path) -> dict:
         },
         "run": {"name": "frozen-test-" + manifest["version"],
                 "data_source": {"type": "jsonl", "source": {"type": "file_content", "content": items}}},
-        "note": "These string graders are supplemental; local schema/urgent denominators and four-tier gates remain authoritative.",
+        "note": "These string graders are supplemental; local schema/urgent denominators and the repository's eval gates remain authoritative.",
     }
 
 

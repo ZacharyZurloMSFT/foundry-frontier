@@ -304,7 +304,7 @@ def job_status(receipt_path: Path, output: Path) -> dict:
             "state": "not_deployed", "deployment_name": STAGING_DEPLOYMENT,
             "candidate_environment": {"TRIAGE_MODEL_DEPLOYMENT": STAGING_DEPLOYMENT},
             "activation_environment": {},
-            "required": "Human-approved ARM/portal staging deployment, frozen-test comparison and all four eval tiers.",
+            "required": "Human-approved ARM/portal staging deployment, frozen-test comparison and the repository's remaining eval gates.",
         },
     }
     write_json(output, result)

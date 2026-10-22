@@ -80,7 +80,7 @@ def status(workspace: Path, manifest_path: Path | None = None,
         result["blocked_reasons"].append("Training placement is blocked until the account default project is verified as northwind-orders")
     if not result["evaluation"].get("passed"):
         result["blocked_reasons"].append("No passing candidate-vs-baseline frozen-test evaluation selected")
-    result["blocked_reasons"].append("Staging deployment and four-tier evaluation promotion require a human")
+    result["blocked_reasons"].append("Staging deployment and evaluation promotion require a human")
     return result
 
 

@@ -1,14 +1,15 @@
 name: Eval regression
-description: File a regression when a prod trace fails an evaluator
-title: "[eval-regression] <metric> drifted <sigma>σ on <workflow>"
+description: File a regression when an evaluator, a red-team report or a production trace fails
+title: "[eval-regression] <metric> regressed on <workflow>"
 labels: ["eval-regression", "needs-triage", "copilot-fix"]
 body:
   - type: markdown
     attributes:
       value: |
-        This issue was filed automatically by the **drift detector** or the
-        **red-team** pipeline. The GitHub Copilot coding agent will pick it up
-        (see `.github/copilot-setup-steps.yml`) and draft a fix PR seeded with
+        File this by hand when an evaluator, a red-team report or a bad trace
+        shows a regression (the automatic drift detector was retired). The GitHub
+        Copilot coding agent picks up issues labelled `copilot-fix`
+        (see `.github/copilot-setup-steps.yml`) and drafts a fix PR seeded with
         the failing trace payload.
   - type: input
     id: workflow
