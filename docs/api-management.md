@@ -277,9 +277,11 @@ previews by default and only changes things with `--apply`. Order matters.
      (reads the key from `NORTHWIND_MCP_KEY`; add `--apply` after reviewing the preview).
    - SPAs (northwind: **done**, the release builds both bundles against the gateway): set the
      repository variable `NORTHWIND_GATEWAY_URL` and re-run the app release
-     (`VITE_API_BASE_URL` becomes `<gateway>/northwind`); build the insurance SPAs with
-     `VITE_API_BASE_URL=https://apim-northwind.azure-api.net/insurance`. The voice client
-     appends `/voice/realtime` to that base path. A local `azd deploy` of an SPA builds from
+     (`VITE_API_BASE_URL` becomes `<gateway>/northwind`). The same release also rebuilds the
+     insurance portal and voice client (`ca-insurance-portal`, `ca-insurance-voice`) with
+     `VITE_API_BASE_URL=<gateway>/insurance`; without the variable they keep calling
+     `ca-insurance-api` directly. The voice client appends `/voice/realtime` to that base path.
+     A local `azd deploy` of an SPA builds from
      `API_URI`, so keep `NORTHWIND_GATEWAY_URL` in the azd environment (the next provision then
      publishes the gateway URL as `API_URI`) or export `VITE_API_BASE_URL` yourself; otherwise
      the bundle calls the direct URL, which a locked-down app rejects.

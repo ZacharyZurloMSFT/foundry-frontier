@@ -21,8 +21,8 @@ REGISTRY = "acrzurlonorthwind.azurecr.io"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
 SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech", "web-voice")
 APPS = {f"ca-{service}": service for service in SERVICES}
-# Insurance-branded deployments reuse the api/web-tech images with their own configuration.
-RELEASE_APPS = {**APPS, "ca-insurance-api": "api", "ca-insurance-portal": "web-tech"}
+# Insurance-branded deployments reuse the api/web images (or a rebuild of the web sources) with their own configuration.
+RELEASE_APPS = {**APPS, "ca-insurance-api": "api", "ca-insurance-portal": "web-tech", "ca-insurance-voice": "web-voice"}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
 SHA = re.compile(r"[0-9a-f]{40}")

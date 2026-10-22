@@ -199,6 +199,27 @@ def test_ready_requires_separate_agent_config_and_never_retail(insurance_config)
     assert not insurance.insurance_runtime_ready()
 
 
+def test_ready_accepts_the_retained_insurance_project_only_with_a_matching_endpoint(insurance_config):
+    insurance_config.insurance_agents_ready = True
+    insurance_config.order_agents_hosted = True
+    insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
+    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
+    assert insurance.insurance_runtime_ready()
+    assert insurance.INSURANCE_PROJECTS == {"northwind-orders", "nw-insurance-claims"}
+    # The endpoint must name the configured project, and neither the legacy web project nor a look-alike is accepted.
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    assert not insurance.insurance_runtime_ready()
+    for other in ("northwind", "nw-insurance-claims-old", "NW-INSURANCE-CLAIMS", ""):
+        insurance_config.order_project_name = other
+        insurance_config.foundry_project_endpoint = f"https://existing.invalid/api/projects/{other}"
+        assert not insurance.insurance_runtime_ready()
+    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
+    insurance_config.insurance_agents_ready = False
+    assert not insurance.insurance_runtime_ready(), "readiness still needs the explicit flag"
+
+
 @pytest.mark.asyncio
 async def test_configured_insurance_inference_cannot_call_retail_agents(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
