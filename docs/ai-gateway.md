@@ -8,10 +8,11 @@ How Northwind sends model inference and MCP traffic through the Azure API Manage
 
 | In scope | Out of scope (stay direct) |
 |---|---|
-| Foundry hosted agents and prompt agents | Search knowledge-base planner and vectorizer calls to models |
+| Foundry hosted agents (models and MCP) and prompt-agent knowledge-base MCP | Search knowledge-base planner and vectorizer calls to models |
 | `apps/api` model calls (safety, bake-off, adjuster support, Copilot harness) | Content Understanding, Voice Live (`gpt-realtime-2.1`) |
 | Insurance MCP servers used by agents: policy/claim lookup, insurance knowledge base, claim-action review | Foundry evaluations, red-team, optimizer, fine-tuning |
 | | The retail orders MCP apps (`ca-mcp-tech-lookup`, `ca-mcp-work-order`): dropped from scope at the owner's direction, neither registered nor changed |
+| | Prompt-agent model calls: Foundry cannot address the gateway's `provider/registration` aliases (finding 9) |
 | | GitHub Models smoke tier, eval/seed scripts |
 | | Agent-to-agent calls (Agent Service traffic is neither model nor MCP) |
 
@@ -73,6 +74,13 @@ Verified on 2026-10-22 after PR #61 merged (`87731ac`), from the workflow runs a
 | Hosted agents, prompt agents, connections, role grants, enforcement | **not applied**: runbook steps 2, 3, 5, 6 and 8 |
 | Infrastructure | unchanged: the plan is identical before and after the merge, and apply is a manual dispatch |
 
+### Verified live (2026-10-22, after the table above)
+
+- **Tool servers through the gateway:** `release verify` listed exactly the expected tools on all three servers, and read-only `lookup_policy`, `lookup_claim` and `knowledge_base_retrieve` calls succeeded (the review tool was not called). The temporary Tools User assignment used for this was revoked from its receipt.
+- **The API's model client:** the real app, run in-process with the operator's identity against the live gateway (no deployed app was touched), reported `/gateway/status` enabled with the alias map, answered `/safety/check` (`foundry-guardrails via AI Gateway`) and streamed the two-model bake-off, all served by the gateway.
+- **The hosted agents' MCP design:** one Responses call through the gateway, with an `mcp` tool pointed at a gateway tool server and a runtime key in the `api-key` header, made Foundry list the prefixed tool and execute it (`lookup_lookup_policy`, `knowledge_knowledge_base_retrieve`), and the model answered from the result. The canary keys were deleted afterwards; only `master` remains.
+- **Prompt agents cannot use the gateway** for models (finding 9).
+
 ## Routing design
 
 | Traffic | Route | Notes |
@@ -80,7 +88,7 @@ Verified on 2026-10-22 after PR #61 merged (`87731ac`), from the workflow runs a
 | Hosted agent inference | client-side gateway (`ORDERS_MODEL_GATEWAY_*`) | `AI_GATEWAY_REQUIRED=true` makes direct paths a startup error |
 | Hosted provider-executed MCP (order lookup, policy lookup) | gateway tool server via Responses `mcp` tool; runtime key read from a project connection at startup | `ORDERS_MCP_GATEWAY`, `AI_GATEWAY_MCP_REQUIRED` |
 | Hosted resolution draft / work-order MCP | **`apim-northwind` or direct, never the AI Gateway** | needs application-bound headers the AI Gateway drops; `northwind-insurance-review` is registered on the AI Gateway at the owner's request but rejects every call by design (finding 1) |
-| Prompt agent inference | Foundry model connection (`ApiManagement`), model string `<connection>/<alias>` | connection payload for this tier is unverified; canary first |
+| Prompt agent inference | **direct (cannot be routed today)** | Foundry rejects the gateway's `provider/registration` aliases as model ids (finding 9) |
 | Prompt agent knowledge-base MCP | the KB's gateway tool server, connection holding the runtime key | `AI_GATEWAY_MCP_KB_ROUTES`; a KB without a route stays on Search unless `AI_GATEWAY_MCP_REQUIRED` |
 | API app inference | `apps/api/app/model_gateway.py` with Entra token | `AI_GATEWAY_MODEL_*` settings; `GET /gateway/status` |
 | Copilot harness inference | SDK provider pointed at the gateway | same settings |
@@ -91,13 +99,13 @@ All optional; empty means unset and keeps the current direct behaviour (fresh `a
 
 | Setting | Purpose |
 |---|---|
-| `AI_GATEWAY_REQUIRED` | models must use the gateway (hosted agents, API app, prompt-agent creation); fail closed |
+| `AI_GATEWAY_REQUIRED` | models must use the gateway (hosted agents, API app); fail closed. **Do not set it in the azd environment yet**: `postprovision` runs `create-prompt-agents.py`, which currently refuses to run when it is set (it demands a prompt-agent model connection that cannot work, finding 9). Set it per app or agent instead, as the runbook does |
 | `AI_GATEWAY_MCP_REQUIRED` | hosted order/policy lookup MCP and prompt-agent knowledge-base MCP must use the gateway; fail closed |
 | `ORDERS_MODEL_GATEWAY_ENDPOINT/_MODEL/_DEPLOYMENT/_SCOPE` | existing hosted-agent contract |
 | `ORDERS_MCP_GATEWAY` | hosted agents: JSON per role: `url`, `tool_prefix`, `connection`, optional `forwards_headers` |
 | `MCP_GATEWAY_CONNECTION` | hosted agents routing `orderlookup` / `resolutiondraft` through `apim-northwind` (the [API Management](./api-management.md) contract); mutually exclusive with `ORDERS_MCP_GATEWAY` for the same role |
 | `AI_GATEWAY_MODEL_ENDPOINT`, `AI_GATEWAY_SCOPE`, `AI_GATEWAY_MODEL_PROVIDER`, `AI_GATEWAY_MODEL_ALIASES` | API app |
-| `AI_GATEWAY_MODEL_CONNECTION` | Foundry model connection used by prompt agents |
+| `AI_GATEWAY_MODEL_CONNECTION` | Foundry model connection for prompt agents; **not usable with the AI Gateway tier** (finding 9), leave it unset |
 | `AI_GATEWAY_MCP_KB_ROUTES` | prompt agents: JSON keyed by Search knowledge-base name, `{"toolserver", "connection", "tool_prefix"?}` (prefix defaults to `knowledge_`) |
 
 ### Two gateways
@@ -121,6 +129,7 @@ For one hosted role the two routes are mutually exclusive: setting both `MCP_GAT
 6. **The runtime key is gateway-wide.** A gateway API key can call every model and every published tool server; it cannot be scoped to one tool server. The runbook therefore creates a dedicated named key for MCP (`northwind-mcp-runtime`) so it can be rotated or deleted without touching the built-in `master` key. Replacing the key with per-identity Entra tokens (project managed identity on the connection, or a token minted per request by the agent) would remove the stored secret; that path is not implemented here and was only verified manually with a user token.
 7. **Resolved (2026-10-22): the gateway had no diagnostic settings.** `northwind-gateway-to-law` now sends `GatewayLogs`, `GatewayLlmLogs`, `GatewayMCPLogs` and metrics to `log-zurlo-northwind`, and `northwind-account-to-law` sends the Foundry account's `RequestResponse` logs there too; the policy-assigned `setByPolicy-MCAPSGovernance` setting is untouched. The bypass-detection KQL was run against that workspace and corrected: on this tier model calls land in `ApiManagementGatewayLlmLog` and MCP calls in `ApiManagementGatewayMCPLog` (`ApiManagementGatewayLogs` stayed empty), Foundry's `RequestResponse` rows are in `AzureDiagnostics` with the caller in `properties_s.objectId`, and Responses calls are named `create-response` (the first template filtered on operation names that never occur, so it would have reported nothing).
 8. The MCP container apps (`ca-insurance-lookup`, `ca-insurance-review`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`) have public ingress, no authentication and no IP restrictions, so routing through the gateway does not stop anyone calling them directly. Locking them down (Container Apps authentication accepting only the gateway identity, then switching the tool server credential from `none` to `managedIdentity`) is a gated manual decision, not done here.
+9. **Prompt agents cannot route model calls through the AI Gateway tier** (tried 2026-10-22 with throwaway connections and a throwaway agent, all deleted afterwards). Foundry resolves the connection only when it uses `ApiKey` auth (an `AAD` connection answers `Connection ... not found`), then validates the model id as letters, digits, `-`, `_` and `.`, so the gateway's `provider/registration` alias is rejected (`Invalid model_id 'aisvc-zurlo-northwind/gpt-4o'`). The gateway in turn accepts only that alias in the request body: a bare registration is `model_not_found`, and path-style routes answer `A model alias is required in the request body`. Mapping a short connection entry name to the alias does not help, because Foundry sends the entry `name` (`'gpt-4o' is not a known model alias`). The two live prompt agents therefore stay direct. Options, all needing a decision: move them to hosted agents (which call the gateway themselves with the alias), publish them through a classic API Management Azure OpenAI API instead, or ask the platform teams for slash-free aliases or a mapping field.
 
 ## Runbook
 
@@ -191,14 +200,7 @@ python scripts/connect-mcp-gateway.py --project-arm-id $project --toolserver nor
 Remove-Item Env:AI_GATEWAY_RUNTIME_KEY
 ```
 
-Prompt agents need a model connection as well. **Its payload for the AI Gateway tier is not verified live**, so create it and run one canary before anything else uses it:
-
-```powershell
-python scripts/connect-model-gateway.py --name nw-gateway-models            # dry run: prints the PUT and the model strings
-python scripts/connect-model-gateway.py --name nw-gateway-models --apply
-```
-
-Canary: create one throwaway prompt agent (`zz-gateway-canary`) with `model` `nw-gateway-models/aisvc-zurlo-northwind/gpt-4o`, send it one message in the Foundry playground, confirm it answered and delete it. The identity Foundry calls the gateway with (the project or account managed identity) needs Models User on the gateway; the script does not grant it. Prompt agents use chat completions only, so `Kimi-K2.6` works there but not through the Responses API.
+Do **not** create a prompt-agent model connection for the AI Gateway tier: it was tried on 2026-10-22 and cannot work (finding 9). `connect-model-gateway.py` remains for gateways whose model aliases are slash-free.
 
 ### 4. API app
 
@@ -242,14 +244,15 @@ That is a dry run; it validates the gateway settings before any network call and
 
 ### 6. Prompt agents
 
+Prompt-agent **model** calls stay direct (finding 9); only their knowledge-base MCP can be routed, and that route is **not verified live** for prompt agents (the hosted-agent MCP path is, see [Deployment status](#deployment-status)).
+
 ```powershell
 $env:FOUNDRY_PROMPT_AGENT_DEPLOYMENT = 'gpt-4o'                    # plus the usual azd environment values
-$env:AI_GATEWAY_MODEL_CONNECTION = 'nw-gateway-models'
 $env:AI_GATEWAY_MCP_KB_ROUTES = '{"nw-hr-kb": {"toolserver": "northwind-hr-knowledge", "connection": "nw-hr-kb-gw"}}'
 python scripts/create-prompt-agents.py --dry-run
 ```
 
-The dry run prints every planned agent, for example `model=nw-gateway-models/aisvc-zurlo-northwind/gpt-4o; tools=mcp:nw-hr-kb@ai-gateway`, and sends nothing. Each routed knowledge base needs its own project connection (`connect-mcp-gateway.py --toolserver northwind-hr-knowledge --connection-name nw-hr-kb-gw`). The four existing knowledge servers map to `nw-hr-kb`, `nw-claims-kb`, `nw-contact-center-kb` and `northwind-kb` (`northwind-{hr,claims,contact-center,orders}-knowledge`). With `AI_GATEWAY_REQUIRED=true` the script exits before creating anything when the model connection is missing. With `AI_GATEWAY_MCP_REQUIRED=true` an agent whose knowledge base has no route (or whose yaml `mcp` tool is not on the gateway) is **not created** and the run exits non-zero, while agents that comply are still created, so run `--dry-run` first: it lists every such agent (marked `x`, exit code 1) before anything is sent. Re-run without `--dry-run` once the canary passed.
+The dry run prints every planned agent, for example `model=gpt-4o; tools=mcp:nw-hr-kb@ai-gateway`, and sends nothing. Each routed knowledge base needs its own project connection (`connect-mcp-gateway.py --toolserver northwind-hr-knowledge --connection-name nw-hr-kb-gw`). The four existing knowledge servers map to `nw-hr-kb`, `nw-claims-kb`, `nw-contact-center-kb` and `northwind-kb` (`northwind-{hr,claims,contact-center,orders}-knowledge`). With `AI_GATEWAY_MCP_REQUIRED=true` an agent whose knowledge base has no route (or whose yaml `mcp` tool is not on the gateway) is **not created** and the run exits non-zero, while agents that comply are still created, so run `--dry-run` first: it lists every such agent (marked `x`, exit code 1) before anything is sent. `create-prompt-agents.py` iterates every department in `data/northwind/company.yaml` and creates the flagship order-concierge set too, so against the live insurance projects run it only with `--dry-run` until that mapping matches them.
 
 ### 7. Verify
 
@@ -300,5 +303,5 @@ Live, after each routing step:
 - **Grants:** `python scripts/ai-gateway-grants.py plan --principals principals.json` reports everything already present.
 - **API app:** `GET https://ca-insurance-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/gateway/status`, or through API Management at `https://apim-northwind.azure-api.net/insurance/gateway/status` (the northwind-stack `ca-api` rejects direct calls once `NORTHWIND_GATEWAY_AUTH_REQUIRED` is on, so use `.../northwind/gateway/status` for it). A 404 means the app still runs a build without the gateway code (the insurance API on 2026-10-22). Once routed it returns `"enabled": true`, `"required": true` once enforced, `"features"` all `"gateway"` and `"problem": null`, plus the deployment to alias map (`gpt-5.4` to `aisvc-zurlo-northwind/gpt-5-4`). Traces carry `gateway.route` and `gateway.model_alias`, and the trace panel marks each model call the gateway served with an **AI Gateway** badge showing the alias.
 - **Hosted agents:** responses carry `model_gateway_required` and `mcp_route` metadata; a version without the flags omits them.
-- **Prompt agents:** `create-prompt-agents.py --dry-run` shows `@ai-gateway` on every gateway-routed MCP tool (`@apim` for ones through `apim-northwind`, `@direct` for the rest) and a `nw-gateway-models/...` model string on every agent.
+- **Prompt agents:** `create-prompt-agents.py --dry-run` shows `@ai-gateway` on every gateway-routed MCP tool (`@apim` for ones through `apim-northwind`, `@direct` for the rest); their model strings stay plain deployment names (finding 9).
 - **Bypass detection:** `python scripts/ai-gateway-enforce.py audit` prints ready-to-run KQL (`foundryNotFromGateway`, `inScopeIdentitiesBypassing`, `gatewayTraffic`, `gatewayModelUsage`). All four were run against `log-zurlo-northwind` on 2026-10-22 (finding 7): in the 12 hours checked every inference call to the account was attributed to the gateway identity, so `foundryNotFromGateway` returned nothing. Gateway tables take 5 to 15 minutes to fill after the first traffic.
