@@ -274,8 +274,10 @@ def az_rest(method: str, url: str, body: Mapping[str, Any]) -> dict[str, Any]:
                  "--headers", "Content-Type=application/json", "--output", "json"]
     if any(_UNSAFE_ARGUMENT.search(argument) for argument in arguments):
         raise RuntimeError("A request argument contains characters that are unsafe for the Azure CLI launcher")
-    with tempfile.TemporaryDirectory() as directory:
-        (Path(directory) / "body.json").write_text(json.dumps(body), encoding="utf-8")
+    directory = tempfile.mkdtemp(prefix="aigw-connection-")
+    body_file = Path(directory) / "body.json"
+    try:
+        body_file.write_text(json.dumps(body), encoding="utf-8")
         try:
             completed = subprocess.run(
                 [az, *arguments], capture_output=True, encoding="utf-8", errors="replace",
@@ -285,6 +287,11 @@ def az_rest(method: str, url: str, body: Mapping[str, Any]) -> dict[str, Any]:
             raise RuntimeError(f"az rest {method} timed out; check the connection in Foundry before retrying") from None
         except OSError as exc:
             raise RuntimeError(f"Azure CLI could not be started: {exc.strerror or type(exc).__name__}") from None
+    finally:
+        # The body can hold a key, so delete it first. On Windows the Azure CLI's telemetry process can still hold
+        # the directory as its working directory, so removing the directory is best effort and never an error.
+        body_file.unlink(missing_ok=True)
+        shutil.rmtree(directory, ignore_errors=True)
     if completed.returncode != 0:
         detail = scrub(completed.stderr.strip(), secret_values(body))[:800]
         raise RuntimeError(f"az rest {method} failed with exit code {completed.returncode}: {detail}")

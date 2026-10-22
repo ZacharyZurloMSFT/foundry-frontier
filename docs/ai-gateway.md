@@ -99,7 +99,7 @@ All optional; empty means unset and keeps the current direct behaviour (fresh `a
 
 | Setting | Purpose |
 |---|---|
-| `AI_GATEWAY_REQUIRED` | models must use the gateway (hosted agents, API app); fail closed. **Do not set it in the azd environment yet**: `postprovision` runs `create-prompt-agents.py`, which currently refuses to run when it is set (it demands a prompt-agent model connection that cannot work, finding 9). Set it per app or agent instead, as the runbook does |
+| `AI_GATEWAY_REQUIRED` | models must use the gateway (hosted agents, API app); fail closed. It does not apply to prompt-agent models, which stay direct (finding 9): `create-prompt-agents.py` (run by `postprovision`) validates the flag but ignores it, so setting it in the azd environment does not break `azd up`. It does make the hosted agents fail closed on their next deploy, so set it there only after the gateway route is verified |
 | `AI_GATEWAY_MCP_REQUIRED` | hosted order/policy lookup MCP and prompt-agent knowledge-base MCP must use the gateway; fail closed |
 | `ORDERS_MODEL_GATEWAY_ENDPOINT/_MODEL/_DEPLOYMENT/_SCOPE` | existing hosted-agent contract |
 | `ORDERS_MCP_GATEWAY` | hosted agents: JSON per role: `url`, `tool_prefix`, `connection`, optional `forwards_headers` |

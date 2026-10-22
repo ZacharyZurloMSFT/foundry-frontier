@@ -107,9 +107,10 @@ def test_settings_from_environment():
 
 
 @pytest.mark.parametrize("flag", ["true", "1", "yes", " TRUE ", "Yes"])
-def test_required_without_a_connection_fails_closed(flag):
-    with pytest.raises(ValueError, match="AI_GATEWAY_REQUIRED.*AI_GATEWAY_MODEL_CONNECTION"):
-        agents_script.gateway_models_from_env({"AI_GATEWAY_REQUIRED": flag})
+def test_required_without_a_connection_leaves_prompt_agent_models_direct(flag):
+    # Prompt-agent models cannot be routed through the AI Gateway tier (finding 9), so the flag must not make a
+    # connection mandatory: azd's postprovision runs this script with the flag set for the hosted agents.
+    assert agents_script.gateway_models_from_env({"AI_GATEWAY_REQUIRED": flag}) is None
 
 
 @pytest.mark.parametrize("flag", ["", "false", "0", "no", "off", " OFF "])
@@ -235,15 +236,27 @@ def test_dry_run_reports_a_planning_error_and_exits_non_zero(monkeypatch, capsys
     assert "AZURE_SEARCH_ENDPOINT" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_required_without_a_connection_exits_before_any_agent_is_created(monkeypatch, capsys, prompt_environment,
-                                                                         dry_run):
+def test_required_without_a_connection_still_plans_direct_prompt_agents(monkeypatch, capsys, prompt_environment):
     monkeypatch.setenv("AI_GATEWAY_REQUIRED", "true")
     forbid_foundry(monkeypatch)
-    with pytest.raises(SystemExit) as raised:
-        asyncio.run(agents_script.main(dry_run=dry_run))
-    assert raised.value.code == 1
-    assert "AI_GATEWAY_MODEL_CONNECTION" in capsys.readouterr().err
+    asyncio.run(agents_script.main(dry_run=True))
+    out = capsys.readouterr().out
+    assert "Gateway model connection" not in out
+    assert "northwind-claims-triage (model=gpt-4o; tools=none)" in out
+
+
+def test_a_configured_model_connection_warns_that_foundry_rejects_the_alias(monkeypatch, capsys, prompt_environment):
+    monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
+    forbid_foundry(monkeypatch)
+    asyncio.run(agents_script.main(dry_run=True))
+    err = capsys.readouterr().err
+    assert "Foundry rejects a model id that contains '/'" in err and "finding 9" in err
+
+
+def test_without_a_model_connection_nothing_is_warned(monkeypatch, capsys, prompt_environment):
+    forbid_foundry(monkeypatch)
+    asyncio.run(agents_script.main(dry_run=True))
+    assert "finding 9" not in capsys.readouterr().err
 
 
 def recording_project(sink):
@@ -343,8 +356,7 @@ def test_review_agent_model_follows_the_prompt_agent_rule(monkeypatch):
     assert setup_script.agent_model("Kimi-K2.6") == "my-conn/aisvc-zurlo-northwind/kimi-k2-6"
     monkeypatch.delenv("AI_GATEWAY_MODEL_CONNECTION")
     monkeypatch.setenv("AI_GATEWAY_REQUIRED", "true")
-    with pytest.raises(ValueError, match="AI_GATEWAY_MODEL_CONNECTION"):
-        setup_script.agent_model("gpt-4o")
+    assert setup_script.agent_model("gpt-4o") == "gpt-4o"
 
 
 def test_review_dry_run_report_only_names_the_model_in_gateway_mode(monkeypatch, capsys):
@@ -356,15 +368,11 @@ def test_review_dry_run_report_only_names_the_model_in_gateway_mode(monkeypatch,
     assert json.loads(capsys.readouterr().out)["model"] == "my-conn/aisvc-zurlo-northwind/gpt-4o"
 
 
-def test_review_required_without_a_connection_exits_before_any_client(monkeypatch, capsys):
-    setup_arguments(monkeypatch, "--apply")
+def test_review_required_without_a_connection_keeps_the_direct_model(monkeypatch, capsys):
+    setup_arguments(monkeypatch)
     monkeypatch.setenv("AI_GATEWAY_REQUIRED", "yes")
-    monkeypatch.setattr(setup_script, "AzureCliCredential", Offline)
-    monkeypatch.setattr(setup_script, "AIProjectClient", Offline)
-    with pytest.raises(SystemExit) as raised:
-        setup_script.main()
-    assert "AI_GATEWAY_MODEL_CONNECTION" in str(raised.value)
-    assert capsys.readouterr().out == ""
+    setup_script.main()
+    assert "model" not in json.loads(capsys.readouterr().out)
 
 
 def review_project(versions, created):

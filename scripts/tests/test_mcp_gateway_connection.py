@@ -215,6 +215,27 @@ def test_az_rest_passes_the_body_by_file_and_keeps_the_key_off_the_command_line(
     assert not seen["path"].exists(), "the body file must be removed once az returns"
 
 
+def test_az_rest_succeeds_and_leaves_no_key_behind_when_the_directory_cannot_be_removed(monkeypatch):
+    # On Windows the Azure CLI's telemetry process can keep the working directory open after az returns.
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["directory"] = Path(kwargs["cwd"])
+        return subprocess.CompletedProcess(argv, 0, stdout='{"id": "connection-id"}', stderr="")
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: "az-fixture")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.shutil, "rmtree", lambda *args, **kwargs: None)
+    body = module.build_connection_body("nw-insurance-claims-gateway-mcp", TARGET, KEY)
+    try:
+        assert module.az_rest("PUT", URL, body) == {"id": "connection-id"}
+        assert seen["directory"].exists(), "the stubbed rmtree leaves the directory, as a locked one would"
+        assert not (seen["directory"] / "body.json").exists(), "the key-bearing body must be deleted regardless"
+    finally:
+        monkeypatch.undo()
+        module.shutil.rmtree(seen["directory"], ignore_errors=True)
+
+
 @pytest.mark.parametrize("url", [
     "https://management.azure.com/x&calc", "https://management.azure.com/x|y", 'https://management.azure.com/x"y',
     "https://management.azure.com/%PATH%", "https://management.azure.com/x\ny", "https://management.azure.com/x^y",

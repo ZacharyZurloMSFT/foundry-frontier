@@ -40,15 +40,18 @@ never rewritten; direct Container App URLs behave exactly as before. Those conne
 attached to a URL on the AI Gateway host.
 
 AI Gateway routing (opt-in; unset means the behaviour above, unchanged).
-When `AI_GATEWAY_MODEL_CONNECTION` names the Foundry `ApiManagement` model
-connection created by `scripts/connect-model-gateway.py`, every agent model
-(the department default and any yaml `model:` override) is sent as
-`<connection>/<provider>/<registration>`, for example
-`nw-gateway/aisvc-zurlo-northwind/gpt-4o`, so Foundry calls the model through
-the AI Gateway. `AI_GATEWAY_MODEL_PROVIDER` (default `aisvc-zurlo-northwind`)
-and `AI_GATEWAY_MODEL_ALIASES` (JSON map of deployment -> full alias, wins
-over derivation) tune the alias. `AI_GATEWAY_REQUIRED=true` without a
-connection exits non-zero before any agent is created.
+Model calls: NOT USABLE with the AI Gateway tier (verified 2026-10-22, docs/ai-gateway.md
+finding 9). Foundry rejects a model id that contains '/', and the gateway needs a
+`<provider>/<registration>` alias in the request body, so agents created through
+`AI_GATEWAY_MODEL_CONNECTION` fail at inference; `main` warns when it is set.
+When it names a Foundry `ApiManagement` model connection created by
+`scripts/connect-model-gateway.py`, every agent model (the department default and any
+yaml `model:` override) is sent as `<connection>/<provider>/<registration>`.
+`AI_GATEWAY_MODEL_PROVIDER` (default `aisvc-zurlo-northwind`) and `AI_GATEWAY_MODEL_ALIASES`
+(JSON map of deployment -> full alias, wins over derivation) tune the alias.
+`AI_GATEWAY_REQUIRED` is validated but does not apply to prompt-agent models: leaving the
+connection unset creates direct agents, so `azd up` post-provision keeps working when the
+flag is set for the hosted agents and the API.
 
 The knowledge-base MCP tools follow the same opt-in. `AI_GATEWAY_MCP_KB_ROUTES`
 is a JSON object keyed by Search knowledge-base name:
@@ -225,19 +228,15 @@ def _parse_aliases(raw: str) -> dict[str, str]:
 def gateway_models_from_env(env: Mapping[str, str] | None = None) -> GatewayModels | None:
     """The gateway model routing requested by the environment, or None for direct models.
 
-    Raises ValueError for a malformed setting, and when AI_GATEWAY_REQUIRED is
-    set without AI_GATEWAY_MODEL_CONNECTION, so nothing is created that would
-    bypass the gateway.
+    Raises ValueError for a malformed setting. AI_GATEWAY_REQUIRED is validated (a typo must not silently
+    disable a fail-closed control) but does not make a model connection mandatory: prompt agents cannot be
+    routed through the AI Gateway tier (Foundry rejects its `provider/registration` alias as a model id, see
+    docs/ai-gateway.md finding 9), so requiring one would only break `azd up` post-provision.
     """
     source = os.environ if env is None else env
-    required = _env_flag(source, "AI_GATEWAY_REQUIRED")
+    _env_flag(source, "AI_GATEWAY_REQUIRED")
     connection = str(source.get("AI_GATEWAY_MODEL_CONNECTION") or "").strip()
     if not connection:
-        if required:
-            raise ValueError(
-                "AI_GATEWAY_REQUIRED is set but AI_GATEWAY_MODEL_CONNECTION is empty: prompt agents must use "
-                "the Foundry gateway model connection (create it with scripts/connect-model-gateway.py)."
-            )
         return None
     if not _CONNECTION_NAME.fullmatch(connection):
         raise ValueError("AI_GATEWAY_MODEL_CONNECTION must be a Foundry connection name "
@@ -738,6 +737,10 @@ async def main(dry_run: bool = False) -> None:
     if gateway:
         print(f"Gateway model connection: {gateway.connection} (provider {gateway.provider}); "
               f"agent models are sent as {gateway.connection}/<alias>")
+        print("WARNING: Foundry rejects a model id that contains '/' and the AI Gateway tier needs a "
+              "'<provider>/<registration>' alias, so agents created with these models fail at inference "
+              "(verified 2026-10-22, docs/ai-gateway.md finding 9). Leave AI_GATEWAY_MODEL_CONNECTION unset.",
+              file=sys.stderr)
     if mcp:
         print(f"Gateway MCP: {len(mcp.routes)} knowledge-base route(s)"
               + ("; knowledge bases without a route are an error" if mcp.required else ""))
