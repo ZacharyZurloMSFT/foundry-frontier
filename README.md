@@ -1,44 +1,38 @@
 # Northwind Insurance Copilot
 
 An end-to-end, production-shaped demo of **Azure AI Foundry** built on the
-fictional Northwind Insurance, a property-and-casualty insurer with
-**four departments**, each showcasing a different Foundry pillar. One
-shared Foundry account supports the retained retail demo and the separate
-insurance release. All insurance records and policy wordings are synthetic.
+fictional Northwind Insurance, a property-and-casualty insurer. The product is
+one Microsoft Entra-protected portal: policyholders see their own policies and
+claims and report losses, adjusters work cases with a human in control, and
+identity-bound AI assistants are embedded in the sections where that work
+happens. There is no separate "AI workspace" and no department picker. All
+insurance records and policy wordings are synthetic.
 
-- **Claims Concierge** (multi-agent + HITL): intake triage, policy/claim
-  lookup, cited policy-wording guidance and proposed adjuster actions.
-  Human approval reviews a draft only; it does not approve coverage, deny
-  a claim, execute a settlement or issue a payment.
-- **Employee & Adjuster Support** (RAG): retains HR/IT material and adds
-  fictional claims-handling procedures.
-- **Claims Document Intelligence**: live Content Understanding over actual
-  allowlisted synthetic PDFs or bounded PDF/JPEG/PNG uploads. Results retain
-  typed fields, confidence and source spans; no authored extraction fallback.
-- **Policyholder Contact Center** (Voice Live): insurance intake and
-  claim-status examples, with readiness-gated handoff.
+- **Policies, claims and loss reporting**: a persistent, server-authorised
+  business layer behind `/api/v1` (see the connected journey below). Human
+  review covers drafts and case work only; nothing here approves coverage,
+  denies a claim, executes a settlement or issues a payment.
+- **Embedded assistants** (disabled by default): the Claims Concierge is
+  scoped to the signed-in policyholder's own policies and claims, and the
+  Help Center answers from published customer help articles. See
+  [Embedded assistants](#embedded-assistants-identity-bound).
+- **Claim documents and evidence review**: live Content Understanding over
+  actual allowlisted synthetic PDFs or bounded PDF/JPEG/PNG uploads. Results
+  retain typed fields, confidence and source spans, require human review and
+  never fall back to an authored extraction.
 
 Insurance activation is explicit: `NORTHWIND_BUSINESS_DOMAIN=insurance`.
-Records and pending review drafts work independently of agent deployment.
-`NORTHWIND_INSURANCE_AGENTS_READY` stays `false` until the dedicated
-`northwind-insurance-*` fleet, isolated knowledge base and native
-`northwind-orders` endpoint have been deployed and verified. Unavailable
-insurance inference returns a surfaced error instead of calling retail agents.
-The converted Copilot SDK harness uses insurance tools and pending-only
-human-review drafts. SDK/runtime availability is verified by real execution,
-not inferred from an enabled flag.
+Records and the connected journey work independently of agent deployment.
+`NORTHWIND_INSURANCE_AGENTS_READY` is read only by the hosted agents and stays
+`false` until the dedicated `northwind-insurance-*` fleet, isolated knowledge
+base and native `northwind-orders` endpoint have been deployed and verified.
 
 The first insurance release is deployed: the portal/API/MCP services are in
 Apps, the isolated 13-document knowledge base is in Data, and the five
-dedicated hosted agents are in the existing Orders project in AI. The claims
-manager uses supported named-agent endpoints for specialist delegation.
-The insurance experience release is now deployed: grounded employee/adjuster
-support, the real Copilot SDK harness, native Voice Live through a managed-
-identity WebSocket proxy, confirmed claims handoff, and live CU extraction.
-The voice proxy never sends a broad Azure credential to the browser. Its
-single-use, origin-bound tickets are atomically consumed in Cosmos and work
-across API replicas. Physical microphone interaction is not certified by
-synthetic service-level smoke checks.
+dedicated hosted agents are in the existing Orders project in AI. The portal
+does not call the hosted agents, the MCP servers or the per-department Foundry
+projects; they remain deployed platform assets (see
+[Removed legacy surfaces](#removed-legacy-surfaces)).
 
 `data/northwind/insurance-fixtures.json` drives shared record validation and
 versioned, effective-date/jurisdiction-aware wording citations. Publish the
@@ -50,19 +44,36 @@ qualified insurance review, training authorization or production approval.
 Manual upload remains blocked by Scout's file-upload permission; no native
 paid batch is admitted while all-call cost/token bounds remain unverified.
 
-The isolated `nw-insurance-adjuster-support` index contains 19 fictional
-HR/IT/adjuster documents. The API uses managed identity; Search retains its
-existing key authentication alongside Azure AD. The CU analyzer
-`northwindInsuranceClaimsV1` uses existing `gpt-4o` and
+The CU analyzer `northwindInsuranceClaimsV1` uses existing `gpt-4o` and
 `text-embedding-3-small` deployments. CU model-role mappings were configured;
 the Foundry account default project was not changed.
 
-Capability switches are `ADJUSTER_SUPPORT_ENABLED`, `COPILOT_HARNESS_ENABLED`,
-`NORTHWIND_CU_ENABLED`, `VOICE_LIVE_ENABLED`, `VOICE_LIVE_READY` and
+Capability switches are `NORTHWIND_CU_ENABLED` and
 `NORTHWIND_ASSISTANTS_ENABLED` with an explicit `NORTHWIND_ASSISTANT_SURFACES`
 allowlist. Keep them disabled until their real dependencies and supported
 transport are verified. CU upload limit is 10 MiB; extracted facts still require
 human review, especially missing or low-confidence fields.
+
+### Removed legacy surfaces
+
+The legacy department shell and every unauthenticated endpoint that served it
+were deleted: `/chat`, `/qa`, `/handoff`, `/agent/*`, `/hitl`, `/work-orders`,
+`/voice/*`, `/company`, `/departments`, `/bakeoff/*`, `/safety/*`, `/traces/*`,
+`/insurance/*`, the old `/claims/*` document-intelligence router,
+`/adjuster-support/*` and the Copilot SDK `/harness/*`. The customer voice front
+door (`apps/web-voice`, Voice Live) and the retail mode of the API went with
+them. The API now serves `/api/v1/*`, `/health` and `/build`.
+
+What remains is deliberately untouched and has no in-repo runtime caller:
+the hosted Foundry agents (`agents/`), the two MCP servers, the per-department
+Foundry projects, indexes and prompt agents that `scripts/postprovision.*`
+create, and the Content Understanding pipeline. The MCP work-order server and the
+hosted agents still carry inert harness hooks. Bicep deploys are incremental, so
+resources created by earlier releases are not deleted by a new deployment.
+Operators may delete the `ca-web-voice` Container App, the Voice Live ticket
+records in Cosmos and the `nw-insurance-adjuster-support` index, and may drop the
+retired `ADJUSTER_SUPPORT_*`, `COPILOT_HARNESS_*` and `VOICE_LIVE_*` settings from
+the API app (the API ignores them if they remain).
 
 ### Connected manual business journey (deployed, activation gated)
 
@@ -85,12 +96,12 @@ aggregate; contention is intentionally coarse-grained. Seeding is an explicit,
 create-only administrative operation, never a fallback after a storage failure.
 Retention/reset policy is not implemented or approved by this increment.
 
-Both new surfaces are **disabled by default**. `NORTHWIND_BUSINESS_API_ENABLED`
-gates the API; `VITE_INSURANCE_BUSINESS_ENABLED` selects the new business-first
-frontend at build time. When disabled, the existing fixture-based demos and
-draft-only approvals are unchanged. The application code is deployed through
-scoped CI/CD, but insurance identity registrations, participant mappings, seeded
-business runs and audience access still require separate approval.
+The business API is **disabled by default**: `NORTHWIND_BUSINESS_API_ENABLED`
+gates it. The portal is the only frontend; until the identity settings below are
+configured it shows only the public pages and "My account" reports that it is
+unavailable (no demo account is substituted). The application code is deployed
+through scoped CI/CD, but insurance identity registrations, participant mappings,
+seeded business runs and audience access still require separate approval.
 
 The API verifies delegated **Entra v2 RS256 access tokens**, including signature,
 issuer, tenant, audience, expiry, required scope, and permitted client application.
@@ -115,18 +126,18 @@ requests the full exposed delegated scope URI.
 | `INSURANCE_AUTH_CLIENT_IDS` | Comma-separated permitted SPA client GUIDs |
 | `COSMOS_ENDPOINT`, `COSMOS_DATABASE` | Existing private canonical storage |
 
-Frontend configuration is `VITE_INSURANCE_BUSINESS_ENABLED=true`,
-`VITE_INSURANCE_AUTH_TENANT_ID`, `VITE_INSURANCE_AUTH_CLIENT_ID`,
+Frontend configuration is `VITE_INSURANCE_AUTH_TENANT_ID`,
+`VITE_INSURANCE_AUTH_CLIENT_ID`,
 `VITE_INSURANCE_AUTH_SCOPE` (for example `api://<API-GUID>/access_as_user`),
 `VITE_INSURANCE_RUN_ID`, and `VITE_API_BASE_URL`. Register the exact frontend
 origin/path as an SPA redirect URI and approve the delegated API permission.
 Vite settings are build-time values: changing container runtime variables does
-not alter an already-built frontend. Docker builds accept the same names as
-build arguments. The existing azd prepackage hook inherits these values and the
-default Docker build preserves that prepared `dist`. An explicit Docker business
-opt-in rebuilds from source: supply the API URL and all identity/run arguments
-together, rather than relying on blank build defaults. Identity registration and
-consent are separate operator actions.
+not alter an already-built frontend. The azd prepackage hook and
+`deploy-apps.yml` build `dist` with these values and the production `Dockerfile`
+only serves that prepared `dist`. `Dockerfile.local` builds from source and
+accepts the same names as build arguments: supply the API URL and all
+identity/run arguments together, rather than relying on blank build defaults.
+Identity registration and consent are separate operator actions.
 
 Seed an isolated run using `scripts/seed-insurance-run.py`. Supply a private JSON
 mapping from canonical `tenant-UUID:object-UUID` keys to
@@ -265,7 +276,7 @@ profile remains read-only and does not update the existing API's environment or
 ingress policy; any eventual activation requires an explicitly scoped deployment.
 
 **Still pending:** private Storage/DNS activation, real sign-in and durable
-evidence/worker activation, MCP/voice migration to dynamic scoped claims and
+evidence/worker activation, MCP migration to dynamic scoped claims and
 staff-facing assistants (the policyholder Claims Concierge and customer Help Center
 already read dynamic, identity-scoped claims or published help articles; see
 [Embedded assistants](#embedded-assistants-identity-bound)),
@@ -273,7 +284,7 @@ review/application commands, presenter reset, retention and release acceptance.
 The manual portal never calls the legacy fixture-based agents or the HR/IT
 employee knowledge; its embedded assistants use their own identity-bound API.
 Do not present it as a full PRD release or as certified live
-identity/voice/evidence acceptance.
+identity/evidence acceptance.
 
 Do not run an unscoped `azd up` against the migrated deployment. Use the
 split-group reuse profile and scoped app deployments below. Insurance agents
@@ -322,7 +333,7 @@ Run `python scripts\configure-github-oidc.py` to preview the one-time setup.
 After explicit operator approval, `--apply` creates three dedicated managed
 identities, environment-bound OIDC trust, scoped role definitions/assignments,
 main-only GitHub environments, and nonsecret repository variables. No client
-secret is created. App permissions are confined to five named Container Apps
+secret is created. App permissions are confined to four named Container Apps
 plus ACR push; infra planning has read/what-if access, and infra apply has only
 the reviewed networking writes and Storage private-endpoint approval.
 The setup command deliberately leaves repository Actions disabled.
@@ -349,8 +360,6 @@ account. Model deployments, UAMI, VNet, and observability are shared;
 agents, connections, evaluators, and red-team runs are scoped per project.
 See [`docs/departments.md`](./docs/departments.md) for the full layout.
 
-- **Voice Live** — browser-based customer voice front door + hands-free
-  back-office assistant
 - **Azure AI Content Understanding** — classifies + extracts data from
   warranty PDFs, damage photos, and structured intake forms
 - **Foundry Agent Service** — 5 independently hosted agents in the
@@ -361,33 +370,28 @@ See [`docs/departments.md`](./docs/departments.md) for the full layout.
   names from an earlier scaffold; semantically they serve `lookup_order` and
   `propose_resolution`) plus the Search KB's MCP endpoint, so every tool
   invocation surfaces as a first-class MCP tool call in Foundry
-  Observability + App Insights. The Policy Lookup tab hits the same hosted
-  orchestrator in single-turn mode.
+  Observability + App Insights. The portal and its embedded assistants do not
+  call these agents; they are retained platform assets.
 - **Microsoft Agent Framework** — powers the hosted orchestrator agent and
   is what makes the manager loop tool-callable
 - **Azure AI Search** — **four indexes** (one per department) plus the shared
-  `northwind-knowledge` flagship, all served by one Search service
-- **Foundry Observability + Application Insights** — full OpenTelemetry traces
-  across every agent / tool / model call, stamped with `department` +
-  `foundry_project` so the platform view slices cleanly by project
-- **Foundry Evaluators + custom evaluator** — golden-dataset PR gate + 5% continuous
-  eval sampling of production traffic, **keyed by department** in
-  `evals/baseline.json`
+  `northwind-knowledge` flagship, all served by one Search service, and the
+  isolated customer Help Center index `nw-insurance-help-customer-v1` that the
+  Help Center assistant reads
+- **Foundry Observability + Application Insights** — OpenTelemetry traces
+  across the hosted agents and the embedded assistants, stamped with
+  `department` + `foundry_project` so the platform view slices cleanly by
+  project. Assistants log metadata only, never question or answer content.
+- **Foundry Evaluators + custom evaluators** — rubric/judge evaluators and
+  golden datasets used by the prompt optimizer and the AI Red Team, plus the
+  deterministic assistant golden eval that CI runs (see
+  [`evals/README.md`](./evals/README.md))
 
-The API, web front-ends, and MCP services run on **Azure Container Apps**;
+The API, the web front end, and MCP services run on **Azure Container Apps**;
 the five Orders agents run in **Foundry hosted-agent sandboxes**. Cosmos and
 Storage have public access disabled in the current deployment. Foundry,
-Search, and the demo front doors are publicly reachable with their respective
+Search, and the portal front door are publicly reachable with their respective
 access controls; do not describe this as an entirely private-network solution.
-
-The in-app trace API uses `azure-monitor-query`, the Application Insights
-workspace ID (`APPINSIGHTS_WORKSPACE_ID`, or `LOG_ANALYTICS_WORKSPACE_ID`),
-and the app identity's **Log Analytics Reader** role scoped to that workspace.
-It queries workspace `App*` tables and correlates child spans by operation ID.
-Insurance shows real ingested spans or explicit unavailability, never the
-retail compatibility stub. Reported token/cost metrics are not a complete
-Azure billing total. Failed, incomplete or empty hosted responses are errors,
-not successful turns.
 
 ## Existing project and learning lifecycle
 
@@ -457,13 +461,13 @@ export, evaluation, and approval steps.
 All five hosted services use `scripts/orders_agent_package.py` to package an
 explicit 14-file allowlist before `azd` packaging. SDK deployments can use
 `scripts/deploy-orders-hosted.py`. Prefer this scoped command for Foundry-only
-work; a full `azd up` also redeploys the separate legacy web application.
+work; a full `azd up` also redeploys the web application.
 The shared development Python environment is not upgraded to the hosted
 runtime's dependency set; use an isolated environment for `agents/hosted/requirements.txt`.
 
 ## Insurance portal with Entra sign-in
 
-The insurer-branded portal is the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting, plus the embedded assistants below when the operator enables them; adjusters and presenters get the manual case workbench and claim documents/evidence review. The portal no longer has a separate "AI workspace" tab. The claims concierge, document intelligence, approvals, bake-off and safety tabs remain only in the legacy shell until staff-facing assistants and approvals are embedded in their own sections. The Agent Harness UI has been removed from the web app for now. The portal does not call the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …); backend enforcement of Entra tokens on those endpoints is not yet implemented, so they are for the legacy shell only.
+The insurer-branded portal is the only web experience. Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting, plus the embedded assistants below when the operator enables them; adjusters and presenters get the manual case workbench and claim documents/evidence review. The portal has no separate "AI workspace" tab, and the legacy department shell and its unauthenticated endpoints were removed (see [Removed legacy surfaces](#removed-legacy-surfaces)). Staff-facing assistants and an in-portal approvals workflow do not exist yet: the Model bake-off, Safety and Approvals screens were removed rather than migrated.
 
 ## Embedded assistants (identity-bound)
 
@@ -509,55 +513,9 @@ The Help Center replaces the old HR-document assistant for customers: it answers
 | `NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT` | empty; falls back to `AZURE_SEARCH_ENDPOINT` (HTTPS, no path) |
 | `NORTHWIND_HELP_CENTER_SEARCH_AUTH` | `entra_id`; or `query_key` with `NORTHWIND_HELP_CENTER_SEARCH_QUERY_KEY` (no automatic key fallback) |
 
-The assistants also need `NORTHWIND_BUSINESS_DOMAIN=insurance`, the business API and sign-in configuration above, a `FOUNDRY_PROJECT_ENDPOINT` with a deployment the managed identity may call, and Cosmos; the Help Center additionally needs the published index and read access to it for the API's identity. The status route reports configuration, not verified inference: a real run is an operator action within the existing spend approvals. Prompts are source-controlled in `agents/insurance/assistants/` and packaged and SHA-stamped by `scripts/bundle-harness-assets.py`. No Bicep or `azd up` change is required: set the variables on the existing Container App through a scoped release, and keep them disabled until negative access has been rehearsed with two real policyholders.
+The assistants also need `NORTHWIND_BUSINESS_DOMAIN=insurance`, the business API and sign-in configuration above, a `FOUNDRY_PROJECT_ENDPOINT` with a deployment the managed identity may call, and Cosmos; the Help Center additionally needs the published index and read access to it for the API's identity. The status route reports configuration, not verified inference: a real run is an operator action within the existing spend approvals. Prompts are source-controlled in `agents/insurance/assistants/` and packaged and SHA-stamped by `scripts/bundle-assistant-assets.py`. No Bicep or `azd up` change is required: set the variables on the existing Container App through a scoped release, and keep them disabled until negative access has been rehearsed with two real policyholders.
 
 Evaluate with `python evals/assistant_eval.py --self-check` (offline), or grade a recorded or live run against the golden set `data/golden/assistant.jsonl` (Concierge scoping plus Help Center grounding, no-match, personal-record, decision and injection rows); see [evals/README.md](./evals/README.md#identity-bound-assistants). `evals/baseline.json` is intentionally unchanged until a reviewer approves live numbers.
-
-## Agent Harness (opt-in)
-
-The **Agent Harness** workspace is accessible from the landing page and each
-department's sidebar. It runs the Python **GitHub Copilot SDK 1.0.14** with its
-matching runtime inside FastAPI. In insurance mode the SDK chooses among
-triage, canonical policy/claim lookup, authoritative policy lookup and
-pending-only claim-action drafting. Retail mode retains its separate prompt
-and tool compatibility. The harness does **not** replace the hosted Agent
-Framework manager. Azure Foundry supplies inference through a refreshing
-managed-identity bearer-token callback. No GitHub subscription or new model
-API key is needed for this provider mode.
-
-Enable it explicitly before provisioning/updating the deployment:
-
-```powershell
-azd env set COPILOT_HARNESS_ENABLED true
-azd deploy api
-```
-
-The default is disabled. The workspace remains visible and reports its actual
-configuration; it never substitutes simulated output. API packaging stages the
-canonical `agents\copilot-harness\instructions.prompty` and pre-downloads the
-pinned SDK runtime during the API image build. Roll back by setting the flag
-to `false` and applying the infrastructure configuration.
-
-For local development, use a **clean API virtual environment** rather than an
-environment containing the Agent Framework umbrella package (which can pin
-an incompatible Copilot SDK). Install `apps\api\requirements.txt`, run
-`python -m copilot download-runtime`, and configure
-`FOUNDRY_PROJECT_ENDPOINT`, `COSMOS_ENDPOINT`, and `MCP_WORK_ORDER_URL`.
-Set `COPILOT_HARNESS_ENABLED=true` in the API process. Local Azure Identity
-credentials and connectivity to private Azure resources are required;
-Compose does not inherit the host's Azure CLI login.
-
-Runs are self-contained: Stop/refresh cancels the live request, while actual
-results and events remain in Cosmos for seven days. The existing approval
-queue has its own unchanged retention. A draft is **pending human approval**,
-not an executed claim decision or payment. A cancelled request can already have saved a draft;
-inspect its approval status before starting another run. Runtime access is
-limited to four application tools, with no shell/filesystem tools or personal
-Copilot configuration. This remains an unauthenticated synthetic demo, not a
-production tenant-isolation solution.
-
-See [architecture](./docs/architecture.md#copilot-sdk-agent-harness) and
-[evaluation requirements](./evals/README.md#copilot-sdk-harness).
 
 ## Regions
 
@@ -565,13 +523,15 @@ The demo splits into two regions by default:
 
 | Region              | What lives there                                                                             |
 | ------------------- | -------------------------------------------------------------------------------------------- |
-| **Canada Central**  | Compute + data plane: VNet, Container Apps, FastAPI + web front-ends, Cosmos, Storage, Key Vault, Azure AI Search, App Insights, UAMI |
-| **East US 2**       | AI plane: Foundry AI Services (Voice Live, Agent Service, `gpt-5.4`, `gpt-5.4-mini`) |
+| **Canada Central**  | Compute + data plane: VNet, Container Apps, FastAPI + web front-ends, Storage, Azure AI Search, ACR, App Insights, UAMI, and the Cosmos private endpoint |
+| **East US 2**       | AI plane: Foundry AI Services (Agent Service, `gpt-5.4`, `gpt-5.4-mini`) and the Cosmos DB account (`aiLocation`) |
 
-Cross-region traffic to the AI plane stays on the Microsoft backbone via
-**cross-region Private Endpoints** — the PE is provisioned in the Canada Central
-VNet even though the target Foundry / Search resource lives in East US 2.
-Public network access is disabled on every data-plane resource.
+In the greenfield template only Cosmos is private: its public access is disabled
+and it is reached through a Private Endpoint in the Canada Central VNet. Storage,
+Azure AI Search, Foundry and ACR keep public endpoints there (the migrated
+deployment's Storage private endpoint is managed separately by
+`infra/live/storage-networking.bicep`). Do not describe the template as an
+entirely private-network solution; see [`docs/differentiators.md`](./docs/differentiators.md).
 
 Override with `AZURE_LOCATION` and `AZURE_AI_LOCATION` before `azd up` if you
 want different regions.
@@ -583,10 +543,9 @@ azd auth login
 azd up
 ```
 
-For a fresh retail environment, `azd up` provisions infrastructure with Bicep, deploys the five
+For a fresh retail environment, `azd up` provisions infrastructure with Bicep, deploys the four
 container services, generates ~20 synthetic Northwind policy + product
-documents, indexes them into AI Search, and prints the URLs for the two
-web front-ends.
+documents, indexes them into AI Search, and prints the URL of the web front end.
 
 ### Existing deployment: split-group reuse (opt-in)
 
@@ -600,7 +559,7 @@ In subscription `137c905b-7734-479e-acc5-ab8222462936`, the live placement is:
 
 | Resource group | Final placement |
 | --- | --- |
-| `rg-northwind-apps` | `ca-api`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`, `ca-web-tech`, `ca-web-voice`, all attached to `cae-zurlo-northwind`; retain the selected app UAMI, ACR, App Insights and Log Analytics |
+| `rg-northwind-apps` | `ca-api`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`, `ca-web-tech`, all attached to `cae-zurlo-northwind` (a `ca-web-voice` app deployed by earlier releases is no longer managed or released from this repository and can be deleted); retain the selected app UAMI, ACR, App Insights and Log Analytics |
 | `rg-northwind-networking` | Replacement `vnet-zurlo-northwind`, NSGs, approved Cosmos private endpoint `pe-zz-cosmos-northwind` and `privatelink.documents.azure.com` VNet link `northwind-networking` |
 | `rg-northwind-data` | Existing Storage, Search, Cosmos (East US 2), Storage Event Grid topic |
 | `rg-northwind-ai` | `aisvc-zurlo-northwind` and all five retained projects, `ai-gateway-northwind` and its connector-gateway companion |
@@ -671,12 +630,12 @@ recreation. The replacement run URLs are:
 | `MCP_TECH_LOOKUP_URL` | `https://ca-mcp-tech-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/` |
 | `MCP_WORK_ORDER_URL` | `https://ca-mcp-work-order.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/` |
 | `WEB_TECH_URI` | `https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io` |
-| `WEB_VOICE_URI` | `https://ca-web-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io` |
 
 The old `bluecliff` FQDNs are retired; no custom domain masks this change.
-Both frontend builds, API/MCP callers and all five active insurance-agent
+The frontend build, API/MCP callers and all five active insurance-agent
 configurations use the replacement URLs. Adoption outputs read actual
-named app ingress instead of hardcoding these URLs.
+named app ingress instead of hardcoding these URLs. The `WEB_VOICE_URI` output
+was removed together with the voice front door.
 
 `infra/main.bicepparam` uses compiler serialization for environment values,
 including JSON-valued endpoint strings. This avoids raw JSON interpolation
@@ -732,38 +691,37 @@ reviewed operation.
 ```
 infra/                Bicep IaC (main + modules)
 apps/
-  api/                FastAPI + Agent Framework orchestrator
-  web-tech/           React (Vite) back-office / CX-agent app
-  web-voice/          React (Vite) customer voice front door
+  api/                FastAPI portal API: /api/v1 business layer + embedded assistants
+  web-tech/           React (Vite) Northwind Insurance portal (src/business)
   mcp-tech-lookup/    Tiny MCP server — serves lookup_order for the
                       Order Lookup agent. Directory + service name are
                       legacy from the Field Services scaffold.
   mcp-work-order/     Tiny MCP server — serves propose_resolution for the
                       Resolution Draft agent. Directory + service name are
                       legacy from the Field Services scaffold.
-agents/               Order Concierge Foundry agent definitions (flagship)
+agents/               Foundry agent definitions + the embedded assistants' prompts (agents/insurance/assistants)
 data/
   seed/                        Order Concierge synthetic corpus generator
-  golden/                      Order Concierge eval golden dataset
+  golden/                      Golden datasets (Order Concierge, embedded assistants)
   northwind/                   Company manifest + non-flagship departments
     company.yaml               Top-level manifest (company + 4 departments)
     departments/
       order-concierge/         Points back at data/seed + data/golden + agents/
       employee-help-desk/      HR/IT corpus + hr-assistant prompt agent; seed/customer = customer Help Center articles
       claims-warranty/         Claims corpus + CU analyzer + triage agent
-      contact-center/          Call scripts + intent classifier + Voice Live prompts
+      contact-center/          Call scripts + intent classifier prompts (no portal surface)
 pipelines/
   content-understanding/  CU analyzer schemas + ingestion job
-evals/                Foundry evaluators config + custom evaluator
+evals/                Evaluators, smoke eval and the deterministic assistant eval
 scripts/              azd hooks (postprovision indexing, per-project agents, etc.)
-.github/workflows/    CI, PR evals, continuous evals
+.github/workflows/    CI, scoped app/infra deploys, smoke eval, red team, optimizer, prompt registry
 docs/                 Architecture, demo script
 ```
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
-- [**One company, four departments (the reshape)**](./docs/departments.md)
+- [**Four departments as content packs**](./docs/departments.md)
 - [Demo script (10 minutes)](./docs/demo-script.md)
 - [**Why Foundry — vs OpenAI Assistants, Bedrock, Vertex, LangChain**](./docs/differentiators.md)
 - [**GenAIOps through GitHub**](./docs/genaiops.md)
@@ -771,12 +729,14 @@ docs/                 Architecture, demo script
 
 ## What makes this demo hard to beat
 
-The bake-off (`Model bake-off` tab), safety shields (`Try to jailbreak` tab),
-red-team + optimizer pipelines, and 4-tier eval gate are all Foundry-only
-capabilities that most competing stacks either don't offer or ask you to
-build yourself. See [`docs/differentiators.md`](./docs/differentiators.md)
-for the full checklist and [`docs/genaiops.md`](./docs/genaiops.md) for the
-end-to-end lifecycle diagram.
+Identity-bound embedded assistants with fail-closed grounding and the
+deterministic assistant golden eval that CI runs on every change are pieces that
+most competing stacks either don't offer or ask you to build yourself. The AI Red
+Team and prompt-optimizer pipelines are in the repo too, but as pinned today they
+cannot produce real results (see the caveat in
+[`docs/differentiators.md`](./docs/differentiators.md#eval-tiers-what-exists-now)).
+See that document for the full checklist and [`docs/genaiops.md`](./docs/genaiops.md)
+for the end-to-end lifecycle diagram.
 
 ## Non-goals
 

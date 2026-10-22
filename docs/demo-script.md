@@ -1,279 +1,276 @@
-# Northwind Copilot — 10-minute demo script
+# Northwind Insurance — 10-minute demo script
 
-The whole demo runs against a single `azd up` deployment. Two browser tabs open
-before you start:
+The whole demo runs in **one browser tab** against one deployment of this repo:
+the Northwind Insurance portal (`WEB_TECH_URI`). A second browser profile holds
+the adjuster for Beat 6. AI is embedded in the product where the work happens;
+there is no separate "AI workspace" and no department picker.
 
-- **Tab A**: the customer voice front door (`WEB_VOICE_URI`)
-- **Tab B**: the CX-agent app (`WEB_TECH_URI`)
+> **Not in this demo any more.** The department shell (department tiles, the
+> multi-agent chat, Approvals, Model bake-off, Safety lab, trace panel and Agent
+> Harness), the customer voice front door and the unauthenticated endpoints
+> behind them were deleted. If an audience saw an earlier version, say so and
+> show what replaced them: identity-bound assistants and a case workbench where
+> a person decides.
 
-The demo script's department beats (the multi-agent chat, Approvals, bake-off,
-jailbreak lab, trace panel, department variants and Agent Harness) run in the
-legacy shell build (`VITE_INSURANCE_BUSINESS_ENABLED=false`). The signed-in
-insurance portal embeds its AI instead; see
-[Embedded assistants](#embedded-assistants-insurance-portal-3-min).
+## Before you start
 
-## Beat 0 (0:00–1:00) — "One company, four departments"
+Sign-in, the assistants and evidence upload are all **disabled by default** and
+are operator steps. Nothing in the repo verifies a live Entra tenant, model
+deployment or Search index for you, so rehearse once against your seeded run.
 
-Open **Tab B** on the landing page. Four department tiles:
+| Needed for                  | Operator step                                                                                                                                                                                                                                                                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sign-in (Beats 1–6)         | Entra registrations from `scripts/configure-insurance-identity.py`, the build-time `VITE_INSURANCE_*` settings, `NORTHWIND_BUSINESS_DOMAIN=insurance` and `NORTHWIND_BUSINESS_API_ENABLED=true` (see the [README](../README.md#insurance-portal-with-entra-sign-in)). Without them **My account** says it is unavailable and no demo account is substituted. |
+| Roles and records           | A seeded run (`scripts/seed-insurance-run.py`) that maps your test users: two policyholders (**PH-1001** Avery Example and **PH-1002** Jordan Sample, both fictional), an adjuster and, optionally, a presenter. The server decides the role; the browser cannot.                                                                           |
+| Assistants (Beats 2, 4, 5)  | `NORTHWIND_ASSISTANTS_ENABLED=true` and `NORTHWIND_ASSISTANT_SURFACES=concierge,help_center`, a Foundry project endpoint and model deployment the API's identity may call, and Cosmos. The Help Center also needs its index: `python scripts/publish-customer-help.py --apply`. With the flags off the panels simply do not render.        |
+| Evidence upload (Beat 4)    | `NORTHWIND_EVIDENCE_ENABLED=true`. Automatic extraction also needs the evidence worker and Content Understanding; manual field review needs no model.                                                                                                                                                                                      |
 
-- **Order Concierge** — Multi-agent + HITL (the flagship)
-- **Employee Help Desk** — Grounded RAG over HR/IT policies
-- **Claims & Warranty Ops** — Content Understanding
-- **Customer Contact Center** — Voice Live
+A seeded run is bounded and has no reset yet: at most 100 claims, and eight
+evidence documents per run (four per claim). Rehearse the write beats sparingly.
+Model wording varies from run to run; the server-enforced parts (scope,
+citations, no decisions) do not.
 
-> Northwind Industries is a mid-market retail + services group that runs its
-> whole business on one Azure AI Foundry account. Every department has its own
-> Foundry project — its own agents, connections, evals, and Observability
-> lens — but they share models, UAMI, and quota. Pick the department that
-> matches the buyer in the room; I'll walk you through the department, then
-> we'll do a cross-department finale.
+## Beat 0 (0:00–1:00) — A front door, not a chatbot
 
-Click the department that fits your audience. The rest of the beats below
-default to the Order Concierge flow (the widest one). For an HR / Claims /
-Voice-only room, jump to the department-specific beats at the bottom.
+Open the portal home page; no sign-in is needed. Point at the **Synthetic
+demonstration** banner, the headline *Here for the road ahead.*, the card
+*A report is the beginning. Not a decision.*, and the trust strip (*Human-led*,
+*Plain-English policy wording with citations*, *Secure Microsoft Entra sign-in*).
+Click **Coverage information** and **Claims help**: public, general information
+only, with no automated coverage or payment decisions.
 
-## Beat 1 (1:00–2:30) — The story
+> Northwind Insurance is a fictional auto insurer whose people answer the same
+> three questions all day: *what does my policy say, what do you still need from
+> me, and what happens next?* We did not bolt a chatbot onto the side. The portal
+> is the product. AI sits inside the pages where those questions come up, sees
+> only what the signed-in person may see, and never decides a claim.
 
-> Northwind's Order Concierge handles ~40,000 customer contacts a week
-> across order status, returns, cancellations, address changes, and
-> complaints. Their pain shows up in every layer of Foundry: voice front
-> door, document extraction, retrieval, agents, and workflow automation.
-> We built one deployable app that hits all of them — and the same agents
-> plug into a Voice-Live call center later without a rewrite.
+Optional, 30 seconds: the sequence diagram in
+[architecture](./architecture.md#identity-bound-embedded-assistants). One FastAPI
+service verifies the Entra token, resolves the caller's role and policyholder
+from the run mapping, and binds the model's tools to that caller.
 
-Show the architecture diagram on screen for 30 seconds. Call out: single `azd up`,
-private VNet, UAMI everywhere, four Foundry projects in one account.
+**Presenter note**: the home page's *People when you need them* card says
+adjusters use AI to prepare cases faster. No staff-facing assistant exists in this
+release (Beat 6), so do not demo or promise one.
 
-## Beat 2 (2:30–5:00) — Customer contact → resolution draft
+## Beat 1 (1:00–2:00) — Sign in: the server decides who you are
 
-1. In **Tab A**, click **Start a call** (Order Concierge greeting).
-2. Speak: *"Hi, this is Priya — I ordered a Cascade espresso machine, order
-   NW-40021, and it hasn't shipped in over a week. Where is it?"*
-3. The Voice Live agent asks a clarifying question, confirms the details, and
-   ends with *"a specialist will follow up with a resolution."*
-4. Switch to **Tab B → Multi-Agent tab**. The view is split into the chat on
-   the left and a live **Orchestrator trace** rail on the right — narrate the
-   hand-offs as they light up:
-   - the small graph at the top highlights the active edge as the manager
-     hands off to each sibling agent;
-   - each card in the rail shows the manager's thought, the sub-agent
-     tool call (with the prompt the manager sent), and the sub-agent's
-     response — click to expand.
-   - `triage` extracts intent + order_id + urgency + sentiment as JSON.
-   - `order_lookup` pulls the customer + order + shipment record (Priya
-     Patel, gold tier, order stuck at Chicago DC on day 8).
-   - `policy_lookup` cites `SHIPPING-SLA-STD-2026` — Northwind's 7-day SLA
-     with a full-refund-plus-10%-goodwill remedy for missed delivery.
-   - `resolution_draft` produces the draft **and pauses**.
-5. Switch to **Approvals tab** — the pending resolution is there with the
-   full payload (refund $189 + $19 goodwill credit, cited policy). Click
-   **Approve**.
+1. Click **View my policy**, then **Sign in with Microsoft**. The page shows
+   *Signed in as …* and a strip: *Server-authorized role: policyholder*, the run
+   and the source version.
+2. Say: the role and the policyholder come from a server-side mapping of the
+   verified token. The browser cannot pick or change either, and the token stays
+   in memory. The tabs are **Policies**, **My claims**, **Report a loss** and
+   (when enabled) **Help center**.
+3. Open **Policies**, then **View schedule and wording** on **POL-1001**
+   (*Fictional 2022 passenger sedan*). Show the coverage schedule (collision
+   $30,000 limit and $500 deductible), the rental reimbursement endorsement and
+   **Read policy wording and source references**.
 
-**Point out**: the whole thing streamed live from the API; every tool call
-appears in the timeline; the manager is `gpt-5.4`; specialists are `gpt-4o`;
-and this *same* multi-agent chain will run behind a live phone line once the
-Voice Live front door replaces the web chat.
+**Point out**: the table is captioned *Scheduled limits and deductibles, not a
+coverage determination*. The portal never says "you're covered".
 
-## Beat 3 (4:00–6:00) — Policy Q&A
+## Beat 2 (2:00–4:00) — Ask the Claims Concierge about the policy
 
-1. Still in **Tab B → Policy Lookup tab**, ask:
-   > *"What's Northwind's return window on kitchen items?"*
-2. Watch `policy_lookup` fire `knowledge_retrieve(query)` against the
-   Foundry IQ knowledge base. Answer comes back with a
-   `[Northwind Standard Return Policy (2026), p.1](…)` citation.
-3. Click the citation — the source PDF opens.
-4. Now click **Hands-free**. Say the same question aloud. Voice Live streams
-   the same answer as audio — this is the CX-agent-headset use case.
+1. With POL-1001 open, the panel above the schedule reads **Ask about this
+   policy** with the badge *Only your own records · POL-1001*. Ask *"What is my
+   collision deductible?"* (or click a suggested question). Expect a short
+   plain-English answer ($500 on the schedule) with **Policy wording cited**,
+   typically the collision section `NW-AUTO-WA-2026-v1#collision`. Expand it and
+   click **Show in policy wording**: the portal opens the wording and scrolls to
+   the cited section. The citation text is rendered by the server from the policy
+   snapshot it read, not by the model.
+2. Expand **How this answer was produced**: the model deployment, the prompt
+   version (the first 12 characters of the prompt file's SHA-256), how many
+   records were checked and whether human review is recommended.
+3. Prove the boundary. Ask *"Is my collision damage covered? Answer yes or no."*
+   Expect the assistant to say a human adjuster decides and to flag the answer
+   (*A person needs to review this. The assistant cannot decide coverage or
+   claims.*). If a draft ever sounded like a decision, the server withholds it and
+   shows *No answer was shown* with a reference code instead. Either outcome is
+   by design; a plain "yes" never appears.
+4. Say it plainly: the Concierge has four read-only tools (list and get policy,
+   list and get claim), all bound to the signed-in policyholder. It cannot write,
+   it cannot name another customer's record, and the server rejects any answer
+   that cites wording it was not shown or reads like a coverage, claim or payment
+   decision. That is also why an answer arrives whole rather than token by token:
+   nothing is shown until every check has passed.
 
-## Beat 4 (6:00–7:30) — Content Understanding
+## Beat 3 (4:00–5:15) — Report a loss: a report is the beginning
 
-1. Show the `cu-inbox` blob container. Upload a sample warranty PDF (or
-   run the pre-staged one).
-2. Trigger the CU worker (`POST {API}/cu/run` or the container app's `/run`).
-3. Show the extracted JSON in Cosmos `cu_extractions` — customer_name,
-   order_id, defect_summary, etc. Show that the derived text is also now
-   searchable in the AI Search index (rerun the policy_lookup query and it
-   turns up as citable precedent).
+1. On the open policy click **Report a loss on this policy**. The form is
+   **Report an auto loss**: the policy is preselected; choose *Auto hail*, a
+   recent loss date and, to show a review flag, the state `OR` (the policy is
+   `WA`); describe it in a sentence of synthetic facts, tick the synthetic-data
+   acknowledgement and click **Submit loss report**. (Under the form, a collapsed
+   **Questions about reporting a loss? Ask the Help Center** cannot see anything
+   you type.)
+2. You land on the new case with *Loss report received — claim CLM-…*. The status
+   is *reported*, the timeline reads *Loss report received. A human will review
+   the case.* and **Review flags** lists *loss jurisdiction mismatch*.
+3. In **Ask about this claim**, click *Why does my claim show a review flag?*
+   Expect an explanation that the flag is recorded for a human reviewer and is not
+   a denial.
 
-## Beat 5 (7:30–8:30) — Order Lookup direct
+**Point out**: review flags (loss date outside the policy, loss state different
+from the policy, wording or endorsement periods) are computed by the server and
+recorded. They never become an automatic denial. Submitting is safe to retry:
+the portal keeps only an idempotency key and a report hash in session storage,
+never the description or the token, and it never resubmits on its own.
 
-1. In **Tab B → Order Lookup** tab, type: *"priya@example.com"*.
-2. Response streams from the **Foundry Agent Service prompt agent** — a
-   different surface from the multi-agent orchestrator. Point out that for
-   short structured lookups a prompt agent is often the right tool.
+## Beat 4 (5:15–6:30) — Cases, evidence and documents
 
-## Beat 6 (8:30–9:30) — Operate
+1. Open **My claims**. The list shows the claim you just reported and the seeded
+   **CLM-2001**. In the panel above the list (*Ask about your policies and
+   claims*) ask *"Where do my claims stand?"*; the steps it took appear first
+   (*Looked up your claims*, done). Then ask *"Show me claim CLM-2002."* The step
+   reads *Record not found among your records* and the answer reveals nothing
+   about that claim: another customer's record is indistinguishable from a
+   missing one. (Optional: repeat as **PH-1002** in a private window. Only
+   POL-1002 and CLM-2002 exist for that customer.)
+2. Open **View case CLM-2001**. **Next evidence steps** lists what is outstanding.
+   In **Ask about this claim** (*Only your own records · CLM-2001*) click *What
+   evidence is still needed?* The answer comes from the same customer view you
+   see on screen; internal notes and adjuster ids are never part of it.
+3. In **Documents and evidence review**, open **Attach synthetic evidence**:
+   choose *Allowlisted synthetic sample*, pick a sample, tick the synthetic-data
+   acknowledgement and click **Store document and queue processing**. Then
+   **Inspect** the stored document: it shows the source SHA-256, and **Download
+   verified original** re-checks type, size and hash in the browser before it
+   offers the file.
+4. If the evidence worker and Content Understanding are enabled, *Processing:*
+   moves from queued to completed; the extracted values are shown only to the
+   adjuster, as untrusted suggestions (Beat 6). If they are not enabled, the panel
+   says *Automatic extraction is paused…* and manual review still works with no
+   model. A customer only ever sees **Human-reviewed facts**.
 
-1. Open the **Foundry Observability** blade for this project. Show one full trace:
-   voice session → orchestrator → manager → tool call → search hit → model reply.
-   Point out that every span is stamped with the git SHA + prompt version, so
-   a bad trace pivots one click back to the PR that shipped it.
-2. Open the **Evaluations** blade. Show the golden dataset (~30 rows) and the
-   latest scored run — TaskAdherence, Groundedness, Coherence, safety, plus the
-   custom **ResolutionCompleteness** evaluator.
-3. Open the GitHub Actions tab. Point at the four eval tiers:
-   - **Tier 1** — GitHub Models smoke eval, ~60s, ran on every PR for free.
-   - **Tier 2** — Foundry golden set, ran on this PR against a real deployment.
-   - **Tier 3** — nightly AI Red Team run against the orchestrator.
-   - **Tier 4** — continuous eval sampling 5% of prod, with a drift detector
-     that opens issues when any metric moves >2σ from baseline.
-4. Show the most recent **optimizer PR** — the Prompt Optimizer beat the
-   triage baseline by 0.07 last night; a human just needs to review and merge.
+## Beat 5 (6:30–7:30) — Help Center: published answers only
 
-## Beat 7 (9:30–10:30) — Standout Foundry-only capabilities
+1. Open the **Help center** tab. The scope badge reads *Help articles only · no
+   personal records*. Click *What evidence should I send?* The answer starts *Here
+   is what the Help Center says:* and continues with verbatim quotes, each followed
+   by its article title. **Help articles quoted** lists title, version, effective
+   date and article id (the evidence checklist is `HELP-EVIDENCE-001`).
+2. Expand **How this answer was produced**: *Personal records read: None*. Say:
+   the model only **selects** excerpts from twelve fictional customer help
+   articles; the server checks that each is an exact substring of a retrieved
+   article and renders every word shown. The articles are source-controlled in
+   `data/northwind/departments/employee-help-desk/seed/customer/`.
+3. Show the honest edge. Ask *"What is the status of my claim CLM-2001?"* The
+   Help Center says it could not find that in its articles, will not guess, and
+   points to the portal or Northwind Claims; the tab's banner points to the Claims
+   Concierge. Ask *"What will the weather be tomorrow?"* or *"Will my claim be
+   approved?"* and it declines the same way instead of guessing.
 
-1. **`🏁 Model bake-off` tab** — paste the default prompt:
-   *"Customer says order NW-40021 (espresso machine, $189) hasn't shipped in
-   a week. Draft the triage JSON, then recommend a resolution and cite the
-   policy."* Three Azure-direct deployments race side by side. Highlight
-   the ⚡fastest and 💰cheapest pips, the live token + $/turn footer, and
-   that **one project + one UAMI + one SDK** serves all three.
-2. **`🛡 Try to jailbreak` tab** — click any of the three canned attacks
-   (Classic DAN, indirect injection via document, PII exfil probe). Watch
-   the shield fire, the harm categories fill in, and the PII findings
-   render `[REDACTED:ssn]`. Point out that this is **first-party** — no
-   Guardrails-side vendor, no LangChain callback stitching.
+## Beat 6 (7:30–8:45) — The adjuster's view: a person is in control
 
-## Beat 8 (10:30–11:30) — The trace panel (A8 + B6)
+1. In the second browser profile, sign in as the adjuster. The strip reads
+   *Server-authorized role: adjuster*. The tabs are **Policies** and **Claim
+   queue**: no **Report a loss**, no **Help center** and no assistant panels.
+   Staff-facing assistants are not built yet, and a presenter account is
+   read-only on top of that (*Presenter access is read-only. No case commands are
+   available.*).
+2. Open **CLM-2001**. The workbench shows the assigned adjuster, **Evidence
+   tasks**, **Case notes** and a **Case timeline** where every event shows its
+   version, before and after.
+3. Under **Adjuster actions**, use **Move workflow** to take the case from
+   *evidence requested* to *evidence received* with a reason, then **Add case
+   note** twice: once *Internal — employees only*, once *Customer-visible in this
+   portal*. Each button names the case version it applies to; the server checks it,
+   and after a conflict or an uncertain result the actions pause until the case is
+   read again. Nothing is resubmitted for you, and saving a note does not email,
+   text or contact the policyholder.
+4. Read the stages aloud: *reported → evidence requested → evidence received →
+   adjuster review → customer update prepared*. There is no approved, denied or
+   paid stage, on purpose. The panel says it too: *You are not authorizing
+   coverage, settlement, payment, or an external communication.*
+5. Open the document attached in Beat 4 and use **Compare suggestions with the
+   original source**. Six fields (claim id, policy id, policyholder id, loss date,
+   estimate total, invoice total) each show the *Untrusted extracted suggestion*,
+   any *Available confidence* and the *Human-confirmed value*. With extraction off,
+   each suggestion reads *Missing — manual entry is available* and the adjuster
+   types the value from the source. The adjuster accepts, corrects or clears each
+   field separately after inspecting the original; the raw extraction is never
+   overwritten.
+6. Back in the policyholder profile click **Read current case**: **Case updates**
+   shows only the customer-visible note, the timeline shows the new stage, and the
+   internal note and the adjuster's id are nowhere. Optional: ask the Concierge
+   *"What did the adjuster write in the internal notes on my claim?"* It only
+   receives the customer-visible projection, so it cannot repeat them.
 
-1. Back in the **Multi-Agent** tab. At the bottom of the pane there's a
-   collapsed **▸ Trace** strip showing `N agents · N tools · N ms · $0.0021`.
-2. Click it open. Three things render live:
-   - **Build stamp footer**: `build a3f9c2e1 @ staging` — a clickable link
-     to the exact commit that shipped every prompt in this turn. The
-     "Prompt versions" expander lists each agent's individual prompt SHA.
-   - **Agent hand-off mermaid**: a sequenceDiagram of exactly which agents
-     called which — orchestrator → triage → order_lookup → policy_lookup
-     → resolution_draft → resolution_approver (thanks to A2 Connected Agents).
-   - **Span table**: one row per agent/tool/model span with ms, in/out
-     tokens, and $/turn. This is the same data Foundry Observability shows,
-     but embedded in the app so the SE never has to pop the Azure portal.
-3. Tell the room: *"That build hash and every prompt SHA next to it is what
-   makes B6 work. Bad trace? Click the SHA, land on the PR, fix the prompt,
-   the optimizer + red-team + eval loop verifies it. That's GenAIOps."*
+## Beat 7 (8:45–10:00) — What keeps it honest: GitHub, CI and evals
 
-> One repo, one `azd up`, one story that covers Voice Live, Content Understanding,
-> Agent Service, Agent Framework, AI Search, Prompt Shields, Red Teaming,
-> Prompt Optimizer, evals across 4 tiers, and observability — with the entire
-> GenAIOps lifecycle driven from GitHub. Fork it, point it at your customer,
-> replace the seed corpus with their policies and product catalog, and you've
-> got a running head-start on a real POC that competitors will struggle to
-> match feature-for-feature. See `docs/differentiators.md` for the checklist
-> you can hand your customer.
+Open the repo's **Actions** tab (the lifecycle diagram is in
+[genaiops](./genaiops.md)).
 
-## Embedded assistants (insurance portal, 3 min)
+1. **CI** (`.github/workflows/ci.yml`) runs on every PR and on `main` with no Azure
+   credentials and no model calls: ruff and mypy on the business and assistant
+   packages, a Bicep compile, the API and release contract tests, and the web
+   build, typecheck and tests. That includes the **deterministic assistant golden
+   eval**: 60+ rows in `data/golden/assistant.jsonl` (Concierge scope, internal
+   data, determination bait and prompt injection; Help Center grounding, no-match,
+   personal-record and injection rows) are replayed through the real routes with a
+   scripted model and search. The grader must pass honest answers and catch every
+   leak class: another customer's data, an internal marker, altered citations,
+   decision language, a non-verbatim Help excerpt. Run it offline with
+   `python evals/assistant_eval.py --self-check`. Be precise: this proves scoping,
+   guards and rendering; it is not a measurement of live model quality.
+2. **Provenance**. `curl https://<API_URI>/build` returns the git SHA and a SHA-256
+   per assistant prompt (`prompt_sha.assistant-concierge`,
+   `prompt_sha.assistant-help-center`); the prompt version in each answer is the
+   first 12 characters of the same hash. Each turn emits an `assistant.turn` span
+   and one `AI-conversation` log line. The line carries metadata only: the
+   assistant surface, a department stamp, a one-way session reference, the outcome
+   and the tool-call count, never the question or the answer.
+3. **Release**. The scoped app release (`deploy-apps.yml`) runs only after CI
+   passes on `main`, pins images by digest and stamps the API with the source SHA
+   that `/build` reports. Infrastructure goes through a plan and apply pair
+   (`deploy-infra.yml`).
+4. **Be upfront about the other tiers.** Of the original four eval tiers, Tier 1
+   (a GitHub Models smoke eval, five micro-cases against the prompts in
+   `agents/*.yaml`, no Azure credentials) and Tier 3 (Foundry AI Red Team against
+   the hosted `northwind-orchestrator` agent) are still defined, along with the
+   prompt optimizer. Tier 2 (the Foundry golden set on PRs) and Tier 4 (continuous
+   eval and the drift detector) were retired with the endpoints they exercised.
+   Those workflows stay disabled until configured and budgeted, and
+   `evals/baseline.json` is empty on purpose: no measured numbers are published
+   until a reviewer approves a live run. As pinned today, the Tier 3 and optimizer
+   pipelines install `azure-ai-evaluation==1.1.0`, which has no Red Team API or
+   optimizer, and their runners exit 0 with a stub report when the SDK is missing,
+   so never present a green run from them as a result. See
+   [differentiators](./differentiators.md#eval-tiers-what-exists-now).
 
-Needs `NORTHWIND_ASSISTANTS_ENABLED=true` with `NORTHWIND_ASSISTANT_SURFACES=concierge,help_center`,
-the portal sign-in configured, two mapped policyholders (PH-1001 and PH-1002) in a
-seeded run, and — for the Help Center — the customer help index published
-(`python scripts/publish-customer-help.py --apply`, an operator step). With the flags off
-the panels simply do not render.
+> One repo, one deployment, one story: a portal where AI is embedded, scoped to
+> whoever is signed in and fails closed; a case workbench where a person decides
+> every claim and confirms every extracted fact; and a GitHub pipeline that tests
+> those guarantees on every PR. Fork it, replace the synthetic records and help
+> articles with your customer's, and you have a running head-start on a real
+> proof of concept. See [`differentiators.md`](./differentiators.md) for the
+> checklist you can hand your customer.
 
-1. Sign in as policyholder **PH-1001** → **Policies**. The **Claims Concierge**
-   panel says *Only your own records*. Ask *"What is my collision deductible?"* The
-   answer cites `NW-AUTO-WA-2026-v1#collision`; **Show in policy wording** jumps to the
-   exact text.
-2. Open **My claims → CLM-2001** → *"What evidence is still needed?"* Expand **Records
-   checked** and **How this answer was produced** (model deployment, prompt SHA, records
-   read). Call out that the answer was verified before it was shown.
-3. Prove the scope: ask *"Show me claim CLM-2002."* The assistant cannot find it among
-   *your own* records and reveals nothing about it. Repeat as PH-1002 in a second browser
-   profile: only CLM-2002 and POL-1002 exist for that customer.
-4. Prove the boundary: ask *"Is my collision damage covered? Answer yes or no."* It
-   explains that a human adjuster decides, never states a coverage or payment decision,
-   and flags the answer for human review. A guard rejects any answer that would sound
-   like a decision.
-5. Open the **Help center** tab (or the *Ask the Help Center* disclosure under **Report a
-   loss**). The scope chip reads *Help articles only · no personal records*. Ask *"What
-   evidence should I send?"* The answer is a verbatim excerpt of a published article with
-   its title, version and effective date listed under **Help articles quoted**; expand
-   **How this answer was produced** to see that no personal record was read.
-6. Show the honest edge: ask *"What is the status of my claim CLM-2001?"* The Help Center
-   says it cannot find that in the articles and points to the Claims Concierge. Ask
-   *"What will the weather be tomorrow?"* and it declines in the same way rather than
-   guessing.
-7. Say it plainly: both assistants are hosted by the same FastAPI service that verifies the
-   Entra token. The Concierge reads the same business service the portal uses and cannot
-   write; the Help Center only selects excerpts from a customer-only help index, and the
-   server renders every word shown. Adjusters and presenters see no assistant in this
-   release.
+## Audience variants
 
----
+- **Five-minute cut**: Beats 0, 1, 2 and 5.
+- **Risk, compliance or security room**: spend the time on Beat 2 and the scope
+  proof in Beat 4. Ask for another customer's claim, for a yes/no coverage answer
+  and, in the Help Center, for a personal record. Then open
+  `data/golden/assistant.jsonl` to show the same attacks written as rows that CI
+  grades on every PR.
+- **Claims operations room**: Beats 3, 4 and 6. Report a loss, attach evidence,
+  then work the case as the adjuster and show internal versus customer-visible
+  notes.
+- **Engineering or platform room**: Beat 7 at length. Walk `ci.yml`,
+  `apps/api/tests/test_assistants_golden.py`, `agents/insurance/assistants/`
+  (the prompt files are the source of truth for both assistants) and the output
+  of `/build`.
 
-## Department-specific 2-minute variants
+## If a panel is missing
 
-For rooms where only one Foundry pillar matters, click into that
-department and use the variant below.
-
-### Employee Help Desk (2 min — RAG for HR / internal knowledge worker)
-
-1. Click the **Employee Help Desk** tile on the landing page.
-2. Ask: *"How many PTO days do I get in my second year?"* The
-   `northwind-hr-assistant` grounds the answer in `pto-policy.md` and
-   cites the filename.
-3. Ask: *"Who is Alex Johnson and what's their salary?"* The agent
-   refuses, points to `ethics@northwind.example`.
-4. Call out: this whole tab lives in the **`nw-employee-help-desk`**
-   Foundry project. Different agent, different Search index, same
-   account — one place to view traces + evals.
-
-### Claims & Warranty Ops (2 min — CU for compliance / claims processing)
-
-1. Click the **Claims & Warranty Ops** tile.
-2. Pick a sample intake form on the left. The right pane shows the
-   source doc + the extracted JSON produced by the
-   `northwind-claim-intake` CU analyzer.
-3. Point at fields the analyzer captured (`customer_name`, `order_id`,
-   `warranty_end_date`, `defect_summary`, `urgency`) and note that the
-   analyzer schema is versioned in git.
-4. Call out: same account, dedicated **`nw-claims-warranty`** project;
-   the derived text lands in `nw-claims` and can be cited by the Order
-   Concierge policy-lookup agent as a resolved-case precedent.
-
-### Customer Contact Center (2 min — Voice Live for contact-center / CX)
-
-1. In the **Contact Center** tab (Tab B), click a canned handoff
-   scenario. Watch the Order Concierge multi-agent orchestrator pick up
-   from the call summary and run its usual triage / order-lookup /
-   policy-lookup / resolution-draft chain.
-2. Switch to **Tab A** (`WEB_VOICE_URI`), click **Start a call**,
-   speak the same scenario aloud. Live Voice Live streams the greeting
-   + intent classification.
-3. Call out: **`nw-contact-center`** owns the voice greeting; the
-   cross-project handoff uses the same UAMI to invoke the Order Concierge
-   `northwind-orchestrator`. **The same four agents power both the web
-   chat and the phone line — the call center demo is just a different
-   front door on the same brain.** Zero secrets crossed a boundary.
-
-## Optional Agent Harness walkthrough
-
-Open **Agent Harness** from the landing page or any department sidebar.
-Confirm that the configuration banner identifies GitHub Copilot SDK as the
-harness and Azure Foundry as the provider. The runtime version appears after
-the first run; disabled or unavailable states are real setup feedback.
-
-Select **Order status** and run it. The SDK chooses the order-lookup specialist;
-the tool rail shows actual calls and results. Then select **Human approval**.
-The SDK obtains order/policy context and calls the existing resolution drafter.
-Open **Order Concierge Approvals**, decide the saved draft, and return to the
-harness to see the persisted decision. Say "decision recorded", not "refund
-executed": this demo has no payment integration.
-
-Open a recent run or refresh the page. The saved event history remains visible,
-but no model or tool is replayed. Point out the prompt hash, separate manager
-and specialist usage, and explicitly unavailable cost values. Contrast this
-app-owned harness with the unchanged Agent Framework/Foundry hosted manager.
-
-## The cross-department finale (2 min)
-
-Skip the department tour and do this as a single narrative:
-
-1. **Contact Center** call → intent classified as an order issue.
-2. Console operator hits **Handoff** → Order Concierge orchestrator picks up.
-3. Multi-agent chain drafts a resolution → HITL approval.
-4. Customer uploads a damage photo → **Claims & Warranty** CU analyzer
-   extracts fields.
-5. Later, an **Employee Help Desk** or Order Concierge query retrieves
-   that record as a precedent.
-
-One company, four projects, one deployment, one story.
+| You see                                                              | Why                                                                                                                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| *My account is unavailable*                                          | The `VITE_INSURANCE_*` sign-in settings are missing or invalid. No demo account is substituted.                                                                                      |
+| No assistant panels and no **Help center** tab                       | Assistants are off, the surface is not in `NORTHWIND_ASSISTANT_SURFACES`, or you are signed in as an adjuster or presenter (the server lists surfaces per role).                      |
+| *The Claims Concierge is not available right now.*                   | The surface is enabled but its configuration is incomplete (Foundry endpoint, Cosmos, packaged prompt; for the Help Center also the Search endpoint and index).                       |
+| No **Attach synthetic evidence** form                                | `NORTHWIND_EVIDENCE_ENABLED` is off, or you are signed in as a presenter (read-only).                                                                                                |
+| *Automatic extraction is paused…*                                    | The evidence worker or extraction is not enabled. Stored sources and manual field review still work.                                                                                 |

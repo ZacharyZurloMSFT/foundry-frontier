@@ -13,11 +13,14 @@ Legacy filenames remain stable for compatibility, but their active content is:
 | `warranty-carrier-30gx.md` | Fictional WA wording NW-AUTO-WA-2026-v1, version 1, with exact clause citations |
 | `warranty-trane-rtac.md` | Endorsement/evidence procedure NW-CLAIMS-HANDLING-2026-V1 |
 
-The web document view uses `GET /claims/samples` and `POST /claims/extract`,
-showing source text alongside extracted JSON and reported provenance.
-It must not portray an authored sample as a live CU run. No `ca-cu-ingest`
-worker is required for this API surface. The view does not upload files,
-automatically index them or execute claims actions.
+The legacy `GET /claims/samples` / `POST /claims/extract` document viewer was
+removed with the department shell. These sample documents are now reached through
+the portal's evidence routes (`/api/v1/evidence/samples` and
+`/api/v1/claims/{claim_id}/documents/samples`), where an adjuster compares the
+source with untrusted Content Understanding suggestions and confirms each field.
+An authored sample must never be portrayed as a live CU run. No `ca-cu-ingest`
+worker is required for this API surface, and nothing here indexes documents
+automatically or executes claims actions.
 
 `../cu-analyzers/claim-intake.json` and the pipeline insurance schemas cover
 FNOL, repair estimates, invoices and damage observations. Source references,

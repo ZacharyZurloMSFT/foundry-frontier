@@ -1,134 +1,196 @@
-# Northwind Insurance — one fictional insurer, four departments, one Foundry account
+# Northwind Insurance — four departments as content packs
 
-The Northwind demo is organized around **one fictional mid-market
-property-and-casualty insurer** (Northwind Insurance) with **four departments**, each
-backed by its own **Foundry project** inside a shared AI Services
-account. An authorised operator verifies each target project and deployment
-scope before rollout. An SE can navigate to the appropriate department — same VNet, same
-UAMI, same model quota, but each department has its own agents,
-connections, evaluators, red-team runs, and Foundry Observability lens.
+Northwind Insurance is **one fictional property-and-casualty insurer** with **four
+departments**. Each department is a **content pack** — a seed corpus, prompt agents, a
+golden set and a Search index — that bootstrap scripts load into its own **Foundry
+project** inside one shared AI Services account. Model deployments and account-scoped
+RBAC are shared; each project keeps its own agents and connections. An authorised
+operator verifies each target project and deployment scope before running any of the
+scripts below.
+
+## What a department is now
+
+Departments are **not a portal concept**. The Northwind Insurance portal
+(`apps/web-tech`, entered through `BusinessPortal`) has no department picker and no
+per-department tabs, and the API's own routes are `/health`, `/build` and `/api/v1/*`: there
+is no `/company` or `/departments` endpoint and no `X-Department` header (see
+[Removed legacy surfaces](../README.md#removed-legacy-surfaces)). The API makes its model
+calls through the single project in `FOUNDRY_PROJECT_ENDPOINT` and never calls a
+department's prompt agents or its own Search index. Three things still tie departments to
+the running system:
+
+- **One content set reaches users.** The customer Help Center answers from the
+  `employee-help-desk` pack's `seed/customer/*.md` articles
+  ([Help Center customer articles](#help-center-customer-articles)).
+- **Telemetry.** Each assistant profile names a department (`concierge` →
+  `order-concierge`, `help_center` → `employee-help-desk`). `apps/api/app/company.py`
+  loads the bundled manifest, and the assistant runtime calls `resolve_department()` to
+  look up that slug's `foundry_project` and stamp `department` and `foundry_project` on
+  the spans it creates for the turn.
+- **Shared source files.** The `claims-warranty` pack supplies the Content Understanding
+  analyzer definition and the allowlist of synthetic claim PDFs behind the portal's
+  claim-document review, and selected seed files from three packs are the source of the
+  isolated insurance knowledge base ([Source of truth](#source-of-truth)).
+
+Everything else — the department projects, their `search_index` indexes, knowledge bases and
+prompt agents — is platform content that the scripts create and the portal does not call.
 
 ## The four departments
 
-| Department                    | Foundry pillar         | Foundry project            | Search index         | Prompt agents                                                              |
-| ----------------------------- | ---------------------- | -------------------------- | -------------------- | -------------------------------------------------------------------------- |
-| **Claims Concierge** (flagship) | Records + Multi-agent + HITL | `northwind` (legacy web), `northwind-orders` (native) | `northwind-insurance-knowledge` | Stable specialist names retained; insurance behavior requires authorised rollout |
-| **Employee & Adjuster Support** | Read-only Search + model RAG | Department namespace retained; shared model client | `nw-insurance-adjuster-support` | Server-validated verbatim evidence with title/version/source citations; no retail HR-agent fallback |
-| **Claims Document Intelligence** | Live Content Understanding | Shared AI Services account; department namespace retained | No automatic indexing | `northwindInsuranceClaimsV1`, actual document bytes and typed fields/confidence/source spans |
-| **Policyholder Contact Center** | Native Voice Live WSS | Shared AI Services account; `nw-contact-center` namespace retained | No voice RAG claim | Insurance intake, completed transcripts and explicitly confirmed claims handoff |
+| Department (slug) | Foundry pillar | Foundry project | Search index | Prompt agents created from `prompts/*.yaml` |
+| --- | --- | --- | --- | --- |
+| **Claims Concierge** (`order-concierge`, flagship) | `multi_agent` | `northwind-orders` | `northwind-insurance-knowledge` | None from this tree: its agents are the hosted agents under `agents/` |
+| **Employee & Adjuster Support** (`employee-help-desk`) | `rag` | `nw-employee-help-desk` | `nw-hr` | `northwind-hr-assistant` and three model variants (`-gpt-5-4`, `-gpt-5-4-mini`, `-kimi`) |
+| **Claims Document Intelligence** (`claims-warranty`) | `content_understanding` | `nw-claims-warranty` | `nw-claims` | `northwind-claims-triage` |
+| **Policyholder Contact Center** (`contact-center`) | `voice_live` | `nw-contact-center` | `nw-contact-center` | `northwind-intent-classifier` |
 
-Internal slugs `order-concierge`, `employee-help-desk`, `claims-warranty` and
-`contact-center` remain unchanged. Legacy web `northwind` and native
-`northwind-orders` are distinct projects, not renamed or merged.
+Names, slugs, projects and indexes come from `data/northwind/company.yaml`; the slugs key
+the scripts and the telemetry stamp. The flagship's project is the native Orders project
+`northwind-orders`; the manifest does not reference the separate legacy `northwind`
+project.
 
-## Active insurance surfaces and rollout boundary
-
-In the signed-in portal, AI is **embedded in the sections it helps with** rather than
-hosted in a separate workspace: the policyholder Claims Concierge sits in Policies,
-My claims and each claim, and reads only the caller's own records, while the customer
-Help Center (a Help center tab and a collapsed panel beside Report a loss) answers general
-questions from published help articles and reads no records. Both run through an
-identity-bound API (`/api/v1/assistants`, see
-[architecture](./architecture.md#identity-bound-embedded-assistants)). The Help Center's
-articles live under the `employee-help-desk` department
-(`seed/customer/*.md`, published to their own `nw-insurance-help-customer-v1` index by
-`scripts/publish-customer-help.py`); that department's HR and IT corpus stays in the
-legacy shell and is never offered to customers. The department
-tabs described below (multi-agent chat, Approvals, Document Intelligence, support chat,
-contact center, bake-off, safety) remain in the legacy shell
-(`VITE_INSURANCE_BUSINESS_ENABLED=false`); staff-facing assistants and Approvals will be
-embedded in their own sections in a later release.
-
-Claims / Policies loads synthetic policyholders, auto policies, coverage
-schedules, endorsements, loss dates and evidence from `GET /insurance/fixtures`.
-It prepares `POST /insurance/actions/draft` payloads with linked claim,
-policy and policyholder IDs, one of five allowed action types, summary,
-source references and an optional proposed settlement amount.
-Saved drafts enter the existing `/hitl` human-review queue. Approval is an
-internal draft decision only: no insurance claim approval/denial, external
-message, real adjuster assignment or payment execution.
-
-Insurance chat uses **only** `POST /insurance/chat`, with a fresh readiness
-check before sending. Chat, harness execution, voice and contact handoff are
-unavailable until `/insurance/fixtures` reports `agent_runtime_ready: true`.
-The server's `NORTHWIND_BUSINESS_DOMAIN=insurance` and authorised
-`NORTHWIND_INSURANCE_AGENTS_READY` rollout remain the runtime boundary.
-Readiness also requires separately configured `northwind-insurance-*` native
-agents in `/api/projects/northwind-orders`; the legacy web
-`/api/projects/northwind` and old retail agent names are not compatible.
-The converted Copilot SDK harness preserves history and uses insurance
-lookup/policy/draft tools. `COPILOT_HARNESS_ENABLED` controls activation;
-configured dependencies are not labelled ready until a real SDK run completes.
-No custom learning/training screen or automatic training is added to the web app.
-
-Document extraction uses the API directly; `ca-cu-ingest` is not required.
-Allowlisted synthetic PDF inputs and raw bounded PDF/JPEG/PNG uploads go to
-live CU. Expected golden extractions are never returned as inference.
-The UI preserves source provenance and confidence; no automatic indexing or
-claim-record mutation is implied. Source bytes are not stored by the API.
-FNOL, repair estimates, supporting invoices and damage evidence are source
-facts only; photos cannot establish cause, fault, fraud or coverage.
-
-Voice Live authenticates through the API's managed identity. Browsers receive
-only a short-lived app connect ticket, never an Azure token or key. Ticket
-digests, origin, expiry and atomic ETags live in the existing workflow store
-with a 60-second TTL. Only completed transcripts populate the editable intake;
-an operator confirms the typed summary before POST `/handoff`. Raw audio is not
-persisted, and partial transcripts never trigger an action.
-
-The user accepted the immutable v2 synthetic package for evaluation-only use,
-not training or individual annotation. Five final review findings in SDK
-metadata checks and scoring were fixed. Reviewed execution-code overlays keep
-the prepared and executed source hashes separate without rewriting approved
-data. File-upload permission and verifiable all-call spend bounds remain
-independent mandatory gates before native evaluation.
-
-Active source forms/procedures carry fictional, version, effective-date,
-jurisdiction and citation context. `data/seed/generate.py --domain insurance`
-builds the local flagship PDF manifest without cloud/model calls.
-`--domain retail` retains explicit historical generation; old retail files
-are not referenced by the active insurance manifest.
-
-Insurance retrieval is isolated: index `northwind-insurance-knowledge`, knowledge
-source `northwind-insurance-knowledge-ks`, knowledge base `northwind-insurance-kb`
-and optional native `northwind-orders` connection `northwind-insurance-kb-mcp`.
-The existing Search service may be reused, but the retail `northwind-knowledge`
-index and `northwind-kb` knowledge base remain unchanged and are not insurer
-corpora. Manifest names describe intended targets, not proof that cloud resources
-exist or contain current content. An authorised operator reviews the dry-run
-plan from `scripts/publish-insurance-knowledge.py` before explicitly publishing
-the isolated corpus and verifying converted agents. The legacy
-`data/seed/index.py` and `upload_blobs.py` reject insurance manifests so they
-cannot populate the old retail index or shared seed container.
+- **`order-concierge`** has no content folder of its own: its manifest entry points at the
+  top-level `data/seed`, `data/golden/dataset.jsonl`, `agents/` and
+  `pipelines/content-understanding`. The department indexer skips it,
+  `scripts/publish-insurance-knowledge.py` publishes its index
+  ([Bootstrapping the packs](#bootstrapping-the-packs)), and `create-prompt-agents.py`
+  skips it while `ORDER_AGENTS_HOSTED` is `true` (the default).
+- **`employee-help-desk`** keeps its name, but its adjuster-procedures surface (an
+  endpoint, a prompt agent and a publisher script) was removed. Today it is the HR/IT
+  corpus plus the customer help articles; its adjuster content survives only as the
+  `## Adjuster procedures and claims-review boundaries` section of
+  `seed/manager-approval-workflow.md`, which feeds the insurance knowledge base. The three
+  model-variant agents fed a model dropdown in the removed UI (per the docstring in
+  `create-prompt-agents.py`); the script still creates them and nothing calls them.
+- **`claims-warranty`**'s Content Understanding assets are live:
+  `cu-analyzers/claim-intake.json` defines analyzer `northwindInsuranceClaimsV1`
+  (registered by `scripts/configure-insurance-cu.py`), and `claims-documents.json` lists
+  the synthetic PDFs the API's claim-document review offers.
+- **`contact-center`** was written for the removed Voice Live front door and its handoff
+  to the Claims Concierge. Only `northwind-intent-classifier` is created from it;
+  `prompts/greeting.md`, `prompts/voice-live-system.md` and the `agents.voice_live` block of
+  its `department.yaml` have no consumer, while two of its seed files (`call-scripts.md`,
+  `deflection-faq.md`) still feed the insurance knowledge base.
 
 ## Source of truth
 
-Everything about a department lives under
-`data/northwind/departments/<slug>/`:
+Everything about a department lives under `data/northwind/departments/<slug>/`:
 
-- `department.yaml` — manifest slice
-- `seed/*.md` — synthetic corpus indexed into the department's Search index
-- `golden/dataset.jsonl` — golden eval rows for that department's agents
+- `department.yaml` — a descriptive copy of the department's manifest entry plus authoring
+  notes; no code reads it
+- `seed/*.md` — synthetic corpus; the top-level files are indexed into the department's
+  Search index (`README.md` is skipped)
 - `prompts/*.yaml` — Foundry prompt-agent definitions
-- `cu-analyzers/*.json` — (Claims only) Content Understanding analyzer schemas
+- `golden/dataset.jsonl` — golden rows
+- `cu-analyzers/*.json` and `claims-documents.json` — (`claims-warranty` only) the Content
+  Understanding analyzer definition and the allowlist of synthetic claim PDFs
+- `seed/customer/*.md` — (`employee-help-desk` only) customer help articles, kept out of
+  the department index and published to their own
 
-The top-level `data/northwind/company.yaml` composes these into a single
-manifest read by:
+`data/northwind/company.yaml` is the manifest that code loads
+(`data.northwind.load_company()`); each `department.yaml` repeats its entry, so keep the two
+in step by hand. [`data/northwind/README.md`](../data/northwind/README.md) has the full tree
+and the folder contract.
 
-- **API** (`apps/api/app/company.py`) → serves `GET /company` + resolves
-  `X-Department` headers to project endpoints.
-- **web-tech** (`CompanyContext`) → renders the landing tiles + wires
-  the sidebar navigation.
-- **`scripts/create-prompt-agents.py`** → iterates every department and
-  creates its agents in the department's own Foundry project.
-- **`scripts/create-department-indexes.py`** → seeds each new
-  department's Search index from the department's `seed/` corpus.
+Who reads the packs:
+
+| Reader | What it takes |
+| --- | --- |
+| `scripts/create-department-indexes.py`, `create-knowledge-base.py`, `connect-knowledge-base.py`, `create-prompt-agents.py` | The manifest, plus top-level `seed/*.md` (indexer) and `prompts/*.yaml` (prompt agents); see [Bootstrapping the packs](#bootstrapping-the-packs) |
+| `apps/api/app/company.py` | `company.yaml`, bundled into the API image as `app/_northwind/` |
+| `scripts/publish-customer-help.py`, `evals/assistant_eval.py` | `employee-help-desk/seed/customer/*.md` |
+| `scripts/publish-insurance-knowledge.py`, `data/seed/generate.py` | The seed files listed in `data/seed/insurance-corpus.json`: the four `claims-warranty` sources, the adjuster-procedures section of `employee-help-desk/seed/manager-approval-workflow.md`, and `contact-center/seed/call-scripts.md` and `deflection-faq.md` |
+| `scripts/configure-insurance-cu.py`, `apps/api/app/content_understanding.py` | `claims-warranty/cu-analyzers/claim-intake.json` (analyzer definition); `claims-warranty/claims-documents.json` (PDF allowlist) |
+| `data/northwind/_smoke_test.py` | Everything: the manifest loads, seed directories exist, golden files are valid JSONL and prompt YAML parses |
+
+## Bootstrapping the packs
+
+Four scripts turn the packs into platform content. Each iterates the departments in
+`company.yaml`. Run them only against a project and deployment scope an authorised operator
+has verified.
+
+1. **`scripts/create-department-indexes.py`** uploads each department's top-level
+   `seed/*.md` (not `README.md`) to blob container `dept-seed/<slug>/`, then upserts the
+   Search index named by `search_index`, datasource `nw-<slug>-ds`, skillset
+   `<search_index>-skillset` and indexer `nw-<slug>-indexer`, and resets and runs the
+   indexer. It skips `order-concierge`, and it first deletes any existing
+   `<search_index>-kb`, `<search_index>-ks` and index so the index can be recreated.
+   Customer help articles sit in `seed/customer/` so they never reach `nw-hr`;
+   `scripts/tests/test_create_department_indexes_isolation.py` pins that.
+2. **`scripts/create-knowledge-base.py`** upserts a knowledge source `<search_index>-ks` and
+   a knowledge base `<search_index>-kb` per department (the flagship's names come from
+   `AZURE_SEARCH_KNOWLEDGE_SOURCE` and `AZURE_SEARCH_KNOWLEDGE_BASE`). Only the four slugs
+   in the script's `_DEPT_INSTRUCTIONS` map get one; any other slug is skipped.
+3. **`scripts/connect-knowledge-base.py`** creates a project connection
+   `<search_index>-kb-mcp` in each department's project, pointing at that knowledge base's
+   MCP endpoint (the flagship's connection name comes from `FOUNDRY_KB_CONNECTION_NAME`).
+4. **`scripts/create-prompt-agents.py`** creates (or adds a version of) every
+   `prompts/*.yaml` agent in the department's project. A YAML needs `name` and
+   `instructions`; the model is `FOUNDRY_PROMPT_AGENT_DEPLOYMENT` unless the YAML sets
+   `model:`, and a `tools: [{type: knowledge, index: ...}]` entry becomes an MCP tool over
+   that index's knowledge base. It skips `order-concierge` while `ORDER_AGENTS_HOSTED` is
+   `true`, and it exits non-zero when a department has no project endpoint.
+
+**When they run.** The azd `postprovision` hook (`scripts/postprovision.ps1` and `.sh`) runs
+`data/seed/generate.py`, `data/seed/upload_blobs.py` and `scripts/create-vector-indexer.py`,
+then the four scripts above in that order, but only in the retail domain
+(`NORTHWIND_BUSINESS_DOMAIN` unset or `retail`, the Bicep default). With
+`NORTHWIND_BUSINESS_DOMAIN=insurance` the hook prints that it is skipping all legacy
+bootstrap and exits, and with `NORTHWIND_REUSE_EXISTING_RESOURCES=true` it exits before any
+bootstrap. In those cases run the scripts yourself with the azd outputs and keys the hook
+would load (`scripts/load-azd-env.ps1`, `scripts/fetch-keys.*`);
+`scripts/index-departments.ps1` does that for steps 1 and 2.
+
+**The flagship's insurance knowledge is published separately.**
+`scripts/publish-insurance-knowledge.py` is a dry run unless `--apply` is passed. It pushes
+the policy wordings in `data/northwind/insurance-fixtures.json` and the department seed files
+listed in `data/seed/insurance-corpus.json` to index `northwind-insurance-knowledge`,
+knowledge source `northwind-insurance-knowledge-ks` and knowledge base
+`northwind-insurance-kb`; with `--connect-project` it also creates the
+`northwind-insurance-kb-mcp` connection in `northwind-orders`. A listed seed file must declare
+synthetic provenance, a source reference, a version, an effective date and a fictional
+jurisdiction, or the publisher refuses it. `data/seed/generate.py --domain insurance`
+renders the same sources to PDFs locally, with no cloud or model calls. The names describe
+intended targets, not proof that the cloud resources exist or hold current content. The
+retail `northwind-knowledge` index and `northwind-kb` knowledge base are separate;
+`data/seed/index.py` and `upload_blobs.py` reject insurance manifests, so they cannot write
+insurance content to the retail index or the shared seed container.
+
+## Help Center customer articles
+
+The one department content set that an embedded assistant serves. The Help Center
+(`help_center`, an `extractive_help` surface) appears in the portal as a Help center tab and a
+collapsed panel beside Report a loss. It answers general questions from published help
+articles and reads no personal record; the Claims Concierge is the assistant that reads a
+caller's own policies and claims. Both run through the identity-bound API
+(`/api/v1/assistants`; see [Embedded assistants (identity-bound)](../README.md#embedded-assistants-identity-bound)
+and [architecture](./architecture.md#identity-bound-embedded-assistants)) and stay disabled
+until an operator enables them.
+
+- **Source.** `data/northwind/departments/employee-help-desk/seed/customer/*.md`: twelve
+  fictional articles. Each starts with front matter of exactly `id`, `topic`, `version` and
+  `effective_from`, then one H1 beginning `# Fictional Northwind help: `. HTML, links and
+  images are not allowed, and each article stays under 12,000 characters.
+- **Publish.** `python scripts/publish-customer-help.py` validates the articles and
+  previews: it prints a summary and makes no network call or write. `--apply` is an operator
+  action: it creates or refreshes only the publisher-owned index
+  `nw-insurance-help-customer-v1`, authenticating with Entra by default, and refuses an index
+  that holds foreign documents. The publisher requires exactly the twelve ids in its
+  `EXPECTED_IDS`, so adding or removing an article also means changing that list and the
+  assistant golden rows that cite article ids.
+- **Isolation.** The articles live in a subfolder, so the department indexer (top-level
+  `seed/*.md` only) never sends them to `nw-hr`, and the HR/IT corpus and its prompt agents
+  have no portal surface. The API reads only `nw-insurance-help-customer-v1`, through a fixed
+  publisher and audience filter.
+- **Checks.** `python evals/assistant_eval.py --self-check` runs the deterministic assistant
+  golden-set grader offline; it also reads these articles.
 
 ## Where each Foundry project lives in Bicep
 
-`infra/modules/foundry.bicep` provisions the shared AI Services account
-and the stable flagship projects unchanged. Additional projects come in
-via the `additionalProjects` param (defaulted in `infra/main.bicep`):
+`infra/modules/foundry.bicep` provisions the shared AI Services account, its model
+deployments, the flagship project (`orderProjectName`, default `northwind-orders`) and one
+project per entry of the `additionalProjects` param (defaulted in `infra/main.bicep`; each
+entry is `{ slug, projectName, displayName, description }`):
 
 ```bicep
 additionalProjects = [
@@ -138,118 +200,92 @@ additionalProjects = [
 ]
 ```
 
-The account-scoped RBAC roles (`Azure AI User`,
-`Cognitive Services OpenAI User`) grant the UAMI + dev principal
-access on every project by inheritance — no per-project role
-assignments needed.
+The projects are created whenever the deployment is not in reuse mode, whatever the business
+domain. The account-scoped RBAC roles (`Azure AI User`, `Cognitive Services OpenAI User`) are
+granted to the app identity and the dev principal on the account, so every project inherits
+them — no per-project role assignments.
 
-Endpoints are exported as a JSON map on the `FOUNDRY_PROJECT_ENDPOINTS`
-env var, which the API reads at startup.
+The slug-to-endpoint map is the `FOUNDRY_PROJECT_ENDPOINTS` azd output: a JSON object that
+`infra/main.bicep` formats by hand for the four slugs, in manifest order.
+`create-prompt-agents.py` and `connect-knowledge-base.py` read it (and synthesize it from
+`FOUNDRY_ENDPOINT` plus the manifest's `foundry_project` names when it is missing), and
+`scripts/validate-reuse.py` requires all four slugs in reuse mode. The Container App still
+receives the variable, but the API no longer parses it.
 
-## Adding partner models to the bake-off tab
+An optional `bakeoffDeployments` param (default `[]`) adds extra model deployments to the same
+account. The bake-off tab and endpoint that raced them were removed, so nothing in the portal
+or API uses them; the `FOUNDRY_BAKEOFF_DEPLOYMENTS` output remains for operators and the reuse
+profile.
 
-The Bicep default for `bakeoffDeployments` is `[]` — the bake-off tab
-runs a **2-way race** on the always-deployed planner + worker
-deployments, which works on any Azure subscription without extra
-catalog gymnastics.
+## Golden sets and evals
 
-To add a third (or fourth) model to the race — for example a
-Moonshot Kimi, a Meta Llama, or a DeepSeek from the **Foundry Models
-catalog** — set the array via `azd env set` **before** running
-`azd provision`:
-
-```powershell
-# PowerShell
-azd env set BAKEOFFDEPLOYMENTS '[{"name":"kimi-k2.6","version":"2026-07-01","capacity":50,"publisher":"moonshot","format":"Moonshot"}]'
-```
-
-```bash
-# bash
-azd env set BAKEOFFDEPLOYMENTS '[{"name":"kimi-k2.6","version":"2026-07-01","capacity":50,"publisher":"moonshot","format":"Moonshot"}]'
-```
-
-Then `azd provision`. Each entry becomes a
-`Microsoft.CognitiveServices/accounts/deployments` resource on the
-shared AI Services account, and the bake-off endpoint
-(`FOUNDRY_BAKEOFF_DEPLOYMENTS`) picks up every deployment name.
-
-**Catalog availability varies by subscription + region.** If ARM
-rejects the model with `DeploymentModelNotSupported`, check the
-Foundry portal → Deployments → **+ Deploy model** dialog for what's
-actually listed in your AI region (defaults to `eastus2`), then update
-the array to a name/version that appears there.
-
-The eval Tier-4 pipeline still keys metrics per-department regardless
-of how many bake-off models are configured.
-
-## Agent Harness platform workspace
-
-`agent_harness` in `company.yaml` describes a platform capability, not a fifth
-department. Its explicit UI entry is available from the landing page and
-department navigation. Entering it preserves the selected department's chat
-state. Its insurance calls remain scoped to the stable `order-concierge`
-department and `northwind-orders`, even when opened from another department.
-
-The Python Copilot SDK runs in the API with four registered insurance tools
-and workflow-bound, pending-only action persistence. No additional Foundry
-project or Container App is
-provisioned. `COPILOT_HARNESS_ENABLED` controls execution independently of
-workspace visibility.
+- **Flagship.** `order-concierge`'s golden set is the top-level `data/golden/dataset.jsonl`.
+  `evals/push_to_foundry.py`, `evals/register_foundry_evaluator.py` and the nightly optimizer
+  (`pipelines/optimizer/run_prompt_optimizer.py`) read it.
+- **Assistants.** `data/golden/assistant.jsonl` covers both embedded assistants and is graded
+  offline by `python evals/assistant_eval.py --self-check`.
+- **Other departments.** The `golden/dataset.jsonl` files of `employee-help-desk`,
+  `claims-warranty` and `contact-center` are authored content kept with their packs.
+  `data/northwind/_smoke_test.py` checks that they parse as JSONL, and no eval runner or
+  workflow reads them now: the Tier 2 golden-set runner and its PR workflow were retired with
+  the endpoints they exercised.
+- **Baseline.** `evals/baseline.json` keeps one (currently empty) entry per department slug.
+  Do not edit it without reviewer approval.
 
 ## Adding an embedded assistant surface
 
-Assistants in the portal are surfaces, not departments, so they need no Foundry project
-or Bicep change:
+A department's content reaches users only through an embedded assistant surface. The design
+is in the README's
+[Embedded assistants (identity-bound)](../README.md#embedded-assistants-identity-bound)
+section and in [architecture](./architecture.md#identity-bound-embedded-assistants).
+Surfaces are not departments, so they need no Foundry project or Bicep change:
 
-1. Add a profile to `apps/api/app/assistants/profiles.py` (roles, department stamp,
-   tool allowlist, suggestions, and `kind`: `scoped_tools` for assistants that read a
-   caller's records, `extractive_help` for assistants that quote a document corpus) and a
-   prompt in `agents/insurance/assistants/<surface>.yaml`
-   whose `surface:` matches the profile (use `_` in the id and `-` in the file name).
-   `scripts/bundle-harness-assets.py` packages and SHA-stamps it.
-2. Give customer roles customer-safe tools only: ids as arguments, whitelisted
-   projections, no identity, no writes. Extend `ToolBox` rather than reading storage
-   from a handler.
-3. For a document corpus, publish an **audience-isolated** index (one index per
-   audience, never a filter on a shared index) with a publisher script modelled on
-   `scripts/publish-customer-help.py` (preview by default, `--apply` only writes the
-   publisher-owned index), and map the surface to it on the server. A help desk for staff
-   would reuse `extractive_help` with its own index, prompt and roles.
-4. Mount `<AssistantPanel surface="..." context={...} />` in the section it helps with
-   (or `<AssistantDisclosure>` beside a form; never inside one, because the panel has its
-   own form); it renders only when `/api/v1/assistants/status` lists the surface for the caller.
+1. Add a profile to `apps/api/app/assistants/profiles.py` (`surface`, `kind`, `label`,
+   `agent`, `roles`, `department`, `prompt_file`, `tools`, `accepts` and `suggestions`) and a
+   prompt in `agents/insurance/assistants/<surface>.yaml` that declares
+   `business_domain: insurance` and a `surface:` matching the profile id (use `_` in the id
+   and `-` in the file name). `kind` is `scoped_tools` for assistants that read a caller's
+   records and `extractive_help` for assistants that quote a document corpus. `department`
+   should be a manifest slug: it stamps telemetry, and an unknown slug falls back to
+   `order-concierge`. `scripts/bundle-assistant-assets.py` packages the prompt into the API
+   image and SHA-stamps it.
+2. Give customer roles customer-safe tools only: ids as arguments, whitelisted projections,
+   no identity, no writes. Extend `ToolBox` (`apps/api/app/assistants/tools.py`) rather than
+   reading storage from a handler.
+3. For a document corpus, publish an **audience-isolated** index (one index per audience,
+   never a filter on a shared index) with a publisher script modelled on
+   `scripts/publish-customer-help.py` (it previews by default, and `--apply` writes only the
+   publisher-owned index). `extractive_help` is pinned to the one customer index today: its
+   name, publisher and audience filter are constants in `profiles.py` and `extractive.py`, so
+   a second corpus, such as a staff help desk, also means making that mapping per surface.
+4. Mount `<AssistantPanel surface="..." context={...} />` in the portal section it helps
+   with, or `<AssistantDisclosure>` beside a form (never inside one, because the panel has
+   its own form). Both render nothing unless `/api/v1/assistants/status` lists the surface
+   for the caller. Add the surface's wording to `VARIANTS` in
+   `apps/web-tech/src/business/assistants/AssistantPanel.tsx`; a surface without an entry
+   gets the records wording.
 5. Add golden rows to `data/golden/assistant.jsonl` (including scope, injection and
-   determination bait) and make the offline tests pass before enabling the surface in
-   `NORTHWIND_ASSISTANT_SURFACES`.
+   determination bait) and make `python evals/assistant_eval.py --self-check` and the API's
+   offline tests pass before listing the surface in `NORTHWIND_ASSISTANT_SURFACES`. A surface
+   stays off until `NORTHWIND_ASSISTANTS_ENABLED` is `true`.
 
 ## Adding a new department
 
-1. Add a `data/northwind/departments/<slug>/` directory with a
-   `department.yaml`, a `seed/` corpus, at least one `prompts/*.yaml`,
-   and a `golden/dataset.jsonl` with ≥10 rows.
-2. Add the department to `data/northwind/company.yaml` (top-level).
-3. Add a matching entry to the `additionalProjects` array in
-   `infra/main.bicep`.
-4. Add a `UI tab` entry: create a tab component under
-   `apps/web-tech/src/tabs/` and wire it into `DEPT_TABS` in `App.tsx`.
-5. Run `azd provision && azd deploy` — postprovision picks up every
-   department automatically.
+A new department is data plus platform assets. It has **no portal surface** unless an
+[assistant surface](#adding-an-embedded-assistant-surface) is added for it.
 
-## Cross-department flow
-
-The most compelling demo is the **cross-department finale**:
-
-1. Browse **Claims Concierge** records and select CLM-2001 / POL-1001.
-2. Inspect a synthetic FNOL, estimate or invoice in **Claims Document
-   Intelligence**, noting provenance, source references and uncertainty.
-3. Prepare an evidence request or review recommendation; save an internal draft.
-4. A human reviews the draft in Approvals; no external action or claim
-   adjudication occurs.
-5. After authorised converted-agent rollout, **Policyholder Contact Center**
-   can handle loss intake/status and send an insurance-safe summary to
-   **Claims Concierge** for an adjuster handoff.
-6. **Employee & Adjuster Support** preserves HR/IT retrieval and adds
-   versioned adjuster procedures after the corpus is refreshed.
-
-Same UAMI, same VNet, same account, same eval loop — four different
-customer archetypes all served by one deployment.
+1. Add `data/northwind/departments/<slug>/` with a `department.yaml`, a `seed/` corpus
+   (top-level `*.md` files), at least one `prompts/*.yaml` and a `golden/dataset.jsonl` (by
+   convention at least 10 rows, each carrying the slug).
+2. Add the department to `data/northwind/company.yaml` with the keys `data.northwind`
+   requires (`slug`, `name`, `tagline`, `pillar`, `foundry_project`, `search_index`,
+   `seed_dir`, `golden_path`, `prompts_dir`), and run `python data/northwind/_smoke_test.py`.
+3. Provision its project: add a `{ slug, projectName, displayName, description }` entry to
+   `additionalProjects` in `infra/main.bicep`, and add the slug to the hand-formatted
+   `FOUNDRY_PROJECT_ENDPOINTS` output next to it. While that variable is set, a slug missing
+   from it is skipped as "no project endpoint" and `create-prompt-agents.py` exits non-zero.
+4. Add an entry for the slug to `_DEPT_INSTRUCTIONS` in `scripts/create-knowledge-base.py`;
+   without one, no knowledge base is created for it.
+5. Run the bootstrap ([Bootstrapping the packs](#bootstrapping-the-packs)): in the retail
+   domain `azd provision` runs it through the postprovision hook; otherwise run the four
+   scripts yourself against a verified target.

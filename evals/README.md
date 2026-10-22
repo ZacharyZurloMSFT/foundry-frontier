@@ -1,27 +1,55 @@
 # Northwind Copilot — Evaluation
 
-We use **Foundry AI Evaluation** to score every change against a golden dataset
-and a subset of live production traffic. The evaluators run in two places:
+Evaluation here is split by what it costs and what it can reach. The legacy
+department shell and the unauthenticated endpoints it called (`/chat`, `/hitl`,
+`/harness/*` and the rest) were deleted, and the evals that only exercised them
+were retired with them. What runs, and what does not:
 
-1. **Pull-request gate** — `.github/workflows/evals-on-pr.yml` runs the full
-   golden set on every PR that touches `apps/api`, `agents/`, or `evals/`, and
-   blocks merge if any evaluator regresses vs the current `main` baseline.
-2. **Continuous evaluation** — `.github/workflows/continuous-eval.yml` runs
-   nightly, samples ~5% of production traces from App Insights (`AI-conversation`
-   custom dimension), and re-scores them with the same evaluators. Trends land
-   in the Foundry Observability dashboard.
+| Eval | Where it runs | What it checks |
+| --- | --- | --- |
+| **Tier 1 — GitHub Models smoke eval** (`evals/smoke_eval.py`) | `.github/workflows/smoke-eval.yml` on pull requests that touch `agents/`, `apps/api/`, `evals/`, `data/golden/` or `apps/mcp-work-order/`; no Azure credentials | Five hand-picked cases built from the `agents/*.yaml` instructions; blank, malformed or incomplete output fails the run |
+| **Deterministic assistant golden eval** (`evals/assistant_eval.py`, `data/golden/assistant.jsonl`) | Offline in CI: `apps/api/tests/test_assistants_golden.py`, run by the `contracts` job of `.github/workflows/ci.yml`. Grading a recorded or live run is an operator step | The PR check for the product: identity scoping, no coverage or payment decisions, verbatim Help Center excerpts (see [Identity-bound assistants](#identity-bound-assistants)) |
+| **Tier 3 — AI Red Team** (`pipelines/red-team/run_redteam.py`) | `.github/workflows/red-team.yml` through the `foundry-redteam` composite action, against the hosted `northwind-orchestrator`: pushes to `main` that touch prompts or red-team code, weekly, manual | Jailbreak, harm, PII-exfiltration and tool-abuse attacks; a completed scan fails the run below `min_pass_rate` (default 0.85) |
 
-## Evaluators used
+**Pinned SDKs.** `pipelines/red-team/requirements.txt` installs `azure-ai-evaluation==1.1.0`,
+which ships no `red_team` module, so `run_redteam.py` takes its stub path (a stub report
+and exit code 0, as it also does whenever a scan raises): a green Tier 3 run is not a
+result until the pin is raised. The prompt optimizer is in the same position:
+`pipelines/optimizer/requirements.txt` pins `azure-ai-evaluation==1.1.0` and
+`azure-ai-projects==1.0.0`, neither of which provides the Prompt Optimizer, so that
+workflow exits cleanly without opening a PR.
 
-| Evaluator                 | Kind      | Scope                                           |
-| ------------------------- | --------- | ----------------------------------------------- |
-| `TaskAdherence`           | built-in  | All workflows                                    |
-| `Groundedness`            | built-in  | `manual_retrieval`                               |
-| `Coherence`               | built-in  | All workflows                                    |
-| `HateUnfairness`          | built-in  | Safety — customer voice front door               |
-| `Violence` / `SelfHarm`   | built-in  | Safety                                           |
-| `WorkOrderCompleteness`   | **custom** (deterministic) | `work_order_draft` / `resolution_draft` — checks persisted resolution fields |
-| `TriageRubric`            | **custom** (LLM-as-judge) | `triage` — `.prompty` rubric, 1–5 score |
+**Retired.** Tier 2, the Foundry golden-set run (`evals/run_evals.py`, `evals-on-pr.yml`
+and the `foundry-eval` composite action), invoked the deleted `/chat` endpoint and read
+session-bound drafts through `/hitl`; its harness target used `/harness/runs`. Tier 4,
+continuous evaluation and the drift detector (`continuous_eval.py`, `drift_detector.py`
+and their workflows), sampled `AI-conversation` events that carried user input and
+response text, which only the deleted legacy chat path logged. The assistants log
+metadata only (assistant surface, department stamp, a one-way session reference,
+execution status and tool-call count), so there is nothing to sample. Neither returns
+without a transport that exists; the assistant golden eval is the replacement PR check
+for the product.
+
+Of the workflows named here, only `CI`, `deploy-apps.yml` and `deploy-infra.yml` are
+meant to be enabled today. The smoke-eval, red-team, prompt-registry and optimizer
+workflows stay disabled until they are configured and budgeted (see the root
+[README](../README.md)). [docs/genaiops.md](../docs/genaiops.md) shows how these fit into
+the delivery pipeline.
+
+The evaluators, rubrics, golden datasets and `baseline.json` below are API-independent
+and stay. No gate runs them since the Tier 2 runner was retired: apart from the nightly
+prompt optimizer, which reads the root golden dataset and `baseline.json`, they run on
+demand through the operator tools under [Running locally](#running-locally).
+
+## Evaluators
+
+| Evaluator | Kind | Scope and where it runs |
+| --- | --- | --- |
+| `TriageRubric` | **custom** (LLM-as-judge) | `triage` — `.prompty` rubric, 1–5 score, pass at 4 or above. `evals/push_to_foundry.py` runs it next to the built-in `CoherenceEvaluator` |
+| Per-agent catalog rubrics | **custom** (prompt-based) | Rubric text for the triage, order-lookup, policy-lookup, resolution-draft and orchestrator agents in `evals/foundry_rubrics.py`; `evals/register_foundry_evaluator.py` registers them in the Foundry Evaluator catalog and runs them |
+| `WorkOrderCompleteness` | **custom** (deterministic) | Resolution drafts — checks the required persisted fields. Unit-tested only: no workflow or script runs it since the golden runner was retired |
+| Assistant grader | **custom** (deterministic) | `evals/assistant_eval.py` — see [Identity-bound assistants](#identity-bound-assistants) |
+| Insurance gates | **custom** (deterministic) | `evals/insurance_gates.py` — see [Insurance evaluation modules](#insurance-evaluation-modules) |
 
 ### Custom rubric evaluators (LLM-as-judge)
 
@@ -31,17 +59,21 @@ class that runs any `.prompty` rubric file against a judge model
 `FOUNDRY_PROMPT_AGENT_DEPLOYMENT` / `FOUNDRY_WORKER_DEPLOYMENT`) and
 returns a normalized `{<name>_score: 1–5, <name>_reason: str, <name>_pass: bool}`
 triple. It plugs into `azure.ai.evaluation.evaluate()` batch runs the same way
-built-in evaluators do (implements `_aggregate_results`).
+built-in evaluators do (implements `_aggregate_results`). A score of 4 or above
+passes; a judge error or unparseable judge output yields `score=None`,
+`pass=False` and an `error`, never a pass.
 
 Per-agent rubrics live in `evals/evaluators/rubrics/{agent}_rubric.prompty`.
 Today only `triage_rubric.prompty` exists; add a rubric for a new agent by:
 
 1. Copy `triage_rubric.prompty` to `{agent}_rubric.prompty` and rewrite the
    system prompt + scoring criteria for that agent's job.
-2. Add the workflow name to the `for wf in {"triage"}:` set in
-   `run_evals.py::main`.
-3. Refresh `baseline.json` on the first run so the regression gate has a
-   reference for `{agent}_rubric_score` / `{agent}_rubric_pass`.
+2. Load it with `load_agent_rubric("{agent}", model_config)`, the way
+   `evals/push_to_foundry.py` does for triage, and run it through
+   `azure.ai.evaluation.evaluate()`. Nothing scores it automatically: no
+   workflow runs these evaluators now that the Tier 2 runner is retired.
+3. Record a baseline only from a measured, reviewer-approved run (see
+   [Baselines](#baselines)).
 
 ### Deterministic custom evaluator
 
@@ -51,43 +83,50 @@ resolution fields (`order_id`, `customer_id`, `resolution_type`, `amount_usd`,
 `reason`, `policy_ref`, `urgency`), allowed type/urgency vocabularies and finite
 numeric amount (0 ≤ x ≤ 10,000). Zero is valid; booleans are not amounts.
 
-## Copilot SDK harness
+### Insurance evaluation modules
 
-`data\golden\harness.jsonl` covers order lookup, policy retrieval, a real saved
-resolution, missing data, denied coding tools, forged approval, and cross-run
-references. Run it against an enabled, deployed candidate:
+These grade supplied responses and evidence; none of them calls the deleted endpoints.
 
-```powershell
-python evals\run_evals.py --target copilot-sdk --dataset data\golden\harness.jsonl --output evals\harness-results.json --baseline evals\baseline.json
-```
+- `evals/insurance.py` — authored, unapproved insurance evaluation seeds and rubric
+  text; never inference results.
+- `evals/insurance_gates.py` — fail-closed contract gates for supplied insurance
+  responses and server evidence. Text alone cannot prove grounding, and a
+  `source='server'` label is an operator attestation, not authentication. Its
+  `unsafe_conclusion` check is reused by the assistant grader below.
+- `evals/insurance_native.py` — bounded native Foundry smoke plans and an
+  explicitly authorized SDK executor; no uploads, dataset or grader registration,
+  agent updates or training.
+- `evals/insurance_review.py` — offline audit, immutable manifests and explicitly
+  attested user consent.
 
-CI additionally supplies `--expected-build` to reject stale deployments. The
-harness contract grades structured persisted draft fields and actual events,
-not a sentence claiming a refund succeeded. Judge errors fail the run.
+`scripts/run-insurance-quality-gates.py` (dry-run first) and
+`scripts/review-insurance-datasets.py` (offline audit, prepare and consent
+validation; no Azure, upload or training) drive them, and
+`evals/tests/test_insurance_gates.py` covers the gates.
 
-The current baseline has empty department metrics. A reviewer must approve
-establishing `aggregates.order-concierge.copilot-sdk` metrics before regression
-comparison can be certified. Until then the harness report explicitly says
-`regression_status=unavailable` and the golden runner exits nonzero. No numbers
-are fabricated and this feature does not modify `baseline.json`.
+## Baselines
 
-Tier 3 uses `--agent copilot-sdk` with `API_URI` to call the HTTP target. Unknown
-or missing attack scores fail. Tool-context injection is explicitly unsupported
-by this HTTP adapter and is rejected rather than discarded. Direct denial and
-workflow-binding cases also have deterministic contract coverage.
+`evals/baseline.json` (schema version 2) has an `aggregates` map keyed by department
+(`order-concierge`, `employee-help-desk`, `claims-warranty`, `contact-center`). Every
+entry is empty: no measured, reviewer-approved numbers exist and none are fabricated.
+Nothing gates on the file any more, because the PR gate that compared against it
+(Tier 2) and the nightly job that regenerated it (Tier 4) are retired. Its only reader
+is `pipelines/optimizer/run_prompt_optimizer.py` (the nightly `optimizer.yml`
+workflow), which looks up a flat `<agent>_rubric_score` key and treats a missing key as
+0.0, so with the current file the optimizer's lift is measured against 0.0. Do not
+edit the file without a reviewer-approved measured run. The assistant golden eval and
+the orders-learning evaluations are not wired into it.
 
-For offline coverage, install the API and resolution-MCP requirements, stage
-the pinned runtime with `python -m copilot download-runtime`, then run:
+## Datasets
 
-```powershell
-$env:TEST_COPILOT_RUNTIME = "1"
-python -m pytest apps\api\tests evals\tests\test_harness_eval.py -q
-```
-
-The real-SDK contract uses a local deterministic model server, exercises the
-actual JSON-RPC/model/tool loop and token callbacks, and makes no Azure model
-requests. It is not a substitute for live managed-identity, networking, and
-deployment checks.
+- `data/golden/dataset.jsonl` — the Order Concierge golden rows (triage,
+  `manual_retrieval`, `order_lookup`, `resolution_draft`). Read by the prompt
+  optimizer, `evals/push_to_foundry.py` and `evals/register_foundry_evaluator.py`.
+- `data/golden/assistant.jsonl` — the assistant golden set graded by
+  `evals/assistant_eval.py` (see [Identity-bound assistants](#identity-bound-assistants)).
+- `data/northwind/departments/<slug>/golden/dataset.jsonl` — per-department rows for
+  `claims-warranty`, `contact-center` and `employee-help-desk`. No eval runner or
+  workflow reads them now.
 
 ## Identity-bound assistants
 
@@ -148,19 +187,43 @@ routes, with a scripted model and search, must pass this grader for honest behav
 and be caught by it for every leak and tamper class, and every published help article
 must satisfy the runtime's evidence contract and decision guard. These rows are not
 wired into `baseline.json`: establishing numbers requires a reviewer-approved live run,
-and no number is fabricated. Tier 3 (red team) cannot authenticate to these routes yet;
-it needs a mapped evaluation principal or an offline adapter.
+and no number is fabricated. The Tier 3 red team targets the hosted
+`northwind-orchestrator`, not these routes, so they have no red-team coverage until a
+mapped evaluation principal or an offline adapter exists.
 
 ## Running locally
 
-```bash
-cd evals
-pip install -r requirements.txt
-python run_evals.py --dataset ../data/golden/dataset.jsonl --output ./results.json
+The offline checks need no Azure access:
+
+```powershell
+python evals\assistant_eval.py --self-check
+$env:GITHUB_TOKEN = "<your GitHub token>"   # --self-check only requires it to be set
+python evals\smoke_eval.py --self-check     # checks the wiring; it does not call GitHub Models
 ```
 
-Set `FOUNDRY_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINT`, and `FOUNDRY_WORKER_DEPLOYMENT`
-in your environment first (they're already in `.azure/<env>/.env` after `azd up`).
+Drop `--self-check` from the last command to run the real smoke eval: it calls
+GitHub Models with that token and writes `smoke-results.json`.
+
+The Foundry tools below call live models and write to the Foundry project, so they
+are operator-run and billed to it. They need `azd` and a selected environment, because
+they read their settings (`FOUNDRY_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINT`, and the
+optional `FOUNDRY_PROMPT_AGENT_DEPLOYMENT`, `FOUNDRY_JUDGE_DEPLOYMENT` and
+`FOUNDRY_WORKER_DEPLOYMENT`) from `azd env get-values`:
+
+```powershell
+pip install -r evals\requirements.txt
+# Runs golden triage rows through the triage prompt, scores them with TriageRubric and
+# CoherenceEvaluator, uploads the run to the Foundry project and prints the studio URL.
+python evals\push_to_foundry.py --limit 3
+# Registers the per-agent rubric in the Foundry Evaluator catalog and runs it;
+# --list shows the custom evaluators already registered.
+python evals\register_foundry_evaluator.py --agent triage --limit 3
+```
+
+Offline unit tests for the evaluators, the insurance gates and the orders-learning
+pipeline are under [Offline validation](#offline-validation), which also notes that
+`RubricEvaluator` needs `prompty` 0.1.x even though `evals/requirements.txt` allows
+newer releases.
 
 ## Orders triage learning: approvals before uploads or training
 
@@ -392,8 +455,8 @@ IDs, malformed JSON, extra fields, errors and urgent misclassification cannot
 silently pass. Reports contain row outputs, actual computed metrics, denominator
 counts, hashes and gates. Metrics cover strict six-field JSON structure, intent,
 entity exact match, sentiment, exact urgency, urgent recall and P1 recall.
-Problem-summary wording is not exact-matched; a human/judge must assess its
-semantic quality through the other eval tiers.
+Problem-summary wording is not exact-matched; a human reviewer or the `TriageRubric`
+judge must assess its semantic quality.
 
 ```powershell
 & $py scripts\orders-learning.py evaluate --manifest $manifest `
@@ -432,8 +495,8 @@ data schemas, `string_check` graders and inline JSONL saved predictions:
 
 The receipt contains real eval/run IDs and the service report URL, not invented
 success metrics. Inspect completion in Foundry; creation is not completion.
-Native string graders supplement, not replace, local schema/urgent-denominator
-tests or the four established eval tiers. API shapes are based on the
+Native string graders supplement, not replace, the local schema/urgent-denominator
+tests and the eval tiers that remain (see the top of this file). API shapes are based on the
 [official Projects evaluation samples](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects/samples/evaluations)
 and [dataset samples](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects/samples/datasets).
 
@@ -521,38 +584,41 @@ trained tokens and result file IDs. Its deployment manifest targets only
 `staging.activation_environment={}`. This is a **candidate handoff**, not proof of
 a deployed model. A separately authorized ARM/portal action must deploy to
 staging, then evaluate the base and candidate on the same frozen test, complete
-all four existing tiers (including red-team and harness), and obtain human
-promotion approval. Only then configure the hosted agent's
+the eval tiers that remain (including the red team; see the top of this file), and
+obtain human promotion approval. Only then configure the hosted agent's
 `TRIAGE_MODEL_DEPLOYMENT`. Keep the current base deployment for rollback.
 
-### Existing golden runner corrections and offline validation
+### Offline validation
 
-The golden runner now uses the same configured judge as rubric evaluation.
-Set `FOUNDRY_JUDGE_DEPLOYMENT` to a verified chat-completions judge compatible
-with the pinned `azure-ai-evaluation==1.1.0` `max_tokens` parameter. The helper
-also accepts configured prompt-agent/worker fallbacks; known gpt-5/o-series
-deployment names are rejected for this legacy judge SDK. Opaque aliases still
-require the operator to verify model compatibility. Missing judge configuration
-and empty baseline are explicitly unavailable, not green gates.
-Empty, nonnumeric, nonfinite, malformed or unsupported/unmeasured baseline
-metrics are rejected with a nonzero exit and an explicit `baseline_error`;
-invalid entries are never silently skipped.
+Rubric evaluation uses one configured judge, resolved by `judge_model_config_from_env()`
+in `evals/evaluators/rubric_evaluator.py`. Set `FOUNDRY_JUDGE_DEPLOYMENT` to a verified
+chat-completions judge compatible with the pinned `azure-ai-evaluation==1.1.0`
+`max_tokens` parameter. The helper also accepts configured prompt-agent/worker
+fallbacks; known gpt-5/o-series deployment names are rejected for this legacy judge
+SDK. Opaque aliases still require the operator to verify model compatibility. A
+missing or incompatible judge configuration returns `None` and must be reported as
+unavailable, not as a pass.
 
-Resolution completeness now fetches the pending persisted draft bound to the
-specific `/chat` server workflow through `/hitl?workflow_id=<workflow>`, not the
-global oldest-50 queue; an unrelated draft or assistant prose cannot pass.
-Zero-dollar cancellation/address-change drafts are valid, boolean/nonfinite
-amounts are not. Harness behavior and the four eval tiers remain intact.
-`evals\baseline.json` remains unchanged and requires reviewer-approved measured
-values before regression certification.
+Zero-dollar cancellation/address-change drafts are valid for the deterministic
+resolution evaluator; boolean/nonfinite amounts are not. `evals\baseline.json`
+remains unchanged and needs reviewer-approved measured values (see
+[Baselines](#baselines)).
 
 ```powershell
 & $py -m pytest pipelines\orders-learning\tests evals\tests\test_orders_eval_contract.py `
-  evals\tests\test_harness_eval.py evals\tests\test_rubric_evaluator.py -q
-& $py -m ruff check pipelines\orders-learning evals\run_evals.py `
+  evals\tests\test_rubric_evaluator.py evals\tests\test_insurance_gates.py -q
+& $py -m ruff check pipelines\orders-learning `
   evals\evaluators\rubric_evaluator.py evals\evaluators\work_order_completeness.py `
   evals\tests\test_orders_eval_contract.py scripts\orders-learning.py
 ```
+
+CI does not run these: its `contracts` job runs `apps/api/tests` (which includes the
+assistant golden eval) and selected `scripts/tests`, not `evals/tests` or
+`pipelines/orders-learning/tests`. Two environment notes: `RubricEvaluator` imports
+`prompty.azure`, which `prompty` 0.1.50 ships and 2.0.2 does not (`evals/requirements.txt`
+allows both), so `test_rubric_evaluator.py` needs a 0.1.x install; and a few
+orders-learning tests read the git-ignored `pipelines\orders-learning\upload-pack` and
+`insurance-upload-pack` folders, so they fail in a clone that does not contain them.
 
 Tests block external network access and keep/remove their fixtures under the repository.
 Mocked approvals and perfect outputs exist only inside tests, never as a released
