@@ -2,7 +2,7 @@
 
 How Northwind sends model inference and MCP traffic through the Azure API Management **AI Gateway tier** instance `ai-gateway-northwind`, what is verified live, what is deliberately not routed, and how to roll it out and roll it back.
 
-> Status: the repository changes are implemented and **off by default** (a fresh `azd up` is unchanged). The live gateway was changed on 2026-10-22 at the owner's direction: two stale tool servers were removed, the three insurance MCP tool servers were registered, and diagnostic settings were enabled on the gateway and the Foundry account (details below). Everything else live (role grants, connections, new agent versions, app settings, enforcement) is **not applied automatically**; each is a dry-run-by-default script described in the [runbook](#runbook). Earlier inspection used only read-only calls plus temporary canaries and a temporary role assignment, all deleted again.
+> Status: the repository changes are implemented and **off by default** (a fresh `azd up` is unchanged). The live gateway was changed on 2026-10-22 at the owner's direction: two stale tool servers were removed, the three insurance MCP tool servers were registered, and diagnostic settings were enabled on the gateway and the Foundry account (details below). The code is merged (PR #61) and its release put it on the northwind-stack apps, where it is inactive; the insurance apps and the agents are **not deployed** (see [Deployment status](#deployment-status)). Everything else live (role grants, connections, new agent versions, app settings, enforcement) is **not applied automatically**; each is a dry-run-by-default script described in the [runbook](#runbook). Earlier inspection used only read-only calls plus temporary canaries and a temporary role assignment, all deleted again.
 
 ## Scope
 
@@ -52,13 +52,26 @@ The AI Gateway is not the only gateway in this repository. [`docs/api-management
 | Foundry projects | `nw-insurance-claims` (default), `nw-insurance-documents`, `nw-insurance-support`, `nw-insurance-contact-center` |
 | Hosted agents (`nw-insurance-claims`) | `northwind-insurance-{orchestrator,triage,policy-claim-lookup,policy-wording,claim-action-draft}` v1; models **already via gateway** (`ORDERS_MODEL_GATEWAY_*`, manager `.../gpt-5-4`, others `.../gpt-4o`); MCP **direct** |
 | Prompt agents | `northwind-claims-triage` (`nw-insurance-documents`), `northwind-intent-classifier` (`nw-insurance-contact-center`): gpt-4o, no tools, model **direct** |
-| API app | `ca-insurance-api`: planner gpt-5.4, worker gpt-5.4-mini, prompt-agent gpt-4o, bake-off `gpt-5.4,gpt-5.4-mini`, harness gpt-5.4; all model calls **direct**; no `AI_GATEWAY_*` settings |
+| API app | `ca-insurance-api`, still its 2026-10-16 build (no gateway code; no workflow releases it): planner gpt-5.4, worker gpt-5.4-mini, prompt-agent gpt-4o, bake-off `gpt-5.4,gpt-5.4-mini`, harness gpt-5.4; all model calls **direct**; no `AI_GATEWAY_*` settings |
 | MCP apps | `ca-insurance-lookup` (read-only synthetic lookups), `ca-insurance-review` (work-order drafts), legacy `ca-mcp-tech-lookup`, `ca-mcp-work-order`; external ingress, no IP restrictions, no auth |
 | Gateway tool servers | registered by this change (2026-10-22): `northwind-insurance-lookup`, `northwind-insurance-knowledge` (the gateway holds a read-only Search query key), `northwind-insurance-review` (fails closed through the gateway, see finding 1); pre-existing KB servers `northwind-{claims,contact-center,hr,orders}-knowledge`; `northwind-api` (OpenAPI facade, 23 tools). The two stale servers `northwind-order-lookup` and `northwind-resolutions` (retired `bluecliff` FQDNs, HTTP 404) were **deleted** on 2026-10-22 |
 | Diagnostics | gateway: `northwind-gateway-to-law` sends `GatewayLogs`, `GatewayLlmLogs`, `GatewayMCPLogs` and `AllMetrics` to Log Analytics workspace `log-zurlo-northwind` (resource-specific tables); Foundry account: `northwind-account-to-law` sends `RequestResponse` to the same workspace, next to the existing policy-assigned `setByPolicy-MCAPSGovernance` setting |
 | Foundry connections | one `RemoteTool` KB connection `nw-insurance-claims-kb-mcp` (CustomKeys, Search admin key); no `ApiManagement` model connection |
 | Account | `disableLocalAuth=true`, public network enabled, no private endpoints |
 | RBAC | Models User on the gateway for the 5 hosted agent identities (plus 5 orphaned identities of the removed `northwind-orders` project); the app UAMI `id-app-zurlo-northwind` has **no** gateway role yet; hosted identities also hold Cognitive Services OpenAI User (account) and Foundry User (project) |
+
+## Deployment status
+
+Verified on 2026-10-22 after PR #61 merged (`87731ac`), from the workflow runs and read-only checks of Azure:
+
+| Layer | State |
+|---|---|
+| Code on `main` | merged; CI passed |
+| Northwind-stack apps (`ca-api`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`, `ca-web-tech`, `ca-web-voice`) | released by the app-release workflow (`deploy-apps.yml`), all five ready and smoke-tested. The gateway code is **inactive** (no `AI_GATEWAY_*` settings): `GET /northwind/gateway/status` through API Management returns `"enabled": false` |
+| Insurance apps (`ca-insurance-*`) | **not deployed**: no workflow or script releases them (`scripts/release-app.py` accepts only the five apps above). `ca-insurance-api` still runs the 2026-10-16 build, so `/gateway/status` is 404 and its model calls go direct |
+| Gateway tool servers and diagnostics | applied live (see the inventory above) |
+| Hosted agents, prompt agents, connections, role grants, enforcement | **not applied**: runbook steps 2, 3, 5, 6 and 8 |
+| Infrastructure | unchanged: the plan is identical before and after the merge, and apply is a manual dispatch |
 
 ## Routing design
 
@@ -121,7 +134,7 @@ Order is **route, verify, then enforce**: nothing is enforced until the traffic 
 | 1 tool servers | API Management Service Contributor on the gateway; AI Gateway Tools User for `verify` |
 | 2 grants | User Access Administrator or Role Based Access Control Administrator on the gateway |
 | 3 connections | Contributor on the Foundry account and project |
-| 4 API app | Contributor on `ca-insurance-api` |
+| 4 API app | Contributor on `ca-insurance-api`; AcrPush on `acrzurlonorthwind` to publish the image |
 | 5-6 agents | the deploy identity already used for `deploy-orders-hosted.py` / `create-prompt-agents.py` |
 | 8 enforce | Role Based Access Control Administrator on the Foundry account |
 
@@ -189,6 +202,12 @@ Canary: create one throwaway prompt agent (`zz-gateway-canary`) with `model` `nw
 
 ### 4. API app
 
+`ca-insurance-api` is outside both the app-release workflow and `scripts/release-app.py` (they release only the five northwind-stack apps), and it still runs its 2026-10-16 build, which has no gateway code, so setting `AI_GATEWAY_*` on it would change nothing. In this order:
+
+1. **Release an image built from `main`.** Package and build it like the `api` case of `.github/workflows/deploy-apps.yml` (the "Snapshot nonsecret release guards" and "Build and push immutable images" steps), push it to `acrzurlonorthwind`, then point the app at the digest, for example `az containerapp update -g rg-northwind-apps -n ca-insurance-api --image acrzurlonorthwind.azurecr.io/api@sha256:<digest> --set-env-vars GIT_SHA=<commit> DEPLOYED_AT=<UTC timestamp>` (the other settings are kept; the two variables make `/build` report the new build). Confirm `GET /gateway/status` now returns 200 with `"enabled": false`.
+2. **Grant the app identity Models User** (step 2) before the gateway is enabled.
+3. **Enable the gateway:**
+
 ```powershell
 az containerapp update -g rg-northwind-apps -n ca-insurance-api --set-env-vars `
   AI_GATEWAY_MODEL_ENDPOINT=https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/ `
@@ -254,7 +273,7 @@ Each step undoes independently, newest first.
 | 8 enforce | `python scripts/ai-gateway-enforce.py rollback --receipt <receipt> --yes` recreates exactly the removed assignments |
 | 6 prompt agents | re-run `create-prompt-agents.py` with the `AI_GATEWAY_*` variables unset: a new version calls the deployment and Search directly; delete the connections with `az rest --method delete --url "https://management.azure.com<connection id>?api-version=2025-10-01-preview"` |
 | 5 hosted agents | deploy a new version from the previous config (flags removed); hosted versions are immutable, so there is no in-place edit |
-| 4 API app | `az containerapp update -g rg-northwind-apps -n ca-insurance-api --remove-env-vars AI_GATEWAY_REQUIRED AI_GATEWAY_MODEL_ENDPOINT AI_GATEWAY_MODEL_PROVIDER` (remove `AI_GATEWAY_REQUIRED` first) |
+| 4 API app | `az containerapp update -g rg-northwind-apps -n ca-insurance-api --remove-env-vars AI_GATEWAY_REQUIRED AI_GATEWAY_MODEL_ENDPOINT AI_GATEWAY_MODEL_PROVIDER` (remove `AI_GATEWAY_REQUIRED` first); the newer image can stay, because its gateway code is inactive without these settings |
 | 3 connections and key | delete the connections as above; `az aigateway api-key delete -g rg-northwind-ai --gateway-name ai-gateway-northwind -n northwind-mcp-runtime --yes` |
 | 2 grants | `python scripts/ai-gateway-grants.py revoke --receipt <receipt> --yes` deletes only what that receipt created |
 | 1 tool servers | `az aigateway mcp delete -g rg-northwind-ai --gateway-name ai-gateway-northwind -n northwind-insurance-lookup --yes` (and `northwind-insurance-knowledge`, `northwind-insurance-review`); the backend apps are untouched |
@@ -279,7 +298,7 @@ Live, after each routing step:
 
 - **Tool servers:** `python scripts/ai-gateway-release.py plan` shows no pending change, and `verify --include-observed --strict` lists only the expected tools (add `--include-observed` to see whether `northwind-api` still publishes decide/delete operations).
 - **Grants:** `python scripts/ai-gateway-grants.py plan --principals principals.json` reports everything already present.
-- **API app:** `GET https://ca-insurance-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/gateway/status` returns `"enabled": true`, `"required": true` once enforced, `"features"` all `"gateway"` and `"problem": null`, plus the deployment to alias map (`gpt-5.4` to `aisvc-zurlo-northwind/gpt-5-4`). Traces carry `gateway.route` and `gateway.model_alias`, and the trace panel marks each model call the gateway served with an **AI Gateway** badge showing the alias.
+- **API app:** `GET https://ca-insurance-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/gateway/status`, or through API Management at `https://apim-northwind.azure-api.net/insurance/gateway/status` (the northwind-stack `ca-api` rejects direct calls once `NORTHWIND_GATEWAY_AUTH_REQUIRED` is on, so use `.../northwind/gateway/status` for it). A 404 means the app still runs a build without the gateway code (the insurance API on 2026-10-22). Once routed it returns `"enabled": true`, `"required": true` once enforced, `"features"` all `"gateway"` and `"problem": null`, plus the deployment to alias map (`gpt-5.4` to `aisvc-zurlo-northwind/gpt-5-4`). Traces carry `gateway.route` and `gateway.model_alias`, and the trace panel marks each model call the gateway served with an **AI Gateway** badge showing the alias.
 - **Hosted agents:** responses carry `model_gateway_required` and `mcp_route` metadata; a version without the flags omits them.
 - **Prompt agents:** `create-prompt-agents.py --dry-run` shows `@ai-gateway` on every gateway-routed MCP tool (`@apim` for ones through `apim-northwind`, `@direct` for the rest) and a `nw-gateway-models/...` model string on every agent.
 - **Bypass detection:** `python scripts/ai-gateway-enforce.py audit` prints ready-to-run KQL (`foundryNotFromGateway`, `inScopeIdentitiesBypassing`, `gatewayTraffic`, `gatewayModelUsage`). All four were run against `log-zurlo-northwind` on 2026-10-22 (finding 7): in the 12 hours checked every inference call to the account was attributed to the gateway identity, so `foundryNotFromGateway` returned nothing. Gateway tables take 5 to 15 minutes to fill after the first traffic.
