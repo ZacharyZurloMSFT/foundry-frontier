@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 
 import yaml
@@ -15,6 +18,21 @@ from azure.identity import AzureCliCredential
 REVIEW_AGENT = "northwind-triage-review"
 RULE_ID = "northwind-orders-triage-human-review"
 EVALUATION_NAME = "northwind-orders-triage-precomputed-f1"
+
+
+def agent_model(model: str) -> str:
+    """Model string for the review agent: unchanged by default, `<connection>/<alias>` when
+    AI_GATEWAY_MODEL_CONNECTION routes prompt agents through the AI Gateway (same rule and
+    helpers as scripts/create-prompt-agents.py)."""
+    if not (os.environ.get("AI_GATEWAY_MODEL_CONNECTION", "").strip()
+            or os.environ.get("AI_GATEWAY_REQUIRED", "").strip()):
+        return model
+    path = Path(__file__).resolve().with_name("create-prompt-agents.py")
+    spec = importlib.util.spec_from_file_location("create_prompt_agents", path)
+    helper = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = helper
+    spec.loader.exec_module(helper)
+    return helper.resolve_agent_model(model, helper.gateway_models_from_env())
 
 
 def evaluation_definition() -> dict:
@@ -56,6 +74,10 @@ def main():
     root = Path(__file__).resolve().parents[1]
     prompt = yaml.safe_load((root / "agents" / "triage.yaml").read_text(encoding="utf-8"))
     prompt_hash = hashlib.sha256(prompt["instructions"].encode()).hexdigest()
+    try:
+        review_model = agent_model(args.model)
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
     report = {
         "review_agent": REVIEW_AGENT,
         "review_agent_kind": "prompt",
@@ -65,6 +87,8 @@ def main():
         "metric_note": "Token F1 is diagnostic only; structured triage promotion gates remain separate.",
         "inference_started": False, "training_started": False,
     }
+    if review_model != args.model:
+        report["model"] = review_model
     if not args.apply:
         print(json.dumps(report, indent=2))
         return
@@ -75,7 +99,7 @@ def main():
             try:
                 for version in project.agents.list_versions(REVIEW_AGENT):
                     if ((version.metadata or {}).get("instructions_sha256") == prompt_hash
-                            and getattr(version.definition, "model", None) == args.model):
+                            and getattr(version.definition, "model", None) == review_model):
                         existing = version
                         break
             except ResourceNotFoundError:
@@ -83,7 +107,7 @@ def main():
             if existing is None:
                 existing = project.agents.create_version(
                     REVIEW_AGENT,
-                    definition=PromptAgentDefinition(model=args.model, instructions=prompt["instructions"]),
+                    definition=PromptAgentDefinition(model=review_model, instructions=prompt["instructions"]),
                     description="Review-only companion for native Human Evaluation; hosted triage remains separate.",
                     metadata={"instructions_sha256": prompt_hash, "purpose": "human-review-only"},
                 )

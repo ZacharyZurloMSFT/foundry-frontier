@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 from urllib.parse import urlsplit
@@ -49,10 +50,17 @@ ENV_KEYS = (
     "ORDERS_OPENAI_ENDPOINT",
     "ORDERS_MODEL_GATEWAY_ENDPOINT", "ORDERS_MODEL_GATEWAY_MODEL",
     "ORDERS_MODEL_GATEWAY_DEPLOYMENT", "ORDERS_MODEL_GATEWAY_SCOPE",
+    "AI_GATEWAY_REQUIRED", "AI_GATEWAY_MCP_REQUIRED", "ORDERS_MCP_GATEWAY",
     *(entry[1] for entry in SPECIALISTS.values()),
     *(entry[1] for entry in INSURANCE_SPECIALISTS.values()),
     "NORTHWIND_BUSINESS_DOMAIN", "NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED",
 )
+MCP_GATEWAY_ROLES = ("orderlookup", "policylookup", "resolutiondraft")
+MCP_GATEWAY_FIELDS = {"url", "tool_prefix", "connection", "forwards_headers"}
+GATEWAY_MCP_PATH = re.compile(r"(?:/[^/]+)*/default/toolservers/(?P<server>[A-Za-z0-9][A-Za-z0-9_-]*)/mcp")
+GATEWAY_TOOL_PREFIX = re.compile(r"[a-z0-9_]*")
+CONNECTION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+GATEWAY_KNOWLEDGE_SERVERS = {"retail": "northwind-orders-knowledge", "insurance": "northwind-insurance-knowledge"}
 
 
 def https_url(value: str, name: str) -> str:
@@ -60,6 +68,77 @@ def https_url(value: str, name: str) -> str:
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise ValueError(f"{name} must be an absolute HTTPS URL without credentials or fragment")
     return value
+
+
+def env_flag(env: Mapping[str, str], name: str) -> bool:
+    # Undefined azd values arrive empty and mean "off"; a typo must not silently disable a control.
+    value = env.get(name, "").strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("", "false", "0", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be true, 1 or yes to enable (false, 0, no, off or empty to disable)")
+
+
+def expect_type(value, kind: type, message: str):
+    if isinstance(value, kind):
+        return value
+    raise ValueError(message)
+
+
+@dataclass(frozen=True)
+class McpGateway:
+    """One role's AI gateway tool server. It never carries a credential."""
+
+    url: str
+    tool_prefix: str
+    connection: str
+    forwards_headers: bool = False
+
+    @property
+    def server(self) -> str:
+        return GATEWAY_MCP_PATH.fullmatch(urlsplit(self.url).path).group("server")
+
+
+def parse_mcp_gateway(raw: str) -> dict[str, McpGateway]:
+    raw = raw.strip()
+    if not raw:
+        return {}
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        raise ValueError("ORDERS_MCP_GATEWAY must be a JSON object keyed by agent role") from None
+    document = expect_type(document, dict, "ORDERS_MCP_GATEWAY must be a JSON object keyed by agent role")
+    entries = {}
+    for role, entry in document.items():
+        name = f"ORDERS_MCP_GATEWAY[{role}]"
+        if role not in MCP_GATEWAY_ROLES:
+            raise ValueError(f"ORDERS_MCP_GATEWAY supports only {', '.join(MCP_GATEWAY_ROLES)}; got {role!r}")
+        entry = expect_type(entry, dict, f"{name} must be a JSON object")
+        forwards = entry.get("forwards_headers", False)
+        if role == "resolutiondraft" and forwards is not True:
+            raise ValueError(f"{name} requires forwards_headers: true; work-order MCP needs "
+                             "application-bound headers that the AI gateway does not forward")
+        unknown = sorted(set(entry) - MCP_GATEWAY_FIELDS)
+        if unknown:
+            raise ValueError(f"{name} has unsupported fields: {', '.join(unknown)}")
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            raise ValueError(f"{name}.url is required")
+        https_url(url, f"{name}.url")
+        parsed = urlsplit(url)
+        if parsed.query or not GATEWAY_MCP_PATH.fullmatch(parsed.path):
+            raise ValueError(f"{name}.url must be a gateway tool server URL "
+                             "(/default/toolservers/<server>/mcp) without a query")
+        prefix = entry.get("tool_prefix")
+        if not isinstance(prefix, str) or not GATEWAY_TOOL_PREFIX.fullmatch(prefix):
+            raise ValueError(f"{name}.tool_prefix is required and must match [a-z0-9_]*")
+        connection = entry.get("connection")
+        if not isinstance(connection, str) or not CONNECTION_NAME.fullmatch(connection):
+            raise ValueError(f"{name}.connection must name a project connection")
+        entries[role] = McpGateway(url, prefix, connection, expect_type(
+            forwards, bool, f"{name}.forwards_headers must be a boolean"))
+    return entries
 
 
 @dataclass(frozen=True)
@@ -71,6 +150,7 @@ class Settings:
     prompt: dict
     prompt_sha256: str
     env: Mapping[str, str]
+    mcp_gateway: Mapping[str, McpGateway] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -97,6 +177,10 @@ class Settings:
         gateway = env.get("ORDERS_MODEL_GATEWAY_ENDPOINT", "").strip()
         gateway_model = env.get("ORDERS_MODEL_GATEWAY_MODEL", "").strip()
         gateway_deployment = env.get("ORDERS_MODEL_GATEWAY_DEPLOYMENT", "").strip()
+        if env_flag(env, "AI_GATEWAY_REQUIRED") and not (gateway and gateway_model and gateway_deployment):
+            raise ValueError("AI_GATEWAY_REQUIRED is set: ORDERS_MODEL_GATEWAY_ENDPOINT, ORDERS_MODEL_GATEWAY_MODEL "
+                             "and ORDERS_MODEL_GATEWAY_DEPLOYMENT are all required; "
+                             "direct model inference is not permitted")
         if gateway:
             https_url(gateway, "ORDERS_MODEL_GATEWAY_ENDPOINT")
             if not gateway.rstrip("/").endswith("/openai/v1"):
@@ -108,12 +192,24 @@ class Settings:
                                  "a triage override cannot silently reuse a baseline gateway alias")
         elif gateway_model or gateway_deployment or env.get("ORDERS_MODEL_GATEWAY_SCOPE"):
             raise ValueError("ORDERS_MODEL_GATEWAY_ENDPOINT is required for gateway configuration")
+        mcp_gateway = parse_mcp_gateway(env.get("ORDERS_MCP_GATEWAY", ""))
+        if (env_flag(env, "AI_GATEWAY_MCP_REQUIRED") and role in ("orderlookup", "policylookup")
+                and role not in mcp_gateway):
+            raise ValueError(f"AI_GATEWAY_MCP_REQUIRED is set but ORDERS_MCP_GATEWAY has no {role} entry; "
+                             "direct MCP traffic is not permitted")
         raw = (AGENTS_DIR / (INSURANCE_PROMPTS if domain == "insurance" else PROMPTS)[role]).read_bytes()
         prompt = yaml.safe_load(raw)
         if not isinstance(prompt, dict) or not prompt.get("name") or not prompt.get("instructions"):
             raise ValueError("Canonical prompt must declare name and instructions")
-        return cls(role, endpoint, model, "triage_override" if override else "baseline",
-                   prompt, hashlib.sha256(raw).hexdigest(), env)
+        settings = cls(role, endpoint, model, "triage_override" if override else "baseline",
+                       prompt, hashlib.sha256(raw).hexdigest(), env, mcp_gateway)
+        if role in mcp_gateway:
+            # A gateway entry the canonical prompt rejects must fail at startup, before any credential is read.
+            if role == "policylookup":
+                settings.knowledge_spec()
+            else:
+                settings.mcp_spec()
+        return settings
 
     def expand(self, value: str) -> str:
         def replace(match: re.Match) -> str:
@@ -138,7 +234,13 @@ class Settings:
         spec = dict(tools[0])
         if spec.get("type") != "mcp" or spec.get("require_approval") != "never":
             raise ValueError("Unsupported MCP configuration; never auto-approve a requested approval")
-        spec["server_url"] = https_url(self.expand(spec["server_url"]), "MCP endpoint")
+        gateway = self.mcp_entry
+        if gateway is None:
+            spec["server_url"] = https_url(self.expand(spec["server_url"]), "MCP endpoint")
+        else:
+            # The canonical prompt names the backend's tools; the gateway namespaces them with its prefix.
+            spec["server_url"] = gateway.url
+            spec["allowed_tools"] = [gateway.tool_prefix + name for name in expected]
         return spec
 
     def knowledge_spec(self) -> dict:
@@ -146,6 +248,19 @@ class Settings:
         if len(entries) != 1:
             raise ValueError("Policy lookup requires one canonical Foundry IQ knowledge source")
         entry = entries[0]
+        gateway = self.mcp_entry
+        if gateway is not None:
+            required = GATEWAY_KNOWLEDGE_SERVERS[self.business_domain]
+            if gateway.server != required:
+                other = "insurance" if self.business_domain == "retail" else "retail"
+                raise ValueError(f"{self.business_domain.capitalize()} policy lookup requires the {required} "
+                                 f"gateway tool server; {other} knowledge cannot be substituted.")
+            return {
+                "name": gateway.server,
+                "url": gateway.url,
+                "allowed_tools": [gateway.tool_prefix + "knowledge_base_retrieve"],
+                "approval_mode": "never_require",
+            }
         kb = self.expand(entry["knowledge_base"])
         if not re.fullmatch(r"[A-Za-z0-9_-]+", kb):
             raise ValueError("Invalid knowledge base name")
@@ -175,6 +290,29 @@ class Settings:
         return bool(self.env.get("ORDERS_MODEL_GATEWAY_ENDPOINT", "").strip())
 
     @property
+    def model_gateway_required(self) -> bool:
+        return env_flag(self.env, "AI_GATEWAY_REQUIRED")
+
+    @property
+    def mcp_entry(self) -> McpGateway | None:
+        return self.mcp_gateway.get(self.role)
+
+    @property
+    def mcp_route(self) -> str:
+        return "gateway" if self.mcp_entry is not None else "direct"
+
+    @property
+    def mcp_connection(self) -> str | None:
+        """Project connection whose credential is read at startup for provider-executed MCP."""
+        gateway = self.mcp_entry
+        if gateway is not None:
+            # The in-process work-order client authenticates with the agent identity instead.
+            return None if self.role == "resolutiondraft" else gateway.connection
+        if self.role == "policylookup" and self.uses_model_gateway:
+            return self.knowledge_spec()["project_connection_id"]
+        return None
+
+    @property
     def inference_model(self) -> str:
         return self.env["ORDERS_MODEL_GATEWAY_MODEL"].strip() if self.uses_model_gateway else self.model
 
@@ -199,4 +337,8 @@ class Settings:
                 model_gateway_model=self.inference_model,
                 model_gateway_auth="entra_id",
             )
+        if self.model_gateway_required:
+            metadata["model_gateway_required"] = "true"
+        if self.role in MCP_GATEWAY_ROLES:
+            metadata["mcp_route"] = self.mcp_route
         return metadata

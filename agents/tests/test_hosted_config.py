@@ -5,7 +5,7 @@ import zipfile
 import pytest
 import yaml
 
-from agents.hosted.config import AGENTS_DIR, Settings
+from agents.hosted.config import AGENTS_DIR, ENV_KEYS, Settings
 
 ENV = {
     "FOUNDRY_PROJECT_ENDPOINT": "https://existing.services.ai.azure.com/api/projects/northwind-orders",
@@ -61,6 +61,47 @@ def test_original_nonreserved_aliases_remain_supported():
 def test_unrelated_environment_secrets_are_not_copied_into_configuration():
     config = Settings.from_env({**ENV, "NOT_A_RUNTIME_SETTING": "test-only-sentinel"})
     assert "NOT_A_RUNTIME_SETTING" not in config.env
+
+
+GATEWAY_SETTINGS = ("AI_GATEWAY_REQUIRED", "AI_GATEWAY_MCP_REQUIRED", "ORDERS_MCP_GATEWAY")
+ROLES = ("manager", "triage", "orderlookup", "policylookup", "resolutiondraft")
+AGENT_DEFINITIONS = ("orchestrator", "triage", "orderlookup", "policylookup", "resolutiondraft", "legacyorchestrator")
+
+
+def test_gateway_enforcement_settings_are_recognised_runtime_settings():
+    assert set(GATEWAY_SETTINGS) <= set(ENV_KEYS)
+    config = Settings.from_env({**ENV, "AI_GATEWAY_MCP_REQUIRED": "false", "ORDERS_MCP_GATEWAY": ""})
+    assert config.env["AI_GATEWAY_MCP_REQUIRED"] == "false"
+
+
+@pytest.mark.parametrize("role", ROLES)
+def test_undefined_azd_values_arrive_empty_and_change_nothing(role):
+    env = {**ENV, "ORDER_AGENT_ROLE": role}
+    baseline = Settings.from_env(env)
+    unset = Settings.from_env({**env, **dict.fromkeys(GATEWAY_SETTINGS, "")})
+    assert unset.metadata == baseline.metadata
+    assert not unset.model_gateway_required and unset.mcp_gateway == {}
+    assert unset.mcp_route == "direct"
+
+
+@pytest.mark.parametrize("service", AGENT_DEFINITIONS)
+def test_agent_definitions_pass_the_gateway_enforcement_settings_through(service):
+    definition = yaml.safe_load((AGENTS_DIR / service / "agent.yaml").read_text(encoding="utf-8"))
+    variables = {entry["name"]: entry["value"] for entry in definition["environment_variables"]}
+    assert "ORDERS_MODEL_GATEWAY_ENDPOINT" in variables
+    for name in GATEWAY_SETTINGS:
+        assert variables[name] == "${" + name + "}"
+
+
+def test_azd_agent_services_pass_the_gateway_enforcement_settings_through():
+    config = yaml.safe_load((AGENTS_DIR.parent / "azure.yaml").read_text(encoding="utf-8"))
+    services = {name: service for name, service in config["services"].items() if service["host"] == "azure.ai.agent"}
+    assert set(services) == {"orchestrator", "triage", "orderlookup", "policylookup", "resolutiondraft"}
+    for name, service in services.items():
+        variables = {entry["name"]: entry["value"] for entry in service["environmentVariables"]}
+        assert "ORDERS_MODEL_GATEWAY_ENDPOINT" in variables, name
+        for setting in GATEWAY_SETTINGS:
+            assert variables[setting] == "${" + setting + "}", (name, setting)
 
 
 def test_source_zip_contract_contains_entrypoint_dependencies_and_canonical_prompts():

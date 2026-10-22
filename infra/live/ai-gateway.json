@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "description": "Desired state of the AI Gateway tool servers owned by scripts/ai-gateway-release.py. Only toolServers are written; models are checked, observed/stale/deferred are reported and never modified. Secret credential header values are environment placeholders resolved at apply time only.",
+  "gateway": {
+    "subscriptionId": "137c905b-7734-479e-acc5-ab8222462936",
+    "resourceGroup": "rg-northwind-ai",
+    "name": "ai-gateway-northwind",
+    "url": "https://ai-gateway-northwind.azure-api.net",
+    "workspace": "default",
+    "armApiVersion": "2025-09-01-preview",
+    "tokenScope": "https://azure-api.net/aigateway/.default"
+  },
+  "modelProvider": {
+    "name": "aisvc-zurlo-northwind",
+    "kind": "Foundry"
+  },
+  "expectedModels": {
+    "gpt-4o": {
+      "modelName": "gpt-4o",
+      "endpoints": ["chat/completions", "responses"]
+    },
+    "gpt-5-4": {
+      "modelName": "gpt-5.4",
+      "endpoints": ["chat/completions", "responses"]
+    },
+    "gpt-5-4-mini": {
+      "modelName": "gpt-5.4-mini",
+      "endpoints": ["chat/completions", "responses"]
+    },
+    "gpt-5-6-luna": {
+      "modelName": "gpt-5.6-luna",
+      "endpoints": ["chat/completions", "responses"]
+    },
+    "kimi-k2-6": {
+      "modelName": "Kimi-K2.6",
+      "endpoints": ["chat/completions"]
+    },
+    "text-embedding-3-small": {
+      "modelName": "text-embedding-3-small",
+      "endpoints": ["embeddings"]
+    }
+  },
+  "toolServers": {
+    "northwind-insurance-lookup": {
+      "displayName": "Northwind insurance lookup",
+      "description": "Read-only synthetic insurance policy and claim lookups (ca-insurance-lookup) exposed through the AI Gateway.",
+      "failureMode": "failClosed",
+      "endpoints": [
+        {
+          "kind": "mcp",
+          "namespace": "lookup",
+          "required": true,
+          "mcp": {
+            "transport": "streamableHttp",
+            "url": "https://ca-insurance-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"
+          },
+          "credentials": {
+            "type": "none"
+          }
+        }
+      ],
+      "expectedTools": [
+        "lookup_lookup_policy",
+        "lookup_lookup_claim"
+      ]
+    },
+    "northwind-insurance-knowledge": {
+      "displayName": "Northwind insurance knowledge",
+      "description": "Foundry IQ knowledge base northwind-insurance-kb (Azure AI Search MCP endpoint) exposed through the AI Gateway, which injects the Search api-key.",
+      "failureMode": "failClosed",
+      "endpoints": [
+        {
+          "kind": "mcp",
+          "namespace": "knowledge",
+          "required": true,
+          "mcp": {
+            "transport": "streamableHttp",
+            "url": "https://srch-zurlo-northwind.search.windows.net/knowledgebases/northwind-insurance-kb/mcp?api-version=2026-05-01-preview"
+          },
+          "credentials": {
+            "type": "header",
+            "headers": {
+              "api-key": ["${SEARCH_ADMIN_KEY}"]
+            }
+          }
+        }
+      ],
+      "expectedTools": [
+        "knowledge_knowledge_base_retrieve"
+      ]
+    }
+  },
+  "observed": {
+    "northwind-api": {
+      "reason": "OpenAPI facade of the Northwind REST API (23 tools). Read-only here: this unit never modifies it.",
+      "concern": "Governance: the published operations include the HITL decide and delete operations. Approval and business execution are never agent tools, and every holder of AI Gateway Tools User or a runtime key can call every published tool. Narrow or remove this registration through a separate, reviewed change.",
+      "forbiddenToolPatterns": ["decide", "delete"]
+    },
+    "northwind-claims-knowledge": {
+      "reason": "Working Search knowledge-base MCP server (nw-claims-kb) that predates this unit."
+    },
+    "northwind-contact-center-knowledge": {
+      "reason": "Working Search knowledge-base MCP server (nw-contact-center-kb) that predates this unit."
+    },
+    "northwind-hr-knowledge": {
+      "reason": "Working Search knowledge-base MCP server (nw-hr-kb) that predates this unit."
+    },
+    "northwind-orders-knowledge": {
+      "reason": "Working Search knowledge-base MCP server (northwind-kb) that predates this unit."
+    }
+  },
+  "stale": {
+    "northwind-order-lookup": {
+      "reason": "Backend ca-mcp-tech-lookup lives on the retired bluecliff Container Apps domain and answers HTTP 404.",
+      "retiredHostFragment": "bluecliff",
+      "decision": "Needs a human decision: repoint the registration at a live backend or remove it. Never auto-fixed by this unit."
+    },
+    "northwind-resolutions": {
+      "reason": "Backend ca-mcp-work-order lives on the retired bluecliff Container Apps domain and answers HTTP 404.",
+      "retiredHostFragment": "bluecliff",
+      "decision": "Needs a human decision: repoint the registration at a live backend or remove it. Never auto-fixed by this unit."
+    }
+  },
+  "deferred": {
+    "northwind-insurance-review": {
+      "reason": "The work-order MCP server (ca-insurance-review) binds workflow identity with the x-orders-workflow and x-harness-workflow headers, and the AI Gateway does not forward client request headers to MCP backends. Routing it through the gateway would break that application-bound check, so it stays direct and is not registered.",
+      "backend": "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/",
+      "revisit": "Only after the gateway forwards those headers (and the hosted gateway entry declares forwards_headers: true) or the binding moves to a server-verifiable argument."
+    }
+  }
+}

@@ -10,8 +10,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AI_GATEWAY_DEFAULT_SCOPE = "https://azure-api.net/aigateway/.default"
 
 # Search repo root and cwd for a .env; harmless if neither exists.
 # In the container the file lives at /app/app/settings.py (only 2 parents),
@@ -59,6 +61,16 @@ class Settings(BaseSettings):
     # Prompt agent that drafts structured customer resolutions ("Resolution
     # Draft" tab). Env var is legacy — the agent is northwind-resolution-draft.
     work_order_agent_id: str = Field(default="northwind-resolution-draft", alias="FOUNDRY_WORK_ORDER_AGENT_ID")
+
+    # AI Gateway (Azure API Management AI Gateway tier). Every value is optional and
+    # empty means unset: with no endpoint, model calls keep going straight to Foundry.
+    # See model_gateway.py for how these combine.
+    ai_gateway_required: bool = Field(default=False, alias="AI_GATEWAY_REQUIRED")
+    ai_gateway_model_endpoint: str = Field(default="", alias="AI_GATEWAY_MODEL_ENDPOINT")
+    ai_gateway_scope: str = Field(default=AI_GATEWAY_DEFAULT_SCOPE, alias="AI_GATEWAY_SCOPE")
+    ai_gateway_model_provider: str = Field(default="", alias="AI_GATEWAY_MODEL_PROVIDER")
+    # JSON object: deployment name -> full "<provider>/<registration>" gateway alias.
+    ai_gateway_model_aliases: str = Field(default="", alias="AI_GATEWAY_MODEL_ALIASES")
 
     # Search
     search_endpoint: str = Field(default="", alias="AZURE_SEARCH_ENDPOINT")
@@ -131,6 +143,25 @@ class Settings(BaseSettings):
     harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
     harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")
     harness_concurrency: int = Field(default=2, ge=1, le=8, alias="COPILOT_HARNESS_MAX_CONCURRENT_RUNS")
+
+    @field_validator("ai_gateway_required", mode="before")
+    @classmethod
+    def _blank_gateway_required_is_off(cls, value):
+        return False if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("ai_gateway_scope", mode="before")
+    @classmethod
+    def _blank_gateway_scope_is_default(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return AI_GATEWAY_DEFAULT_SCOPE
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator(
+        "ai_gateway_model_endpoint", "ai_gateway_model_provider", "ai_gateway_model_aliases", mode="before",
+    )
+    @classmethod
+    def _strip_gateway_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 @lru_cache

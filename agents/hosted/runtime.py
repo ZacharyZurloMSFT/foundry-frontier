@@ -151,6 +151,9 @@ class RequestMiddleware(AgentMiddleware):
 
 
 def account_openai_client(settings: Settings, credential, *, http_client=None) -> AsyncOpenAI:
+    if settings.model_gateway_required and not settings.uses_model_gateway:
+        raise ValueError("AI_GATEWAY_REQUIRED forbids direct model inference; "
+                         "ORDERS_MODEL_GATEWAY_ENDPOINT is not configured")
     variable = "ORDERS_MODEL_GATEWAY_ENDPOINT" if settings.uses_model_gateway else "ORDERS_OPENAI_ENDPOINT"
     endpoint = https_url(settings.env.get(variable, ""), variable)
     if not endpoint.rstrip("/").endswith("/openai/v1"):
@@ -165,22 +168,36 @@ def account_openai_client(settings: Settings, credential, *, http_client=None) -
     )
 
 
-def knowledge_connection_headers(settings: Settings, connection: Mapping) -> dict[str, str]:
-    spec = settings.knowledge_spec()
+def mcp_connection_headers(settings: Settings, connection: Mapping) -> dict[str, str]:
+    # The connection must be the one that fronts exactly this role's canonical (or gateway) endpoint.
+    if settings.role == "policylookup":
+        label, expected = "Knowledge", settings.knowledge_spec()["url"]
+    elif settings.role == "orderlookup" and settings.mcp_entry is not None:
+        label, expected = "MCP", settings.mcp_spec()["server_url"]
+    else:
+        raise ValueError("This role has no MCP connection credential to resolve")
     credentials = connection.get("credentials")
-    if connection.get("type") != "RemoteTool" or connection.get("target") != spec["url"]:
-        raise ValueError("Knowledge connection must match the canonical RemoteTool endpoint")
+    if connection.get("type") != "RemoteTool" or connection.get("target") != expected:
+        raise ValueError(f"{label} connection must match the canonical RemoteTool endpoint")
     if not isinstance(credentials, Mapping) or credentials.get("type") != "CustomKeys":
-        raise ValueError("Knowledge connection requires CustomKeys credentials")
+        raise ValueError(f"{label} connection requires CustomKeys credentials")
     key = credentials.get("api-key")
     if not isinstance(key, str) or not key:
-        raise ValueError("Knowledge connection did not supply its api-key header")
+        raise ValueError(f"{label} connection did not supply its api-key header")
     return {"api-key": key}
 
 
-def build_agent(settings: Settings, project, *, account_client=None, knowledge_headers=None) -> Agent:
+knowledge_connection_headers = mcp_connection_headers
+
+
+def build_agent(settings: Settings, project, *, account_client=None, knowledge_headers=None,
+                mcp_headers=None, gateway_token_provider=None) -> Agent:
+    if settings.model_gateway_required and not settings.uses_model_gateway:
+        raise ValueError("AI_GATEWAY_REQUIRED forbids direct model inference; "
+                         "ORDERS_MODEL_GATEWAY_ENDPOINT is not configured")
     if settings.uses_model_gateway and account_client is None:
         raise ValueError("Gateway inference requires an identity-authenticated gateway client")
+    headers = mcp_headers or knowledge_headers
     if settings.role == "triage":
         if account_client is None:
             raise ValueError("Triage requires an identity-authenticated ORDERS_OPENAI_ENDPOINT client")
@@ -194,22 +211,28 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
         tools = specialist_tools(settings, project)
     elif settings.role == "orderlookup":
         spec = settings.mcp_spec()
+        options = {}
+        if settings.mcp_entry is not None:
+            # Provider-executed MCP reaches the gateway with the runtime key read from its project connection.
+            if not headers:
+                raise ValueError("Gateway MCP routing requires the tool server connection headers")
+            options["headers"] = headers
         tools = [client.get_mcp_tool(
             name=spec["server_label"], url=spec["server_url"],
-            allowed_tools=spec["allowed_tools"], approval_mode="never_require",
+            allowed_tools=spec["allowed_tools"], approval_mode="never_require", **options,
         )]
     elif settings.role == "policylookup":
         spec = settings.knowledge_spec()
-        if settings.uses_model_gateway:
+        if settings.mcp_entry is not None or settings.uses_model_gateway:
             # Account-level Responses cannot resolve a project-scoped connection.
             # Resolve its credential once under the agent identity; keep it out of env/config.
-            if not knowledge_headers:
+            if not headers:
                 raise ValueError("Gateway policy inference requires knowledge connection headers")
-            spec.pop("project_connection_id")
-            spec["headers"] = knowledge_headers
+            spec.pop("project_connection_id", None)
+            spec["headers"] = headers
         tools = [client.get_mcp_tool(**spec)]
     elif settings.role == "resolutiondraft":
-        tools = [proposal_tool(settings)]
+        tools = [proposal_tool(settings, gateway_token_provider)]
     return Agent(
         client=client,
         name=settings.prompt["name"],

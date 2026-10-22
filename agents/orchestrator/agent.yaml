@@ -19,6 +19,12 @@ environment_variables:
     value: ${ORDERS_GATEWAY_MANAGER_MODEL}
   - name: ORDERS_MODEL_GATEWAY_DEPLOYMENT
     value: ${MODEL_DEPLOYMENT_NAME}
+  - name: AI_GATEWAY_REQUIRED
+    value: ${AI_GATEWAY_REQUIRED}
+  - name: AI_GATEWAY_MCP_REQUIRED
+    value: ${AI_GATEWAY_MCP_REQUIRED}
+  - name: ORDERS_MCP_GATEWAY
+    value: ${ORDERS_MCP_GATEWAY}
   - name: ORDERS_TRIAGE_AGENT_NAME
     value: northwind-triage
   - name: ORDERS_ORDER_LOOKUP_AGENT_NAME

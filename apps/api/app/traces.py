@@ -100,6 +100,8 @@ def _try_query(session_id: str, minutes: int) -> dict[str, Any] | None:
                 "cost_usd":          _num(cd.get("cost_usd", 0)),
                 "cost_reported":     "cost_usd" in cd,
                 "git_sha":           cd.get("git_sha", ""),
+                "gateway":           cd.get("gateway.route", ""),
+                "gateway_model":     cd.get("gateway.model_alias", ""),
                 "prompt_sha":        {k.split(".", 1)[1]: v for k, v in cd.items()
                                       if isinstance(k, str) and k.startswith("prompt_sha.")},
             })
@@ -181,6 +183,7 @@ def _stub(session_id: str) -> dict[str, Any]:
             "ts": "", "kind": "dependency", "trace_id": session_id or "stub",
             "parent_span_id": "", "span_id": "",
             "git_sha": build_info().get("git_sha", "local"), "prompt_sha": {},
+            "gateway": "", "gateway_model": "",
             **s,
         })
     out = _finalize(session_id, spans)

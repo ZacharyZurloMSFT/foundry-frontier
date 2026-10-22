@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from azure.identity.aio import DefaultAzureCredential, ManagedIdentityCredential
 from azure.core.exceptions import AzureError
 
+from .. import model_gateway
 from ..settings import Settings, get_settings
 from .diagnostics import log_failure
 from .models import MAX_RESULT_CHARS, Event, HarnessError, Text, Usage, redact
@@ -26,6 +27,27 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 SDK_VERSION = "1.0.14"
+FOUNDRY_SCOPE = "https://ai.azure.com/.default"
+
+
+def provider_scope(settings: Settings) -> str:
+    return model_gateway.gateway_scope(settings) if model_gateway.gateway_enabled(settings) else FOUNDRY_SCOPE
+
+
+def provider_config(settings: Settings, token) -> dict:
+    """Copilot SDK provider: the AI Gateway when configured, otherwise the Foundry project.
+
+    The SDK appends ``/openai/v1/responses`` to ``base_url``, so the gateway endpoint is passed
+    without its ``/openai/v1/`` suffix. The runtime keeps the deployment name as its model id
+    (capability lookup); ``wire_model`` is what goes on the wire, the gateway alias."""
+    provider = {"type": "azure", "base_url": settings.foundry_project_endpoint,
+                "wire_api": "responses", "bearer_token_provider": token,
+                "max_output_tokens": 4096}
+    if model_gateway.gateway_enabled(settings):
+        provider["base_url"] = model_gateway.sdk_base_url(settings)
+        provider["wire_model"] = model_gateway.gateway_alias(
+            settings, settings.harness_model or settings.planner_deployment)
+    return provider
 
 
 async def sdk_call(stage, operation, run_id=""):
@@ -90,7 +112,8 @@ class HarnessRuntime:
         return (settings.business_domain, settings.foundry_project_endpoint, settings.cosmos_endpoint,
                 settings.harness_model or settings.planner_deployment, settings.azure_client_id,
                 settings.harness_resolution_mcp, settings.order_agents_hosted,
-                settings.insurance_orchestrator_agent_id, prompt_sha)
+                settings.insurance_orchestrator_agent_id, prompt_sha,
+                *model_gateway.configuration_key(settings))
 
     def status(self) -> dict:
         settings = get_settings()
@@ -125,11 +148,15 @@ class HarnessRuntime:
             reasons.append(f"Harness dependencies unavailable: {type(exc).__name__}.")
         if not settings.foundry_project_endpoint or not settings.cosmos_endpoint:
             reasons.append("Foundry project and Cosmos endpoints must be configured.")
+        gateway_problem = model_gateway.configuration_problem(settings)
+        if gateway_problem:
+            reasons.append(gateway_problem)
         if self.last_error:
             reasons.append(self.last_error)
         enabled = settings.harness_enabled
         verified = (self.client is not None and self.credential is not None
                     and self.verified_config == self.configuration(settings, prompt_sha))
+        via_gateway = model_gateway.gateway_enabled(settings)
         return {
             "enabled": enabled,
             "state": "disabled" if not enabled else "unavailable" if reasons else "ready" if verified else "configured",
@@ -138,7 +165,8 @@ class HarnessRuntime:
                 "Dependencies are configured, not live-verified. Connections will be verified when a run starts."),
             "sdk_version": version, "runtime_version": self.runtime_version,
             "model": settings.harness_model or settings.planner_deployment,
-            "provider": "Azure Foundry / managed identity",
+            "provider": "AI Gateway (APIM) / managed identity" if via_gateway else "Azure Foundry / managed identity",
+            "model_route": model_gateway.route_for(settings),
             "max_tool_calls": settings.harness_max_tools,
             "max_concurrent_runs": settings.harness_concurrency,
             "timeout_seconds": settings.harness_timeout,
@@ -197,9 +225,19 @@ class HarnessRuntime:
             self.workspace = None
 
     async def run(self, run_id: str, wid: str, message: str, store: RunStore) -> AsyncIterator[Event]:
+        settings = get_settings()
+        scope = provider_scope(settings)
+
+        async def token(_args) -> str:
+            return (await sdk_call("provider_token", lambda: self.credential.get_token(scope), run_id)).token
+
+        try:
+            model_gateway.require_gateway(settings)
+            provider = provider_config(settings, token)
+        except model_gateway.GatewayConfigError as error:
+            raise HarnessError("gateway_unavailable", str(error)) from error
         await self.start()
         assert self.client is not None and self.credential is not None
-        settings = get_settings()
         prompt, prompt_sha = instructions(settings)
         self.verified_config = None
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=1024)
@@ -222,19 +260,13 @@ class HarnessRuntime:
             elif kind == "session.error":
                 log_failure(logger, "harness", "sdk_session_error_event", event.data, run_id)
 
-        async def token(_args) -> str:
-            return (await sdk_call("provider_token", lambda: self.credential.get_token(
-                "https://ai.azure.com/.default"), run_id)).token
-
         insurance = settings.business_domain == "insurance"
         tools = (InsuranceTools(settings, run_id, wid, emit, store, message=message) if insurance else
                  SpecialistTools(settings, run_id, wid, emit, store))
         names = INSURANCE_NAMES if insurance else NAMES
         session = await sdk_call("session_create", lambda: self.client.create_session(
             session_id=run_id, model=settings.harness_model or settings.planner_deployment,
-            provider={"type": "azure", "base_url": settings.foundry_project_endpoint,
-                      "wire_api": "responses", "bearer_token_provider": token,
-                      "max_output_tokens": 4096},
+            provider=provider,
             tools=tools.build(), available_tools=[f"custom:{name}" for name in names],
             on_permission_request=deny_permission, streaming=True, on_event=on_event,
             system_message={"mode": "append", "content": prompt},

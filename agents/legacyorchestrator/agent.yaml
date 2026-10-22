@@ -28,6 +28,14 @@ environment_variables:
     value: ${ORDERS_MODEL_GATEWAY_MODEL}
   - name: ORDERS_MODEL_GATEWAY_DEPLOYMENT
     value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+  # The legacy manager only honours AI_GATEWAY_REQUIRED; it has no provider-executed MCP, so the
+  # MCP settings are carried for a uniform fleet definition and ignored.
+  - name: AI_GATEWAY_REQUIRED
+    value: ${AI_GATEWAY_REQUIRED}
+  - name: AI_GATEWAY_MCP_REQUIRED
+    value: ${AI_GATEWAY_MCP_REQUIRED}
+  - name: ORDERS_MCP_GATEWAY
+    value: ${ORDERS_MCP_GATEWAY}
   - name: FOUNDRY_AGENT_TRIAGE_ID
     value: ${FOUNDRY_AGENT_TRIAGE_ID}
   - name: FOUNDRY_AGENT_TECH_LOOKUP_ID

@@ -60,10 +60,29 @@ def _env(name: str, *, required: bool = True, default: str = "") -> str:
     return v
 
 
+def _flag(name: str) -> bool:
+    # Undefined azd values arrive empty and mean "off"; a typo must not silently disable a control.
+    value = os.environ.get(name, "").strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("", "false", "0", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be true, 1 or yes to enable (false, 0, no, off or empty to disable)")
+
+
 PROJECT_ENDPOINT = _env("FOUNDRY_PROJECT_ENDPOINT")
 MANAGER_MODEL = _env("AZURE_AI_MODEL_DEPLOYMENT_NAME")
 MODEL_GATEWAY_ENDPOINT = _env("ORDERS_MODEL_GATEWAY_ENDPOINT", required=False)
 MODEL_GATEWAY_MODEL = _env("ORDERS_MODEL_GATEWAY_MODEL", required=False)
+GATEWAY_REQUIRED = _flag("AI_GATEWAY_REQUIRED")
+if GATEWAY_REQUIRED and not (
+    MODEL_GATEWAY_ENDPOINT.strip() and MODEL_GATEWAY_MODEL.strip()
+    and _env("ORDERS_MODEL_GATEWAY_DEPLOYMENT", required=False).strip()
+):
+    raise RuntimeError(
+        "AI_GATEWAY_REQUIRED is set: ORDERS_MODEL_GATEWAY_ENDPOINT, ORDERS_MODEL_GATEWAY_MODEL and "
+        "ORDERS_MODEL_GATEWAY_DEPLOYMENT are all required; direct model inference is not permitted"
+    )
 if MODEL_GATEWAY_ENDPOINT:
     parsed_gateway = urlsplit(MODEL_GATEWAY_ENDPOINT)
     if (parsed_gateway.scheme != "https" or not parsed_gateway.hostname
@@ -362,6 +381,8 @@ def _build_agent() -> Agent:
             model=MODEL_GATEWAY_MODEL,
             api_key=get_bearer_token_provider(_search_credential, "https://azure-api.net/aigateway/.default"),
         )
+    elif GATEWAY_REQUIRED:
+        raise RuntimeError("AI_GATEWAY_REQUIRED forbids direct model inference; the model gateway is not configured")
     else:
         client = FoundryChatClient(
             project_endpoint=PROJECT_ENDPOINT,

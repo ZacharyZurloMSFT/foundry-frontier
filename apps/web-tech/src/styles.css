@@ -346,6 +346,7 @@ table.spans th, table.spans td { padding: 4px 8px; border-bottom: 1px solid var(
 table.spans th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
 table.spans td.num, table.spans th.num { text-align: right; }
 table.spans td.dim { color: var(--muted); }
+.route-badge { margin-left: 6px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 8px; font-size: 10px; color: var(--accent); white-space: nowrap; }
 .trace-body .empty { color: var(--muted); font-size: 12px; padding: 6px 0; }
 .trace-body .warn { color: #f0b95a; font-size: 11px; padding: 6px 8px; background: rgba(240,185,90,0.08); border-radius: 4px; }
 .trace-body .error { color: var(--danger); font-size: 12px; padding: 6px 8px; }

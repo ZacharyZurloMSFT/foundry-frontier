@@ -231,6 +231,7 @@ export interface TraceSpan {
   agent: string; tool: string; model: string;
   prompt_tokens: number; completion_tokens: number; cost_usd: number;
   git_sha: string; prompt_sha: Record<string, string>;
+  gateway?: string; gateway_model?: string;
 }
 export interface TraceReport {
   session_id: string;

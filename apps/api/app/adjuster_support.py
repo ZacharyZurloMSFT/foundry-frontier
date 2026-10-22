@@ -17,7 +17,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from openai import APIError
 
+from . import model_gateway
 from .harness.diagnostics import log_failure
+from .observability import get_tracer
 from .orchestrator_client import _async_credential, _extract_output_text, _project_client
 from .repositories import _container, append_message
 from .settings import get_settings
@@ -32,6 +34,7 @@ UNKNOWN = ("I don't have sufficient evidence in the current fictional employee a
 router = APIRouter(prefix="/adjuster-support", tags=["adjuster-support"])
 _active = 0
 logger = logging.getLogger(__name__)
+tracer = get_tracer("northwind.adjuster_support")
 SUPPORT_ERRORS = (AzureError, httpx.HTTPError, APIError, TimeoutError, OSError, ValueError,
                   RuntimeError, TypeError, LookupError, yaml.YAMLError)
 
@@ -98,8 +101,12 @@ def availability() -> dict:
     auth = _setting("adjuster_support_search_auth", "entra_id")
     if auth not in ("entra_id", "query_key") or (auth == "query_key" and not _query_key()):
         reasons.append("Explicit Search authentication must be configured; no key fallback is performed.")
-    if not settings.foundry_project_endpoint or not settings.cosmos_endpoint:
+    model_endpoint = bool(settings.foundry_project_endpoint) or model_gateway.gateway_enabled(settings)
+    if not model_endpoint or not settings.cosmos_endpoint:
         reasons.append("Foundry model and conversation storage endpoints are required.")
+    gateway_problem = model_gateway.configuration_problem(settings)
+    if gateway_problem:
+        reasons.append(gateway_problem)
     try:
         prompt()
     except (OSError, ValueError, KeyError, yaml.YAMLError):
@@ -107,7 +114,8 @@ def availability() -> dict:
     enabled = _setting("adjuster_support_enabled", False)
     return {"enabled": enabled, "state": "disabled" if not enabled else "unavailable" if reasons else "configured",
             "message": "; ".join(reasons) or "Read-only Search + model retrieval; no native retail HR agents.",
-            "index": INDEX, "models": MODELS, "business_domain": "insurance", "review_scope": "read_only"}
+            "index": INDEX, "models": MODELS, "business_domain": "insurance", "review_scope": "read_only",
+            "model_route": model_gateway.route_for(settings)}
 
 
 @router.get("/status")
@@ -163,25 +171,43 @@ async def retrieve(question: str) -> list[dict]:
     return evidence
 
 
+async def _respond(client, model: str, question: str, evidence: list[dict], history: list[dict]):
+    return await client.responses.create(
+        model=model, store=False, max_output_tokens=1800,
+        input=[
+            {"type": "message", "role": "developer",
+             "content": [{"type": "input_text", "text": prompt()}]},
+            {"type": "message", "role": "user",
+             "content": [{"type": "input_text", "text": json.dumps({
+                 "current_question": question, "history_not_evidence": history[-12:],
+                 "retrieved_evidence": evidence,
+             })}]},
+        ],
+    )
+
+
 async def select_evidence(question: str, evidence: list[dict], history: list[dict], model: str) -> EvidenceAnswer:
     # No key kwargs, hosted agent_name, native HR agent_reference or execution tools.
+    # With the AI Gateway configured the same request goes to the gateway, using the
+    # deployment's gateway alias as the model; callers keep passing deployment names.
     stage = "model_client"
     try:
-        async with _project_client() as project:
-            async with project.get_openai_client() as client:
+        settings = get_settings()
+        model_gateway.require_gateway(settings)
+        # Failures are classified by stage in the logs; telemetry must not record their contents either.
+        with tracer.start_as_current_span("adjuster_support.model_request", record_exception=False,
+                                          set_status_on_exception=False) as span:
+            model_gateway.stamp_span(span, settings, model)
+            if model_gateway.gateway_enabled(settings):
+                alias = model_gateway.gateway_alias(settings, model)
+                client = model_gateway.get_gateway_client(settings)
                 stage = "model_request"
-                response = await client.responses.create(
-                    model=model, store=False, max_output_tokens=1800,
-                    input=[
-                        {"type": "message", "role": "developer",
-                         "content": [{"type": "input_text", "text": prompt()}]},
-                        {"type": "message", "role": "user",
-                         "content": [{"type": "input_text", "text": json.dumps({
-                             "current_question": question, "history_not_evidence": history[-12:],
-                             "retrieved_evidence": evidence,
-                         })}]},
-                    ],
-                )
+                response = await _respond(client, alias, question, evidence, history)
+            else:
+                async with _project_client() as project:
+                    async with project.get_openai_client() as client:
+                        stage = "model_request"
+                        response = await _respond(client, model, question, evidence, history)
         stage = "model_output_validation"
         if response.status != "completed":
             raise RuntimeError("Support model did not complete; no answer was confirmed.")

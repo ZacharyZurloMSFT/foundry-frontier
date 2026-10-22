@@ -152,12 +152,12 @@ class MemoryProvider:
         self.items[key] = value
 
 
-async def hosted_request(config, project, body):
+async def hosted_request(config, project, body, **build_options):
     account = project.get_openai_client(account=config.role == "triage") if (
         config.role == "triage" or config.uses_model_gateway
     ) else None
     headers = {"api-key": "unit-test-only"} if config.uses_model_gateway and config.role == "policylookup" else None
-    agent = build_agent(config, project, account_client=account, knowledge_headers=headers)
+    agent = build_agent(config, project, account_client=account, knowledge_headers=headers, **build_options)
     server = OrdersResponsesHost(
         agent, config, store=InMemoryResponseProvider(),
         agent_session_store_provider=MemoryProvider(),

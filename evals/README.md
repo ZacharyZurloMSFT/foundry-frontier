@@ -11,6 +11,11 @@ and a subset of live production traffic. The evaluators run in two places:
    custom dimension), and re-scores them with the same evaluators. Trends land
    in the Foundry Observability dashboard.
 
+> **AI Gateway:** the evaluator judge model and Foundry safety/red-team
+> services are **not** routed through the AI Gateway (out of scope, see
+> [`docs/ai-gateway.md`](../docs/ai-gateway.md)). Only the deployed app and
+> agents under test are, so PR evals measure the real gateway path.
+
 ## Evaluators used
 
 | Evaluator                 | Kind      | Scope                                           |

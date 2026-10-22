@@ -714,6 +714,7 @@ docs/                 Architecture, demo script
 - [Demo script (10 minutes)](./docs/demo-script.md)
 - [**Why Foundry — vs OpenAI Assistants, Bedrock, Vertex, LangChain**](./docs/differentiators.md)
 - [**GenAIOps through GitHub**](./docs/genaiops.md)
+- [**AI Gateway routing (models + MCP) and rollout runbook**](./docs/ai-gateway.md)
 - [Evaluation strategy](./evals/README.md)
 
 ## What makes this demo hard to beat
@@ -737,4 +738,7 @@ The two MCP servers (`ca-mcp-tech-lookup`, `ca-mcp-work-order`) run behind
 simple so Foundry can reach them without wiring bearer tokens or private
 endpoints. For a real deployment, front them with a Foundry project
 connection (bearer or Entra) the same way `policy-lookup` fronts the
-Search KB's MCP endpoint today.
+Search KB's MCP endpoint today. The AI Gateway tier can front the read-only
+lookup and knowledge servers today; see
+[`docs/ai-gateway.md`](./docs/ai-gateway.md) for why the work-order server
+cannot be routed yet.

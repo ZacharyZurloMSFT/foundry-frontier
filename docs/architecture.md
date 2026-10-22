@@ -162,6 +162,19 @@ invocation still uses the original Foundry project and hosted endpoints.
 Responses metadata retains the original deployment and additionally
 records the gateway alias, endpoint and provider response/model.
 
+The gateway is the Azure API Management **AI Gateway tier**. The `model`
+value is `<provider>/<registration>` (the registration name is the deployment
+name lowercased with dots replaced by dashes, so `gpt-5.4` is
+`aisvc-zurlo-northwind/gpt-5-4`); bare deployment names return 404. Set
+`AI_GATEWAY_REQUIRED=true` to make any direct Foundry inference path a
+startup error, and `AI_GATEWAY_MCP_REQUIRED` plus `ORDERS_MCP_GATEWAY` to send
+the order and policy lookup MCP calls through gateway tool servers (tools are
+exposed as `<namespace>_<tool>`); prompt agents reach their knowledge bases the
+same way through `AI_GATEWAY_MCP_KB_ROUTES`. The work-order MCP stays direct because the
+gateway does not forward its application-bound workflow headers. The full
+design, live inventory and rollout runbook are in
+[`docs/ai-gateway.md`](./ai-gateway.md).
+
 The legacy `northwind` project manager is kept separately in
 `agents\legacyorchestrator`, recovered from its deployed source rather
 than replaced with the Orders runtime. Its own model uses the same
