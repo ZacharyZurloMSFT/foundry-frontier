@@ -22,9 +22,11 @@ kind='resolution'. The web-tech Approvals tab (or any consumer of the
 /hitl/decide. Foundry sees a successful tool call returning the queue
 item; the actual approval loop lives outside the agent runtime.
 
-No auth on the MCP endpoint itself — it's a public demo. Cosmos writes go
-through the shared UAMI (`AZURE_CLIENT_ID`) which has the Cosmos DB
-Built-in Data Contributor role from the containerapps bicep module.
+No auth on the MCP endpoint itself by default — it's a public demo. Setting
+NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py) makes it accept only
+calls relayed by the API gateway. Cosmos writes go through the shared UAMI
+(`AZURE_CLIENT_ID`) which has the Cosmos DB Built-in Data Contributor role from
+the containerapps bicep module.
 """
 from __future__ import annotations
 
@@ -54,6 +56,15 @@ else:
         if exc.name != f"{__package__}.insurance_domain":
             raise
         from apps.api.app.insurance_domain import ACTION_KIND, ClaimActionDraft, action_payload, pending_action, require_insurance_domain
+if not __package__:
+    from apps.api.app.gateway_guard import GatewayGuardMiddleware
+else:
+    try:
+        from .gateway_guard import GatewayGuardMiddleware
+    except ModuleNotFoundError as exc:
+        if exc.name != f"{__package__}.gateway_guard":
+            raise
+        from apps.api.app.gateway_guard import GatewayGuardMiddleware
 
 logger = logging.getLogger("mcp-resolution-draft")
 
@@ -250,3 +261,7 @@ def healthz() -> dict[str, str]:
 
 
 app.mount("/mcp", mcp.streamable_http_app())
+
+# Registered last so it is the outermost middleware (it also covers the mounted MCP
+# transport). A no-op unless NORTHWIND_GATEWAY_AUTH_REQUIRED=true; see gateway_guard.py.
+app.add_middleware(GatewayGuardMiddleware, exempt_paths=frozenset({"/healthz"}))

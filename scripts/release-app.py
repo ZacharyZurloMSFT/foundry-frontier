@@ -40,7 +40,7 @@ def changed_services(paths: list[str]) -> list[str]:
             return list(SERVICES)
         if path.startswith(("data/northwind/", "data/seed/generated/")):
             selected.update(("api", "mcp-tech-lookup", "mcp-work-order"))
-        if path == "apps/api/app/insurance_domain.py":
+        if path in ("apps/api/app/insurance_domain.py", "apps/api/app/gateway_guard.py"):
             selected.update(("mcp-tech-lookup", "mcp-work-order"))
         for service in SERVICES:
             if path.startswith(f"apps/{service}/"):

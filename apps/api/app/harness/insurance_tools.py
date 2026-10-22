@@ -15,7 +15,7 @@ from ..insurance_domain import (
 from ..orchestrator_client import _extract_output_text, invoke_prompt_agent_once
 from ..observability import get_tracer
 from .models import MAX_RESULT_CHARS, Approval, HarnessError, SpecialistInput, ToolEvent, Usage, redact
-from .tools import mcp_payload
+from .tools import gateway_headers, mcp_payload
 from .diagnostics import log_failure
 
 NAMES = ("triage", "policy_claim_lookup", "policy_lookup", "claim_action_draft")
@@ -110,7 +110,8 @@ class InsuranceTools:
             mcp_tool={
                 "type": "mcp", "server_label": "northwind-insurance-claim-action-draft",
                 "server_url": self.settings.harness_resolution_mcp, "require_approval": "never",
-                "allowed_tools": ["draft_claim_action"], "headers": {"x-orders-workflow": self.wid},
+                "allowed_tools": ["draft_claim_action"],
+                "headers": {"x-orders-workflow": self.wid, **gateway_headers(self.settings)},
             }, workflow_id=self.wid,
         )
         calls = {item.call_id for item in response.output

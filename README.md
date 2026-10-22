@@ -284,6 +284,7 @@ delivery lanes are deliberately separate:
 | `CI` | PRs/main/manual; application contracts, deployment contracts, TypeScript, web tests/builds, and Bicep compilation. No Azure login or paid inference. |
 | `Scoped App Release` (`deploy-apps.yml`) | Successful trusted CI for current `main`, or explicit main dispatch after successful CI; build and release selected existing apps only. |
 | `Scoped Infrastructure` (`deploy-infra.yml`) | Successful trusted main CI or manual plan. Apply is manual and requires the exact reviewed main SHA and a successful same-source plan-run artifact. |
+| `Scoped API Management` (`deploy-apim.yml`) | Opt-in (`NORTHWIND_APIM_ENABLED`). Plans the `apim-northwind` API definition after trusted main CI; apply is manual with the reviewed SHA, a same-source plan run and an allow-listed resource boundary. See [API Management](./docs/api-management.md). |
 
 `deploy-progressive.yml` is retired: it can no longer call `azd up` or `azd down`.
 Legacy evaluation/training/prompt workflows remain disabled until separately
@@ -623,7 +624,11 @@ recreation. The replacement run URLs are:
 The old `bluecliff` FQDNs are retired; no custom domain masks this change.
 Both frontend builds, API/MCP callers and all five active insurance-agent
 configurations use the replacement URLs. Adoption outputs read actual
-named app ingress instead of hardcoding these URLs.
+named app ingress instead of hardcoding these URLs. When
+`NORTHWIND_GATEWAY_URL` (and `NORTHWIND_GATEWAY_STACK`) are set, `API_URI` and
+`MCP_*_URL` become the API Management gateway URLs instead, so a re-provision
+cannot silently revert a gateway cut-over; see
+[API Management](./docs/api-management.md).
 
 `infra/main.bicepparam` uses compiler serialization for environment values,
 including JSON-valued endpoint strings. This avoids raw JSON interpolation
@@ -678,6 +683,8 @@ reviewed operation.
 
 ```
 infra/                Bicep IaC (main + modules)
+  live/               Scoped incremental boundaries applied by the guarded
+                      workflows (storage networking, API Management)
 apps/
   api/                FastAPI + Agent Framework orchestrator
   web-tech/           React (Vite) back-office / CX-agent app
@@ -710,6 +717,7 @@ docs/                 Architecture, demo script
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
+- [**API Management gateway (`apim-northwind`)**](./docs/api-management.md)
 - [**One company, four departments (the reshape)**](./docs/departments.md)
 - [Demo script (10 minutes)](./docs/demo-script.md)
 - [**Why Foundry — vs OpenAI Assistants, Bedrock, Vertex, LangChain**](./docs/differentiators.md)
@@ -734,11 +742,14 @@ forkable pattern any Solution Engineer can adapt to a real customer — not a
 turnkey product.
 
 The two MCP servers (`ca-mcp-tech-lookup`, `ca-mcp-work-order`) run behind
-**public Container Apps ingress with no auth** — same trade-off, kept
+**public Container Apps ingress with no auth by default** — same trade-off, kept
 simple so Foundry can reach them without wiring bearer tokens or private
-endpoints. For a real deployment, front them with a Foundry project
-connection (bearer or Entra) the same way `policy-lookup` fronts the
-Search KB's MCP endpoint today. The AI Gateway tier can front the read-only
-lookup and knowledge servers today; see
-[`docs/ai-gateway.md`](./docs/ai-gateway.md) for why the work-order server
-cannot be routed yet.
+endpoints. They (and the API) can be put behind the opt-in API Management
+gateway: MCP callers then present a subscription key (for Foundry agents,
+through a project connection) and `NORTHWIND_GATEWAY_AUTH_REQUIRED=true` makes
+the apps accept only calls relayed by the gateway. See
+[API Management](./docs/api-management.md). The separate AI Gateway tier
+(`ai-gateway-northwind`) fronts model inference and the read-only lookup and
+knowledge MCP servers; it does not forward the workflow headers the work-order
+servers bind to, so those go through API Management instead. See
+[`docs/ai-gateway.md`](./docs/ai-gateway.md).

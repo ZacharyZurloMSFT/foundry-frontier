@@ -132,6 +132,7 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_APPS_RESOURCE_GROUP: ${{ vars.AZURE_APPS_RESOURCE_GROUP }}
       ACR_NAME: ${{ vars.ACR_NAME }}
+      NORTHWIND_GATEWAY_URL: ${{ vars.NORTHWIND_GATEWAY_URL }}
       VITE_INSURANCE_BUSINESS_ENABLED: ${{ vars.VITE_INSURANCE_BUSINESS_ENABLED || 'true' }}
       VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID }}
       VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
@@ -173,10 +174,15 @@ jobs:
           mkdir -p .release-state
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           export GITHUB_SHA="$SOURCE_SHA"
-          api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
-            --name ca-api --query properties.configuration.ingress.fqdn -o tsv)"
-          [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
-          export VITE_API_BASE_URL="https://$api_fqdn"
+          if [[ -n "${NORTHWIND_GATEWAY_URL:-}" ]]; then
+            [[ "$NORTHWIND_GATEWAY_URL" =~ ^https://[a-z0-9-]+\.azure-api\.net$ ]]
+            export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/northwind"
+          else
+            api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
+              --name ca-api --query properties.configuration.ingress.fqdn -o tsv)"
+            [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+            export VITE_API_BASE_URL="https://$api_fqdn"
+          fi
           while IFS= read -r service; do
             case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech|web-voice) ;; *) exit 1 ;; esac
             az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-$service" \

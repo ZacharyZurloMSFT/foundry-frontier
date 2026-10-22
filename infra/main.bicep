@@ -57,6 +57,11 @@ param insuranceAuthTenantId string = ''
 param insuranceAuthAudience string = ''
 param insuranceAuthRequiredScope string = 'access_as_user'
 param insuranceAuthClientIds string = ''
+@description('Origin of the API Management gateway (https://<name>.azure-api.net). When set, API_URI and the MCP URLs point at the gateway instead of the Container Apps. Empty keeps the direct URLs.')
+param gatewayUrl string = ''
+@description('Gateway API stack that fronts the Container Apps this environment manages.')
+@allowed(['northwind', 'insurance'])
+param gatewayStack string = 'northwind'
 @description('Preserved azd outputs for existing Foundry/runtime configuration. Required and validated only in reuse mode.')
 param existingSettings object = {}
 
@@ -123,6 +128,7 @@ var resourceToken = 'zurlo-northwind'
 // Storage accounts and ACR only allow lowercase alphanumerics — strip the dash.
 var compactToken = replace(resourceToken, '-', '')
 var reuseExisting = reuseExistingResources == 'true'
+var gatewayBase = empty(gatewayUrl) ? '' : '${gatewayUrl}/${gatewayStack}'
 var existingLogAnalyticsGroup = empty(logAnalyticsResourceGroupName) ? appsResourceGroupName : logAnalyticsResourceGroupName
 var existingEnvironmentGroup = empty(containerAppsEnvironmentResourceGroupName) ? appsResourceGroupName : containerAppsEnvironmentResourceGroupName
 var existingVnetGroup = empty(vnetResourceGroupName) ? networkingResourceGroupName : vnetResourceGroupName
@@ -455,14 +461,17 @@ output STORAGE_SEED_CONTAINER string = reuseExisting ? reuse!.outputs.settings.S
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_CONTAINER_REGISTRY_ENDPOINT : acr!.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = reuseExisting ? reuse!.outputs.settings.AZURE_CONTAINER_REGISTRY_NAME : acr!.outputs.name
 
-output API_URI string = reuseExisting ? reuse!.outputs.settings.API_URI : containerapps!.outputs.apiUri
+output NORTHWIND_GATEWAY_URL string = gatewayUrl
+output NORTHWIND_GATEWAY_STACK string = gatewayStack
+// With a gateway configured these are the gateway URLs, so re-provisioning cannot silently revert the cutover.
+output API_URI string = !empty(gatewayBase) ? gatewayBase : (reuseExisting ? reuse!.outputs.settings.API_URI : containerapps!.outputs.apiUri)
 output WEB_TECH_URI string = reuseExisting ? reuse!.outputs.settings.WEB_TECH_URI : containerapps!.outputs.webTechUri
 output WEB_VOICE_URI string = reuseExisting ? reuse!.outputs.settings.WEB_VOICE_URI : containerapps!.outputs.webVoiceUri
 
 // MCP server URLs consumed by scripts/create-prompt-agents.py to render
 // the type: mcp tool blocks in agents/tech_lookup.yaml + work_order_draft.yaml.
-output MCP_TECH_LOOKUP_URL string = reuseExisting ? reuse!.outputs.settings.MCP_TECH_LOOKUP_URL : containerapps!.outputs.mcpTechLookupUrl
-output MCP_WORK_ORDER_URL string = reuseExisting ? reuse!.outputs.settings.MCP_WORK_ORDER_URL : containerapps!.outputs.mcpWorkOrderUrl
+output MCP_TECH_LOOKUP_URL string = !empty(gatewayBase) ? '${gatewayBase}/mcp/tech-lookup' : (reuseExisting ? reuse!.outputs.settings.MCP_TECH_LOOKUP_URL : containerapps!.outputs.mcpTechLookupUrl)
+output MCP_WORK_ORDER_URL string = !empty(gatewayBase) ? '${gatewayBase}/mcp/work-order' : (reuseExisting ? reuse!.outputs.settings.MCP_WORK_ORDER_URL : containerapps!.outputs.mcpWorkOrderUrl)
 
 output AZURE_LOG_ANALYTICS_RESOURCE_ID string = reuseExisting ? reuse!.outputs.settings.AZURE_LOG_ANALYTICS_RESOURCE_ID : observability!.outputs.logAnalyticsId
 output NORTHWIND_EXISTING_RESOURCE_IDS string = reuseExisting ? string(union(reuse!.outputs.resourceIds, {

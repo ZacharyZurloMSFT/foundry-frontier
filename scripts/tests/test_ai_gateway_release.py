@@ -26,10 +26,11 @@ def fixed_now():
 
 
 NOW = fixed_now
-SECRET = "s3cr3t-search-admin-key-0123456789"
+SECRET = "s3cr3t-search-query-key-0123456789"
 LOOKUP = "northwind-insurance-lookup"
 KNOWLEDGE = "northwind-insurance-knowledge"
-MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge))")
+REVIEW = "northwind-insurance-review"
+MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge|review))")
 MCP_PATH = re.compile(r"/default/toolservers/([a-z0-9-]+)/mcp")
 
 
@@ -178,7 +179,7 @@ def actions_by_name(plan):
 
 
 def test_repository_manifest_defines_the_managed_boundary(manifest):
-    assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE}
+    assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE, REVIEW}
     lookup, knowledge = manifest["toolServers"][LOOKUP], manifest["toolServers"][KNOWLEDGE]
     assert lookup["endpoints"][0]["namespace"] == "lookup" and knowledge["endpoints"][0]["namespace"] == "knowledge"
     assert lookup["endpoints"][0]["mcp"] == {
@@ -189,23 +190,30 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
         "?api-version=2026-05-01-preview")
     assert lookup["endpoints"][0]["credentials"] == {"type": "none"}
     assert knowledge["endpoints"][0]["credentials"] == {
-        "type": "header", "headers": {"api-key": ["${SEARCH_ADMIN_KEY}"]}}
+        "type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
     assert lookup["expectedTools"] == ["lookup_lookup_policy", "lookup_lookup_claim"]
     assert knowledge["expectedTools"] == ["knowledge_knowledge_base_retrieve"]
+    review = manifest["toolServers"][REVIEW]
+    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == {"type": "none"}
+    assert review["endpoints"][0]["mcp"]["url"] == (
+        "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/")
+    assert review["expectedTools"] == ["review_draft_claim_action"]
     assert set(manifest["observed"]) == {
         "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge",
         "northwind-hr-knowledge", "northwind-orders-knowledge"}
     assert set(manifest["stale"]) == {"northwind-order-lookup", "northwind-resolutions"}
-    assert set(manifest["deferred"]) == {"northwind-insurance-review"}
+    assert manifest["deferred"] == {}
 
 
-def test_deferred_work_order_server_is_documented_and_never_managed(manifest):
-    reason = manifest["deferred"]["northwind-insurance-review"]["reason"]
-    assert "x-orders-workflow" in reason and "x-harness-workflow" in reason and "not registered" in reason
-    assert "northwind-insurance-review" not in manifest["toolServers"]
+def test_review_server_is_registered_but_documents_that_the_gateway_cannot_forward_its_headers(manifest):
+    description = manifest["toolServers"][REVIEW]["description"]
+    assert "x-orders-workflow" in description and "does not forward client headers" in description
+    assert "rejected by design" in description
     concern = manifest["observed"]["northwind-api"]["concern"].lower()
     assert "decide" in concern and "delete" in concern and "never agent tools" in concern
     assert all(entry["retiredHostFragment"] == "bluecliff" for entry in manifest["stale"].values())
+    # The removed retail servers stay listed so a re-registration of the retired hosts is flagged again.
+    assert all("Removed" in entry["decision"] for entry in manifest["stale"].values())
 
 
 def test_manifest_models_match_the_verified_registrations(manifest):
@@ -225,10 +233,9 @@ def test_manifest_models_match_the_verified_registrations(manifest):
 
 def test_manifest_urls_are_https_and_placeholders_only_hold_secrets(manifest):
     urls = [endpoint["mcp"]["url"] for entry in manifest["toolServers"].values() for endpoint in entry["endpoints"]]
-    urls.append(manifest["deferred"]["northwind-insurance-review"]["backend"])
     assert urls and all(urlsplit(url).scheme == "https" for url in urls)
     text = release.DEFAULT_MANIFEST.read_text(encoding="utf-8")
-    assert re.findall(r"\$\{[A-Z0-9_]+\}", text) == ["${SEARCH_ADMIN_KEY}"]
+    assert re.findall(r"\$\{[A-Z0-9_]+\}", text) == ["${SEARCH_QUERY_KEY}"]
     assert manifest["gateway"]["url"] == common.GATEWAY_URL
 
 
@@ -246,7 +253,7 @@ def _literal_secret(manifest):
 
 
 def _placeholder_in_url(manifest):
-    manifest["toolServers"][LOOKUP]["endpoints"][0]["mcp"]["url"] += "?key=${SEARCH_ADMIN_KEY}"
+    manifest["toolServers"][LOOKUP]["endpoints"][0]["mcp"]["url"] += "?key=${SEARCH_QUERY_KEY}"
 
 
 def _placeholder_in_description(manifest):
@@ -356,13 +363,14 @@ def test_plan_creates_missing_managed_servers_without_secrets(manifest):
     gateway = FakeGateway(manifest)
     plan, _ = release.build_plan(gateway, manifest)
     actions = actions_by_name(plan)
-    assert {name: action["action"] for name, action in actions.items()} == {LOOKUP: "create", KNOWLEDGE: "create"}
-    assert actions[KNOWLEDGE]["requiredEnvironment"] == ["SEARCH_ADMIN_KEY"]
-    assert actions[LOOKUP]["requiredEnvironment"] == []
+    assert {name: action["action"] for name, action in actions.items()} == {
+        LOOKUP: "create", KNOWLEDGE: "create", REVIEW: "create"}
+    assert actions[KNOWLEDGE]["requiredEnvironment"] == ["SEARCH_QUERY_KEY"]
+    assert actions[LOOKUP]["requiredEnvironment"] == [] and actions[REVIEW]["requiredEnvironment"] == []
     desired = actions[KNOWLEDGE]["desired"]["endpoints"][0]["credentials"]
-    assert desired == {"type": "header", "headers": {"api-key": ["${SEARCH_ADMIN_KEY}"]}}
+    assert desired == {"type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
     assert re.fullmatch(r"[0-9a-f]{64}", plan["planSha256"])
-    assert plan["summary"]["create"] == 2
+    assert plan["summary"]["create"] == 3
     assert [(call["method"], urlsplit(call["url"]).path.rsplit("/", 1)[-1]) for call in gateway.calls] == [
         ("GET", "toolServers"), ("GET", "models")]
     assert all(call["params"] == {"api-version": common.ARM_API_VERSION} for call in gateway.calls)
@@ -374,9 +382,10 @@ def test_plan_is_noop_when_live_matches_even_though_secrets_are_redacted(manifes
     gateway.redaction = redaction
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
+    gateway.add(REVIEW)
     plan, _ = release.build_plan(gateway, manifest)
-    assert [action["action"] for action in plan["actions"]] == ["noop", "noop"]
-    assert plan["summary"]["noop"] == 2 and not any(action["differences"] for action in plan["actions"])
+    assert [action["action"] for action in plan["actions"]] == ["noop", "noop", "noop"]
+    assert plan["summary"]["noop"] == 3 and not any(action["differences"] for action in plan["actions"])
 
 
 def test_secret_values_alone_never_schedule_an_update(manifest):
@@ -399,10 +408,6 @@ def _change_description(properties):
 
 def _change_failure_mode(properties):
     properties["failureMode"] = "failOpen"
-
-
-def _drop_failure_mode(properties):
-    del properties["failureMode"]
 
 
 def _change_namespace(properties):
@@ -429,7 +434,6 @@ def _change_required(properties):
     (_change_display_name, "displayName"),
     (_change_description, "description"),
     (_change_failure_mode, "failureMode"),
-    (_drop_failure_mode, "failureMode"),
     (_change_namespace, "endpoints[lookup].namespace"),
     (_change_url, "endpoints[lookup].url"),
     (_change_transport, "endpoints[lookup].transport"),
@@ -445,6 +449,16 @@ def test_plan_updates_when_managed_fields_differ(manifest, change, difference):
     actions = actions_by_name(plan)
     assert actions[LOOKUP]["action"] == "update" and difference in actions[LOOKUP]["differences"]
     assert actions[KNOWLEDGE]["action"] == "noop"
+
+
+def test_a_service_that_never_returns_failure_mode_is_not_drift(manifest):
+    gateway = FakeGateway(manifest)
+    for name in (LOOKUP, KNOWLEDGE, REVIEW):
+        gateway.add(name)
+        del gateway.servers[name]["properties"]["failureMode"]
+    plan, _ = release.build_plan(gateway, manifest)
+    assert [action["action"] for action in plan["actions"]] == ["noop", "noop", "noop"]
+    assert not any(action["differences"] for action in plan["actions"])
 
 
 def test_plan_updates_when_header_names_change_but_not_when_values_do(manifest):
@@ -483,6 +497,8 @@ def test_plan_is_deterministic_and_changes_with_the_manifest(manifest):
 
 
 def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manifest):
+    manifest = copy.deepcopy(manifest)
+    manifest["deferred"]["northwind-deferred-example"] = {"reason": "Deliberately not registered."}
     gateway = FakeGateway(manifest)
     api = copy.deepcopy(live_item(manifest, LOOKUP))
     api["name"] = "northwind-api"
@@ -497,9 +513,9 @@ def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manife
     fixed["name"] = "northwind-resolutions"
     fixed["properties"]["endpoints"][0]["mcp"]["url"] = "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"
     gateway.servers["northwind-resolutions"] = fixed
-    review = copy.deepcopy(stale)
-    review["name"] = "northwind-insurance-review"
-    gateway.servers["northwind-insurance-review"] = review
+    deferred = copy.deepcopy(stale)
+    deferred["name"] = "northwind-deferred-example"
+    gateway.servers["northwind-deferred-example"] = deferred
     mystery = copy.deepcopy(stale)
     mystery["name"] = "mystery-server"
     gateway.servers["mystery-server"] = mystery
@@ -524,7 +540,7 @@ def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manife
     assert problems["gpt-5-6-luna"] == ["endpoint embeddings is not expected"]
     assert plan["models"]["unexpected"] == ["surprise-model"]
     assert plan["summary"]["staleNeedingDecision"] == 1 and plan["summary"]["governanceConcerns"] == 1
-    assert [action["action"] for action in plan["actions"]] == ["create", "create"]
+    assert [action["action"] for action in plan["actions"]] == ["create", "create", "create"]
 
 
 def test_model_endpoint_comparison_accepts_the_live_spelling(manifest):
@@ -541,12 +557,13 @@ def test_refresh_secrets_forces_an_update_only_when_requested(manifest, tmp_path
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
+    gateway.add(REVIEW)
     plan_path = make_plan(gateway, tmp_path, "--refresh-secrets", KNOWLEDGE)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     action = actions_by_name(plan)[KNOWLEDGE]
     assert action["action"] == "update" and action["differences"] == ["credentials.headers (refresh requested)"]
     assert actions_by_name(plan)[LOOKUP]["action"] == "noop" and plan["refreshSecrets"] == [KNOWLEDGE]
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_ADMIN_KEY": SECRET}) == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
     assert [call["url"].rsplit("/", 1)[-1] for call in gateway.puts()] == [KNOWLEDGE]
     assert gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]["credentials"]["headers"] == {"api-key": [SECRET]}
     for name in (LOOKUP, "not-managed"):
@@ -571,10 +588,10 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     capsys.readouterr()
     receipt_path = tmp_path / "receipt.json"
     code = run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_ADMIN_KEY": SECRET})
+               environ={"SEARCH_QUERY_KEY": SECRET})
     assert code == 0
     puts = gateway.puts()
-    assert [call["url"].rsplit("/", 1)[-1] for call in puts] == [KNOWLEDGE, LOOKUP]
+    assert [call["url"].rsplit("/", 1)[-1] for call in puts] == [KNOWLEDGE, LOOKUP, REVIEW]
     assert all(call["params"] == {"api-version": "2025-09-01-preview"} for call in puts)
     assert all(call["headers"] == {"If-None-Match": "*"} for call in puts)
     assert all(urlsplit(call["url"]).path.startswith(f"{common.GATEWAY_ID}/workspaces/default/toolServers/")
@@ -588,11 +605,15 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     knowledge = gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]
     assert knowledge["credentials"] == {"type": "header", "headers": {"api-key": [SECRET]}}
     assert knowledge["mcp"]["url"].endswith("/knowledgebases/northwind-insurance-kb/mcp?api-version=2026-05-01-preview")
+    review = gateway.bodies[REVIEW]["properties"]
+    assert review["failureMode"] == "failClosed" and review["description"] == manifest["toolServers"][REVIEW]["description"]
+    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == {"type": "none"}
+    assert review["endpoints"][0]["mcp"]["url"].endswith("ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/")
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["complete"] is True and receipt["kind"] == "ai-gateway-release-receipt"
     assert receipt["planSha256"] == json.loads(plan_path.read_text(encoding="utf-8"))["planSha256"]
     assert [(row["name"], row["outcome"], row["converged"]) for row in receipt["results"]] == [
-        (KNOWLEDGE, "applied", True), (LOOKUP, "applied", True)]
+        (KNOWLEDGE, "applied", True), (LOOKUP, "applied", True), (REVIEW, "applied", True)]
     assert gateway.methods() == {"GET", "PUT"}
 
 
@@ -600,6 +621,7 @@ def test_apply_updates_with_the_etag_and_preserves_live_policies(manifest, tmp_p
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP, etag="etag-live", displayName="Old name")
     gateway.add(KNOWLEDGE)
+    gateway.add(REVIEW)
     gateway.servers[LOOKUP]["properties"]["policies"] = [{"kind": "rate-limit"}]
     plan_path = make_plan(gateway, tmp_path)
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={}) == 0
@@ -624,7 +646,7 @@ def test_apply_refuses_when_the_live_gateway_changed_after_the_plan(manifest, tm
     plan_path = make_plan(gateway, tmp_path)
     gateway.add(LOOKUP)
     capsys.readouterr()
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_ADMIN_KEY": SECRET}) == 1
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 1
     assert "no longer matches the reviewed plan" in capsys.readouterr().err
     assert not gateway.puts()
 
@@ -651,7 +673,7 @@ def test_apply_refuses_a_modified_plan_file(manifest, tmp_path, tamper):
     else:
         plan["kind"] = "something-else"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_ADMIN_KEY": SECRET}) == 1
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 1
     assert not gateway.puts()
 
 
@@ -659,9 +681,9 @@ def test_apply_with_a_missing_secret_fails_clearly_before_any_write(manifest, tm
     gateway = FakeGateway(manifest)
     plan_path = make_plan(gateway, tmp_path)
     capsys.readouterr()
-    for environ in ({}, {"SEARCH_ADMIN_KEY": ""}):
+    for environ in ({}, {"SEARCH_QUERY_KEY": ""}):
         assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=environ) == 1
-        assert "SEARCH_ADMIN_KEY" in capsys.readouterr().err
+        assert "SEARCH_QUERY_KEY" in capsys.readouterr().err
     assert not gateway.puts()
 
 
@@ -669,6 +691,7 @@ def test_apply_with_nothing_to_do_writes_nothing(manifest, tmp_path):
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
+    gateway.add(REVIEW)
     plan_path = make_plan(gateway, tmp_path)
     receipt_path = tmp_path / "receipt.json"
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path)) == 0
@@ -683,14 +706,14 @@ def test_apply_never_overwrites_an_existing_receipt_and_checks_before_writing(ma
     receipt_path.write_text("keep", encoding="utf-8")
     gateway.calls.clear()
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_ADMIN_KEY": SECRET}) == 1
+               environ={"SEARCH_QUERY_KEY": SECRET}) == 1
     assert receipt_path.read_text(encoding="utf-8") == "keep"
     assert not gateway.calls
 
 
-def test_apply_leaves_observed_stale_deferred_and_models_untouched(manifest, tmp_path):
+def test_apply_leaves_observed_stale_and_unlisted_servers_and_models_untouched(manifest, tmp_path):
     gateway = FakeGateway(manifest)
-    for name in ("northwind-api", "northwind-order-lookup", "northwind-resolutions", "northwind-insurance-review",
+    for name in ("northwind-api", "northwind-order-lookup", "northwind-resolutions",
                  "northwind-hr-knowledge", "mystery-server"):
         item = copy.deepcopy(live_item(manifest, LOOKUP))
         item["name"] = name
@@ -698,8 +721,8 @@ def test_apply_leaves_observed_stale_deferred_and_models_untouched(manifest, tmp
     before = copy.deepcopy({name: gateway.servers[name] for name in gateway.servers})
     models_before = copy.deepcopy(gateway.models)
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_ADMIN_KEY": SECRET}) == 0
-    assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE}
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
+    assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE, REVIEW}
     for name, item in before.items():
         assert gateway.servers[name] == item
     assert gateway.models == models_before
@@ -708,13 +731,24 @@ def test_apply_leaves_observed_stale_deferred_and_models_untouched(manifest, tmp
 
 def test_a_changed_service_that_ignores_a_field_is_reported_as_not_converged(manifest, tmp_path):
     gateway = FakeGateway(manifest)
+    gateway.drop_fields = ("description",)
+    plan_path = make_plan(gateway, tmp_path)
+    receipt = release.apply_plan(gateway, manifest, json.loads(plan_path.read_text(encoding="utf-8")),
+                                 {"SEARCH_QUERY_KEY": SECRET}, now=NOW)
+    assert receipt["complete"] is True
+    assert all(row["converged"] is False and row["remainingDifferences"] == ["description"]
+               for row in receipt["results"])
+
+
+def test_a_service_that_does_not_echo_failure_mode_still_converges(manifest, tmp_path):
+    gateway = FakeGateway(manifest)
     gateway.drop_fields = ("failureMode",)
     plan_path = make_plan(gateway, tmp_path)
     receipt = release.apply_plan(gateway, manifest, json.loads(plan_path.read_text(encoding="utf-8")),
-                                 {"SEARCH_ADMIN_KEY": SECRET}, now=NOW)
+                                 {"SEARCH_QUERY_KEY": SECRET}, now=NOW)
     assert receipt["complete"] is True
-    assert all(row["converged"] is False and row["remainingDifferences"] == ["failureMode"]
-               for row in receipt["results"])
+    assert all(row["converged"] is True and row["remainingDifferences"] == [] for row in receipt["results"])
+    assert all(body["properties"]["failureMode"] == "failClosed" for body in gateway.bodies.values())
 
 
 def test_a_failed_write_stops_with_a_partial_receipt_and_scrubs_secrets(manifest, tmp_path, capsys):
@@ -724,7 +758,7 @@ def test_a_failed_write_stops_with_a_partial_receipt_and_scrubs_secrets(manifest
     capsys.readouterr()
     receipt_path = tmp_path / "receipt.json"
     code = run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_ADMIN_KEY": SECRET})
+               environ={"SEARCH_QUERY_KEY": SECRET})
     captured = capsys.readouterr()
     assert code == 1
     assert SECRET not in captured.out + captured.err + receipt_path.read_text(encoding="utf-8")
@@ -741,7 +775,7 @@ def test_secrets_never_reach_outputs_receipts_plans_or_argv(manifest, tmp_path, 
     plan_path = make_plan(gateway, tmp_path, "--refresh-secrets", KNOWLEDGE)
     receipt_path = tmp_path / "receipt.json"
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_ADMIN_KEY": SECRET}) == 0
+               environ={"SEARCH_QUERY_KEY": SECRET}) == 0
     captured = capsys.readouterr()
     for text in (captured.out, captured.err, plan_path.read_text(encoding="utf-8"),
                  receipt_path.read_text(encoding="utf-8")):
@@ -776,7 +810,7 @@ def test_release_script_has_no_delete_or_patch_operation(manifest, tmp_path):
     assert not re.search(r"""["'](DELETE|PATCH)["']""", source)
     gateway = FakeGateway(manifest)
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_ADMIN_KEY": SECRET}) == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
     assert run(gateway, "verify") == 0
     assert gateway.methods() == {"GET", "PUT", "POST"}
 
@@ -807,7 +841,7 @@ def test_verify_sends_only_initialize_and_tools_list_with_the_gateway_token_scop
     gateway = FakeGateway(manifest)
     code, _ = verify(gateway, capsys)
     assert code == 0
-    assert [call["body"]["method"] for call in gateway.calls] == ["initialize", "tools/list"] * 2
+    assert [call["body"]["method"] for call in gateway.calls] == ["initialize", "tools/list"] * 3
     for call in gateway.calls:
         assert call["method"] == "POST" and call["scope"] == "https://azure-api.net/aigateway/.default"
         assert call["headers"] == {"Accept": "application/json, text/event-stream", "Content-Type": "application/json",

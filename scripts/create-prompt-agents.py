@@ -29,6 +29,15 @@ deployment, because prompt-agent function tools don't yet work on
 gpt-5.x). Falls back to `FOUNDRY_WORKER_DEPLOYMENT` for older
 environments that predate the split.
 
+API Management gateway (`apim-northwind`): when `MCP_GATEWAY_CONNECTION` names a
+project connection (a RemoteTool/CustomKeys connection holding the
+`Ocp-Apim-Subscription-Key`), every yaml `type: mcp` tool whose `server_url`
+points at the gateway (a `*.azure-api.net` host, or the host of
+`NORTHWIND_GATEWAY_URL`) authenticates through it via `project_connection_id`,
+unless the yaml sets its own. Gateway URLs are never rewritten; direct Container
+App URLs behave exactly as before. That key is never attached to a URL on the AI
+Gateway host.
+
 AI Gateway routing (opt-in; unset means the behaviour above, unchanged).
 When `AI_GATEWAY_MODEL_CONNECTION` names the Foundry `ApiManagement` model
 connection created by `scripts/connect-model-gateway.py`, every agent model
@@ -50,10 +59,10 @@ A KB with a route gets `server_url` = that gateway tool server's MCP URL,
 (create it with `scripts/connect-mcp-gateway.py`) and `allowed_tools` prefixed
 with the tool server namespace (`tool_prefix`, default `knowledge_`). A KB
 without a route keeps its direct Search endpoint. `AI_GATEWAY_MCP_REQUIRED=true`
-turns a KB without a route, or a yaml `mcp` tool that is not on the gateway, into
-an error for that agent: it is not created, the run exits non-zero, and agents
-that comply are still created. Run `--dry-run` first to see every such agent
-before anything is sent.
+turns a KB without a route, or a yaml `mcp` tool that is not on the AI Gateway,
+into an error for that agent: it is not created, the run exits non-zero, and
+agents that comply are still created. Run `--dry-run` first to see every such
+agent before anything is sent.
 
 `--dry-run` prints every planned agent (name, final model string, tools) and
 makes no Foundry call.
@@ -339,6 +348,18 @@ def _expand_env(v: Any) -> Any:
     return out
 
 
+def _is_gateway_url(url: str) -> bool:
+    """True when an MCP server URL targets an API gateway: any *.azure-api.net host, or the host of
+    NORTHWIND_GATEWAY_URL (a custom gateway domain)."""
+    configured = os.environ.get("NORTHWIND_GATEWAY_URL", "").strip()
+    try:
+        host = urlsplit(url).hostname or ""
+        custom = urlsplit(configured if "//" in configured else f"//{configured}").hostname if configured else None
+    except ValueError:
+        return False
+    return host.endswith(".azure-api.net") or (custom is not None and host == custom)
+
+
 def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
                                mcp: GatewayMcp | None = None) -> list[dict[str, Any]]:
     """Translate the yaml `knowledge:` block into MCPTool entries that
@@ -443,7 +464,9 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
             # `/mcp` (no trailing slash) URL here so old azd envs that were
             # provisioned before the Bicep fix keep working after a
             # re-run of this script.
-            if server_url.rstrip("?").endswith("/mcp") and not _on_gateway(server_url):
+            # Gateway URLs are left untouched: the gateway rewrites them to the backend's `/mcp/` itself.
+            gateway = _is_gateway_url(server_url)
+            if not gateway and server_url.rstrip("?").endswith("/mcp"):
                 server_url = server_url.rstrip("/") + "/"
             if mcp and mcp.required and not _on_gateway(server_url):
                 raise ValueError(
@@ -463,6 +486,11 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
                 mcp_entry["headers"] = {k: _expand_env(v) for k, v in headers.items()}
             if t.get("project_connection_id"):
                 mcp_entry["project_connection_id"] = _expand_env(t["project_connection_id"])
+            elif gateway and not _on_gateway(server_url) and os.environ.get("MCP_GATEWAY_CONNECTION", "").strip():
+                # Foundry attaches the connection's CustomKeys (the gateway subscription key) to every call.
+                mcp_entry["project_connection_id"] = os.environ["MCP_GATEWAY_CONNECTION"].strip()
+                print(f"  ~ {cfg['name']}: MCP server is behind the API gateway; "
+                      f"using project connection '{mcp_entry['project_connection_id']}'.")
             resolved.append(mcp_entry)
         elif kind == "knowledge":
             # Handled in _knowledge_tools_for_agent (below).
@@ -485,12 +513,19 @@ def _plan_agent(cfg: dict[str, Any], model: str, search_index: str | None = None
     return agent_model, tools
 
 
+def _tool_route(url: str) -> str:
+    """Where an MCP tool's calls go: the AI Gateway, another (API Management) gateway, or straight to the server."""
+    if _on_gateway(url):
+        return "ai-gateway"
+    return "apim" if _is_gateway_url(url) else "direct"
+
+
 def _tool_summary(tools: list[dict[str, Any]]) -> str:
     if not tools:
         return "none"
     return ", ".join(
         f"{t.get('type')}:{t.get('name') or t.get('server_label') or '-'}"
-        + (("@gateway" if _on_gateway(t.get("server_url") or "") else "@direct") if t.get("type") == "mcp" else "")
+        + (f"@{_tool_route(t.get('server_url') or '')}" if t.get("type") == "mcp" else "")
         for t in tools
     )
 

@@ -170,8 +170,11 @@ name lowercased with dots replaced by dashes, so `gpt-5.4` is
 startup error, and `AI_GATEWAY_MCP_REQUIRED` plus `ORDERS_MCP_GATEWAY` to send
 the order and policy lookup MCP calls through gateway tool servers (tools are
 exposed as `<namespace>_<tool>`); prompt agents reach their knowledge bases the
-same way through `AI_GATEWAY_MCP_KB_ROUTES`. The work-order MCP stays direct because the
-gateway does not forward its application-bound workflow headers. The full
+same way through `AI_GATEWAY_MCP_KB_ROUTES`. The work-order MCP never uses the AI
+Gateway because the gateway does not forward its application-bound workflow
+headers: it stays direct or goes through the API Management instance
+(`MCP_GATEWAY_CONNECTION`, [`docs/api-management.md`](./api-management.md)),
+and the two routes are mutually exclusive per hosted role. The full
 design, live inventory and rollout runbook are in
 [`docs/ai-gateway.md`](./ai-gateway.md).
 
@@ -224,6 +227,18 @@ Cosmos-backed service; approval and business execution are never agent
 tools. `FOUNDRY_PROJECT_ENDPOINT`, agent name, and version are platform
 injections: do not redeclare reserved `FOUNDRY_*` variables in deployment
 environment maps.
+
+## API gateway (opt-in)
+
+An existing Azure API Management instance, `apim-northwind` (Standard v2), can front every HTTP
+API in the apps resource group: the REST API of both Container App stacks (`/northwind`,
+`/insurance`), the Voice Live WebSocket and the four MCP servers. Browsers reach REST through
+CORS and rate limits, agents reach MCP with a subscription key, and APIM reaches the Container
+Apps with a managed-identity token (`X-Northwind-Gateway-Token`) that an in-app guard
+(`apps/api/app/gateway_guard.py`) validates once direct access is locked down. The definition
+lives in `infra/live/apim-apis.bicep` and is applied only by the guarded `Scoped API Management`
+workflow. It is off until an operator runs the rollout in [api-management.md](./api-management.md),
+which also holds the API inventory, the security model and the rollback steps.
 
 ## Networking
 

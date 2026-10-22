@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import httpx
 from agent_framework import AgentResponseUpdate, Content, tool
@@ -11,7 +11,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config import INSURANCE_SPECIALISTS, SPECIALISTS, Settings
+from .config import INSURANCE_SPECIALISTS, SPECIALISTS, Settings, https_url
 from .scope import RequestScope, current_scope
 from ..insurance.domain import ClaimActionDraft, action_payload
 
@@ -64,10 +64,16 @@ class GatewayBearerAuth(httpx.Auth):
 
 
 async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
-                            tool_name: str = "propose_resolution", *, auth: httpx.Auth | None = None) -> dict:
+                            tool_name: str = "propose_resolution",
+                            gateway_headers: Mapping[str, str] | None = None, *,
+                            auth: httpx.Auth | None = None) -> dict:
     headers = {"x-orders-workflow": workflow_id}
     if workflow_id.startswith("wf-harness-"):
         headers["x-harness-workflow"] = workflow_id
+    if gateway_headers:
+        # Credentials only travel over HTTPS, and can never override the workflow binding.
+        https_url(url, "MCP endpoint")
+        headers = {**gateway_headers, **headers}
     async with httpx.AsyncClient(headers=headers, auth=auth, timeout=60, follow_redirects=False) as http:
         async with streamable_http_client(url, http_client=http) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -86,12 +92,14 @@ async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
                 return pending_approval(data, workflow_id)
 
 
-def proposal_tool(settings: Settings, token_provider=None):
+def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None = None, *, token_provider=None):
     spec = settings.mcp_spec()
     gateway = settings.mcp_entry
     if gateway is not None and token_provider is None:
         raise ValueError("Gateway work-order MCP requires an identity token provider for the gateway scope")
     auth = GatewayBearerAuth(token_provider) if gateway is not None else None
+    # API Management credentials are only forwarded when configured, leaving the call unchanged otherwise.
+    apim = {"gateway_headers": gateway_headers} if gateway_headers else {}
 
     if settings.business_domain == "insurance":
         @tool(name="draft_claim_action", approval_mode="never_require",
@@ -105,7 +113,7 @@ def proposal_tool(settings: Settings, token_provider=None):
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
             if gateway is None:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action")
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **apim)
             else:
                 result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
                                                  gateway.tool_prefix + "draft_claim_action", auth=auth)
@@ -129,7 +137,7 @@ def proposal_tool(settings: Settings, token_provider=None):
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
             if gateway is None:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed)
+                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, **apim)
             else:
                 result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
                                                  gateway.tool_prefix + "propose_resolution", auth=auth)

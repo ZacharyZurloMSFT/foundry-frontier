@@ -45,6 +45,7 @@ ENV_KEYS = (
     "ORDER_AGENT_ROLE", "FOUNDRY_PROJECT_ENDPOINT", "MODEL_DEPLOYMENT_NAME", "ORDERS_MODEL_DEPLOYMENT",
     "AZURE_AI_MODEL_DEPLOYMENT_NAME", "TRIAGE_MODEL_DEPLOYMENT", "AZURE_CLIENT_ID",
     "MCP_TECH_LOOKUP_URL", "MCP_WORK_ORDER_URL", "AZURE_SEARCH_ENDPOINT",
+    "MCP_GATEWAY_CONNECTION",
     "AZURE_SEARCH_INDEX",
     "AZURE_SEARCH_KNOWLEDGE_BASE", "ORDERS_KB_CONNECTION", "ORDERS_KB_CONNECTION_NAME",
     "ORDERS_OPENAI_ENDPOINT",
@@ -55,11 +56,15 @@ ENV_KEYS = (
     *(entry[1] for entry in INSURANCE_SPECIALISTS.values()),
     "NORTHWIND_BUSINESS_DOMAIN", "NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED",
 )
-MCP_GATEWAY_ROLES = ("orderlookup", "policylookup", "resolutiondraft")
+# Roles whose MCP server may sit behind the API Management gateway (MCP_GATEWAY_CONNECTION), and a Foundry
+# connection name's shape.
+MCP_GATEWAY_ROLES = ("orderlookup", "resolutiondraft")
+CONNECTION_NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
+# Roles whose MCP server may be routed through an AI Gateway tool server (ORDERS_MCP_GATEWAY).
+AI_GATEWAY_MCP_ROLES = ("orderlookup", "policylookup", "resolutiondraft")
 MCP_GATEWAY_FIELDS = {"url", "tool_prefix", "connection", "forwards_headers"}
 GATEWAY_MCP_PATH = re.compile(r"(?:/[^/]+)*/default/toolservers/(?P<server>[A-Za-z0-9][A-Za-z0-9_-]*)/mcp")
 GATEWAY_TOOL_PREFIX = re.compile(r"[a-z0-9_]*")
-CONNECTION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 GATEWAY_KNOWLEDGE_SERVERS = {"retail": "northwind-orders-knowledge", "insurance": "northwind-insurance-knowledge"}
 
 
@@ -112,8 +117,8 @@ def parse_mcp_gateway(raw: str) -> dict[str, McpGateway]:
     entries = {}
     for role, entry in document.items():
         name = f"ORDERS_MCP_GATEWAY[{role}]"
-        if role not in MCP_GATEWAY_ROLES:
-            raise ValueError(f"ORDERS_MCP_GATEWAY supports only {', '.join(MCP_GATEWAY_ROLES)}; got {role!r}")
+        if role not in AI_GATEWAY_MCP_ROLES:
+            raise ValueError(f"ORDERS_MCP_GATEWAY supports only {', '.join(AI_GATEWAY_MCP_ROLES)}; got {role!r}")
         entry = expect_type(entry, dict, f"{name} must be a JSON object")
         forwards = entry.get("forwards_headers", False)
         if role == "resolutiondraft" and forwards is not True:
@@ -134,7 +139,7 @@ def parse_mcp_gateway(raw: str) -> dict[str, McpGateway]:
         if not isinstance(prefix, str) or not GATEWAY_TOOL_PREFIX.fullmatch(prefix):
             raise ValueError(f"{name}.tool_prefix is required and must match [a-z0-9_]*")
         connection = entry.get("connection")
-        if not isinstance(connection, str) or not CONNECTION_NAME.fullmatch(connection):
+        if not isinstance(connection, str) or not re.fullmatch(CONNECTION_NAME, connection):
             raise ValueError(f"{name}.connection must name a project connection")
         entries[role] = McpGateway(url, prefix, connection, expect_type(
             forwards, bool, f"{name}.forwards_headers must be a boolean"))
@@ -197,6 +202,13 @@ class Settings:
                 and role not in mcp_gateway):
             raise ValueError(f"AI_GATEWAY_MCP_REQUIRED is set but ORDERS_MCP_GATEWAY has no {role} entry; "
                              "direct MCP traffic is not permitted")
+        mcp_connection = env.get("MCP_GATEWAY_CONNECTION", "").strip()
+        if mcp_connection and role in MCP_GATEWAY_ROLES:
+            if not re.fullmatch(CONNECTION_NAME, mcp_connection):
+                raise ValueError("MCP_GATEWAY_CONNECTION must be a Foundry project connection name")
+            if role in mcp_gateway:
+                raise ValueError(f"MCP_GATEWAY_CONNECTION (API Management) and ORDERS_MCP_GATEWAY (AI Gateway) "
+                                 f"both route the {role} MCP server; configure only one")
         raw = (AGENTS_DIR / (INSURANCE_PROMPTS if domain == "insurance" else PROMPTS)[role]).read_bytes()
         prompt = yaml.safe_load(raw)
         if not isinstance(prompt, dict) or not prompt.get("name") or not prompt.get("instructions"):
@@ -286,6 +298,12 @@ class Settings:
         return self.env.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
 
     @property
+    def mcp_gateway_connection(self) -> str:
+        """Project connection holding the API gateway key; empty unless this role calls a gated MCP server."""
+        name = self.env.get("MCP_GATEWAY_CONNECTION", "").strip()
+        return name if self.role in MCP_GATEWAY_ROLES else ""
+
+    @property
     def uses_model_gateway(self) -> bool:
         return bool(self.env.get("ORDERS_MODEL_GATEWAY_ENDPOINT", "").strip())
 
@@ -299,7 +317,9 @@ class Settings:
 
     @property
     def mcp_route(self) -> str:
-        return "gateway" if self.mcp_entry is not None else "direct"
+        if self.mcp_entry is not None:
+            return "ai-gateway"
+        return "api-management" if self.mcp_gateway_connection else "direct"
 
     @property
     def mcp_connection(self) -> str | None:
@@ -339,6 +359,6 @@ class Settings:
             )
         if self.model_gateway_required:
             metadata["model_gateway_required"] = "true"
-        if self.role in MCP_GATEWAY_ROLES:
+        if self.role in AI_GATEWAY_MCP_ROLES:
             metadata["mcp_route"] = self.mcp_route
         return metadata

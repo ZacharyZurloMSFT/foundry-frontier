@@ -100,10 +100,10 @@ def test_valid_entries_select_the_gateway_route_for_their_role_only():
     entries = {"orderlookup": entry(RETAIL_LOOKUP, "lookup_"), "policylookup": entry(RETAIL_KB, "knowledge_")}
     lookup = mcp_settings("orderlookup", entries)
     assert lookup.mcp_entry.url == RETAIL_LOOKUP and lookup.mcp_entry.server == "northwind-order-lookup"
-    assert lookup.mcp_route == "gateway" and lookup.metadata["mcp_route"] == "gateway"
+    assert lookup.mcp_route == "ai-gateway" and lookup.metadata["mcp_route"] == "ai-gateway"
     assert lookup.mcp_connection == CONNECTION
     policy = mcp_settings("policylookup", entries)
-    assert policy.mcp_route == "gateway" and policy.mcp_connection == CONNECTION
+    assert policy.mcp_route == "ai-gateway" and policy.mcp_connection == CONNECTION
     draft = mcp_settings("resolutiondraft", entries)
     assert draft.mcp_route == "direct" and draft.mcp_spec()["server_url"] == BASE["MCP_WORK_ORDER_URL"]
     assert "mcp_route" not in mcp_settings("manager", entries).metadata
@@ -187,7 +187,7 @@ def test_mcp_required_demands_a_gateway_entry_for_the_provider_executed_roles(ro
             mcp_settings(role, entries, AI_GATEWAY_MCP_REQUIRED=value)
     own = {role: entry(RETAIL_KB if role == "policylookup" else RETAIL_LOOKUP,
                        "knowledge_" if role == "policylookup" else "lookup_")}
-    assert mcp_settings(role, own, AI_GATEWAY_MCP_REQUIRED=value).mcp_route == "gateway"
+    assert mcp_settings(role, own, AI_GATEWAY_MCP_REQUIRED=value).mcp_route == "ai-gateway"
 
 
 @pytest.mark.parametrize("value", ["true", "1", "yes"])
@@ -450,7 +450,7 @@ def test_hosted_request_sends_the_gateway_tool_server_to_the_provider(role, doma
         assert native["headers"] == {"api-key": RUNTIME_KEY}
         assert native["require_approval"] == "never"
         assert "project_connection_id" not in native
-        assert result["metadata"]["mcp_route"] == "gateway"
+        assert result["metadata"]["mcp_route"] == "ai-gateway"
         assert RUNTIME_KEY not in json.dumps(result["metadata"])
         assert any(item["type"] == "mcp_call" and item["name"] == tools[0] for item in result["output"])
     asyncio.run(run())
@@ -500,7 +500,7 @@ def test_work_order_stays_direct_unless_it_explicitly_opts_in():
         assert config.mcp_route == "direct" and config.metadata["mcp_route"] == "direct"
         assert config.mcp_spec()["server_url"] == BASE["MCP_WORK_ORDER_URL"]
     retail = work_order_settings()
-    assert retail.mcp_route == "gateway" and retail.metadata["mcp_route"] == "gateway"
+    assert retail.mcp_route == "ai-gateway" and retail.metadata["mcp_route"] == "ai-gateway"
     assert retail.mcp_spec()["server_url"] == WORK_ORDER
     assert retail.mcp_spec()["allowed_tools"] == ["wo_propose_resolution"]
     insurance = work_order_settings("insurance")
@@ -537,7 +537,7 @@ def test_work_order_opt_in_calls_the_gateway_with_the_prefixed_tool_and_entra_be
             persisted.update(kind="insurance_claim_action", synthetic=True, execution_status="not_executed")
         mcp = AsyncMock(return_value=persisted)
         monkeypatch.setattr(tools, "call_proposal_mcp", mcp)
-        proposal = tools.proposal_tool(work_order_settings(domain), provider)
+        proposal = tools.proposal_tool(work_order_settings(domain), token_provider=provider)
         token = current_scope.set(RequestScope(workflow_id="wf-owned"))
         try:
             await proposal.invoke(arguments={"draft": draft})
@@ -650,7 +650,7 @@ def test_hosted_work_order_opt_in_persists_through_the_gateway_client(monkeypatc
             work_order_settings(), MockProject(infer), {"stream": True, "metadata": {"workflow_id": "wf-owned"}},
             gateway_token_provider=provider)
         assert result[-1]["type"] == "response.completed", result[-1]
-        assert result[-1]["response"]["metadata"]["mcp_route"] == "gateway"
+        assert result[-1]["response"]["metadata"]["mcp_route"] == "ai-gateway"
         assert mcp.await_args.args[0] == WORK_ORDER and mcp.await_args.args[3] == "wo_propose_resolution"
     asyncio.run(run())
 

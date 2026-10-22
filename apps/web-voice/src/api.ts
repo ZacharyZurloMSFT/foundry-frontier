@@ -64,15 +64,19 @@ export async function mintVoiceSession(signal?: AbortSignal): Promise<VoiceSessi
   }
   return data;
 }
-export function voiceProxyUrl(): string {
-  const url = new URL(API_BASE);
+export function voiceProxyUrlFor(apiBase: string): string {
+  const url = new URL(apiBase);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) {
     throw new Error("Voice requires HTTPS (or local development).");
   }
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = "/voice/realtime";
+  // A gateway base keeps its path prefix (for example /northwind), so the proxy path is appended rather than replacing it.
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/voice/realtime`;
   url.search = ""; url.hash = "";
   return url.toString();
+}
+export function voiceProxyUrl(): string {
+  return voiceProxyUrlFor(API_BASE);
 }
 export function confirmedHandoff(payload: HandoffPayload, confirmed: boolean, asset: string): HandoffPayload {
   if (!confirmed) throw new Error("Confirm the caller-provided identifiers, date, state and asset before handoff.");

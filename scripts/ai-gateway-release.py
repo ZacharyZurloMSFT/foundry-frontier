@@ -69,7 +69,7 @@ Sign in with `az login` first. The Azure CLI acquires every token; this script n
 
 typical flow:
   python scripts/ai-gateway-release.py plan --out plan.json
-  (set SEARCH_ADMIN_KEY in the environment of the next command only)
+  (set SEARCH_QUERY_KEY in the environment of the next command only)
   python scripts/ai-gateway-release.py apply --plan plan.json --yes
   python scripts/ai-gateway-release.py verify
 """
@@ -314,7 +314,11 @@ def _endpoint_differences(want: dict, have: dict) -> list[str]:
 
 def diff_views(desired: dict, live: dict) -> tuple[list[str], list[str]]:
     """Drift between desired and live. Endpoints pair by namespace, then by position (a renamed namespace)."""
-    differences = [key for key in ("type", "displayName", "description", "failureMode") if desired[key] != live[key]]
+    differences = [key for key in ("type", "displayName", "description") if desired[key] != live[key]]
+    # The 2025-09-01-preview service accepts failureMode but never returns it (verified with a failOpen canary),
+    # so an absent live value is not drift; a returned value that differs still is.
+    if live["failureMode"] is not None and live["failureMode"] != desired["failureMode"]:
+        differences.append("failureMode")
     unpaired, remaining = [], list(live["endpoints"])
     for want in desired["endpoints"]:
         match = next((have for have in remaining if have["namespace"] == want["namespace"]), None)

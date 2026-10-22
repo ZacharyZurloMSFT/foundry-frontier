@@ -89,13 +89,17 @@ MCP_RECOMMENDATIONS = [
     "These are gated manual decisions. This tool never changes container apps, ingress or network settings.",
 ]
 KQL_NOTES = [
-    "Templates built on the standard Azure Monitor diagnostics schemas; none were run against the live workspace.",
+    (
+        "All four queries were run against Log Analytics workspace log-zurlo-northwind on 2026-10-22. The account's "
+        "RequestResponse rows land in AzureDiagnostics; the caller's object id is in properties_s (objectId, "
+        "callerObjectId) and inference operations are named like create-response, so the filter is a case-insensitive "
+        "regex rather than a list of operation names."
+    ),
     "The account's diagnostic settings must send RequestResponse (or the allLogs group) to Log Analytics.",
     (
-        "Check the caller columns first with: "
-        "AzureDiagnostics | where ResourceProvider == 'MICROSOFT.COGNITIVESERVICES' | getschema. "
-        "An empty caller column means the workspace does not log caller identity; compare CallerIPAddress against the "
-        "gateway's outbound addresses instead."
+        "If caller comes back empty, inspect the identity fields with: "
+        "AzureDiagnostics | where ResourceProvider == 'MICROSOFT.COGNITIVESERVICES' | take 5. An empty caller means the "
+        "workspace does not log caller identity; compare CallerIPAddress against the gateway's outbound addresses instead."
     ),
 ]
 
@@ -296,13 +300,15 @@ def kql_queries(principal_ids: list[str]) -> dict:
     gateway = common.GATEWAY_IDENTITY_PRINCIPAL_ID
     account = common.FOUNDRY_ACCOUNT_NAME
     ids = ", ".join(f'"{principal}"' for principal in sorted(principal_ids))
-    caller = ("extend caller = coalesce(\n"
+    caller = ('extend props = parse_json(tostring(column_ifexists("properties_s", "")))\n'
+              "| extend caller = coalesce(\n"
+              "    tostring(props.objectId), tostring(props.callerObjectId),\n"
               '    tostring(column_ifexists("identity_claim_oid_g", "")),\n'
               '    tostring(column_ifexists("identity_claim_appid_g", "")),\n'
               '    tostring(parse_json(tostring(column_ifexists("identity_s", ""))).oid))')
     account_scope = (f'| where ResourceProvider == "MICROSOFT.COGNITIVESERVICES" and _ResourceId has "{account}"\n'
                      '| where Category == "RequestResponse"\n'
-                     '| where OperationName has_any ("ChatCompletions", "Completions", "Embeddings", "Responses")')
+                     '| where OperationName matches regex "(?i)completion|embedding|response"')
     return {
         "foundryNotFromGateway": (
             "// Inference calls to the Foundry account made by anything other than the AI Gateway identity.\n"
@@ -319,12 +325,18 @@ def kql_queries(principal_ids: list[str]) -> dict:
             "| summarize calls = count(), lastSeen = max(TimeGenerated) by caller, CallerIPAddress, OperationName\n"
             "| order by lastSeen desc"),
         "gatewayTraffic": (
-            "// Requests that reached the AI Gateway, by route and caller.\n"
-            "ApiManagementGatewayLogs\n"
-            f'| where TimeGenerated > ago(24h) and _ResourceId has "{common.GATEWAY_NAME}"\n'
-            '| extend route = case(Url has "/default/models/", "models", Url has "/default/toolservers/", "mcp", "other")\n'
-            "| summarize calls = count(), failures = countif(toint(ResponseCode) >= 400)"
-            " by route, CallerIpAddress, bin(TimeGenerated, 1h)\n| order by TimeGenerated desc"),
+            "// Requests that reached the AI Gateway, by route. Model calls log to ApiManagementGatewayLlmLog and MCP\n"
+            "// calls to ApiManagementGatewayMCPLog; ApiManagementGatewayLogs had no rows for either when checked.\n"
+            f'let gateway = "{common.GATEWAY_NAME}";\n'
+            "union isfuzzy=true\n"
+            '    (ApiManagementGatewayLlmLog | where TimeGenerated > ago(24h) and _ResourceId has gateway\n'
+            '     | project TimeGenerated, route = "models", target = tostring(DeploymentName), failed = bool(null)),\n'
+            '    (ApiManagementGatewayMCPLog | where TimeGenerated > ago(24h) and _ResourceId has gateway\n'
+            '     | project TimeGenerated, route = "mcp", target = tostring(McpServerEndpoint), failed = isnotempty(Error)),\n'
+            '    (ApiManagementGatewayLogs | where TimeGenerated > ago(24h) and _ResourceId has gateway\n'
+            '     | project TimeGenerated, route = "other", target = tostring(Url), failed = toint(ResponseCode) >= 400)\n'
+            "| summarize calls = count(), failures = countif(failed) by route, target, bin(TimeGenerated, 1h)\n"
+            "| order by TimeGenerated desc"),
         "gatewayModelUsage": (
             "// Token usage per model through the gateway (needs gateway LLM logging).\n"
             "ApiManagementGatewayLlmLog\n"

@@ -119,6 +119,13 @@ def validate_reuse_environment(env: Mapping[str, str], agent_service: str | None
             "must not overwrite existing retail agents. Use scripts/deploy-orders-hosted.py "
             "--business-domain insurance for the separate native insurance rollout."
         )
+    gateway = env.get("NORTHWIND_GATEWAY_URL", "")
+    if gateway and not re.fullmatch(r"https://[a-z0-9-]+\.azure-api\.net", gateway):
+        configuration_errors.append(
+            "NORTHWIND_GATEWAY_URL must be a bare https://<name>.azure-api.net origin with no path, query, or trailing slash."
+        )
+    if env.get("NORTHWIND_GATEWAY_STACK", "northwind") not in ("northwind", "insurance"):
+        configuration_errors.append("NORTHWIND_GATEWAY_STACK must be exactly northwind or insurance.")
     if configuration_errors or mode == "false":
         return configuration_errors
 

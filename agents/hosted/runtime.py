@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Literal, Mapping
+from urllib.parse import urlsplit
 
 from agent_framework import Agent, AgentMiddleware, AgentResponse, ChatResponse, ChatResponseUpdate, Content, ResponseStream
 from agent_framework.foundry import FoundryChatClient
@@ -189,9 +191,56 @@ def mcp_connection_headers(settings: Settings, connection: Mapping) -> dict[str,
 
 knowledge_connection_headers = mcp_connection_headers
 
+GATEWAY_KEY_HEADER = "Ocp-Apim-Subscription-Key"
+
+
+def connection_covers(target, url: str) -> bool:
+    """The MCP URL itself, or an ancestor of it on the same origin, so that one gateway connection can
+    serve both MCP servers. A different host, port, scheme or sibling path never matches."""
+    if target == url:
+        return True
+    try:
+        covering, endpoint = urlsplit(target), urlsplit(url)
+        same_origin = (covering.scheme, covering.hostname, covering.port) == (
+            endpoint.scheme, endpoint.hostname, endpoint.port)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not same_origin or covering.username or covering.password or covering.query or covering.fragment:
+        return False
+    base = covering.path.rstrip("/")
+    return endpoint.path.rstrip("/") == base or endpoint.path.startswith(base + "/")
+
+
+def mcp_gateway_headers(settings: Settings, connection: Mapping) -> dict[str, str]:
+    spec = settings.mcp_spec()
+    credentials = connection.get("credentials")
+    if connection.get("type") != "RemoteTool":
+        raise ValueError("MCP gateway connection must be a RemoteTool connection")
+    if not connection_covers(connection.get("target"), spec["server_url"]):
+        raise ValueError("MCP gateway connection target must be the MCP endpoint or its gateway base URL")
+    if not isinstance(credentials, Mapping) or credentials.get("type") != "CustomKeys":
+        raise ValueError("MCP gateway connection requires CustomKeys credentials")
+    # Header names are case-insensitive and Foundry may return custom key names lower-cased.
+    keys = [value for name, value in credentials.items()
+            if isinstance(name, str) and name.lower() == GATEWAY_KEY_HEADER.lower()]
+    if len(keys) != 1 or not isinstance(keys[0], str) or not keys[0]:
+        raise ValueError("MCP gateway connection did not supply its Ocp-Apim-Subscription-Key header")
+    # Never let a malformed secret reach an HTTP client, whose errors may echo header values.
+    if not re.fullmatch(r"[\x21-\x7e]{1,512}", keys[0]):
+        raise ValueError("MCP gateway connection supplied an invalid Ocp-Apim-Subscription-Key header")
+    return {GATEWAY_KEY_HEADER: keys[0]}
+
+
+def require_gateway_headers(settings: Settings, headers: Mapping[str, str] | None) -> dict[str, str] | None:
+    if not settings.mcp_gateway_connection:
+        return None
+    if not headers:
+        raise ValueError("MCP gateway authentication requires gateway connection headers")
+    return dict(headers)
+
 
 def build_agent(settings: Settings, project, *, account_client=None, knowledge_headers=None,
-                mcp_headers=None, gateway_token_provider=None) -> Agent:
+                mcp_headers=None, gateway_token_provider=None, gateway_headers=None) -> Agent:
     if settings.model_gateway_required and not settings.uses_model_gateway:
         raise ValueError("AI_GATEWAY_REQUIRED forbids direct model inference; "
                          "ORDERS_MODEL_GATEWAY_ENDPOINT is not configured")
@@ -213,10 +262,14 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
         spec = settings.mcp_spec()
         options = {}
         if settings.mcp_entry is not None:
-            # Provider-executed MCP reaches the gateway with the runtime key read from its project connection.
+            # Provider-executed MCP reaches the AI gateway with the runtime key read from its project connection.
             if not headers:
                 raise ValueError("Gateway MCP routing requires the tool server connection headers")
             options["headers"] = headers
+        else:
+            gateway = require_gateway_headers(settings, gateway_headers)
+            if gateway:
+                options["headers"] = gateway
         tools = [client.get_mcp_tool(
             name=spec["server_label"], url=spec["server_url"],
             allowed_tools=spec["allowed_tools"], approval_mode="never_require", **options,
@@ -232,7 +285,8 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
             spec["headers"] = headers
         tools = [client.get_mcp_tool(**spec)]
     elif settings.role == "resolutiondraft":
-        tools = [proposal_tool(settings, gateway_token_provider)]
+        tools = [proposal_tool(settings, require_gateway_headers(settings, gateway_headers),
+                               token_provider=gateway_token_provider)]
     return Agent(
         client=client,
         name=settings.prompt["name"],

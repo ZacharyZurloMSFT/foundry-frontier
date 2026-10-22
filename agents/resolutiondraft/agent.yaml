@@ -27,6 +27,8 @@ environment_variables:
     value: ${ORDERS_MCP_GATEWAY}
   - name: MCP_WORK_ORDER_URL
     value: ${MCP_WORK_ORDER_URL}
+  - name: MCP_GATEWAY_CONNECTION
+    value: ${MCP_GATEWAY_CONNECTION}
 resources:
   cpu: "1.0"
   memory: 2Gi

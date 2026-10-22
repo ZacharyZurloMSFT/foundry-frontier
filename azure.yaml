@@ -208,6 +208,7 @@ services:
             - {name: ORDER_AGENT_ROLE, value: orderlookup}
             - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
             - {name: MCP_TECH_LOOKUP_URL, value: "${MCP_TECH_LOOKUP_URL}"}
+            - {name: MCP_GATEWAY_CONNECTION, value: "${MCP_GATEWAY_CONNECTION}"}
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
@@ -290,6 +291,7 @@ services:
             - {name: ORDER_AGENT_ROLE, value: resolutiondraft}
             - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
             - {name: MCP_WORK_ORDER_URL, value: "${MCP_WORK_ORDER_URL}"}
+            - {name: MCP_GATEWAY_CONNECTION, value: "${MCP_GATEWAY_CONNECTION}"}
             - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
             - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
             - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}

@@ -328,7 +328,11 @@ def test_kql_queries_target_the_gateway_identity_and_in_scope_principals():
     for name in ("foundryNotFromGateway", "inScopeIdentitiesBypassing"):
         assert "AzureDiagnostics" in queries[name] and '"aisvc-zurlo-northwind"' in queries[name]
         assert "column_ifexists" in queries[name]
-    assert "ApiManagementGatewayLogs" in queries["gatewayTraffic"] and "/default/toolservers/" in queries["gatewayTraffic"]
+        assert "props.objectId" in queries[name]
+        assert 'matches regex "(?i)completion|embedding|response"' in queries[name]
+    traffic = queries["gatewayTraffic"]
+    assert "ApiManagementGatewayLlmLog" in traffic and "ApiManagementGatewayMCPLog" in traffic
+    assert "isfuzzy=true" in traffic and f'let gateway = "{common.GATEWAY_NAME}"' in traffic
     assert not any(re.search(r"\{[a-z_]+\}", query) for query in queries.values())
 
 

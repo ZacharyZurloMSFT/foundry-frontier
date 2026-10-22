@@ -571,10 +571,27 @@ def test_tool_summary_marks_where_each_mcp_tool_goes():
     tools = [
         {"type": "mcp", "server_label": "nw-hr-kb", "server_url": HR_TOOLSERVER},
         {"type": "mcp", "server_label": "x", "server_url": "https://search.example.net/knowledgebases/x/mcp"},
+        {"type": "mcp", "server_label": "api", "server_url": "https://apim-northwind.azure-api.net/northwind/mcp/work-order"},
         {"type": "function", "name": "lookup"},
     ]
-    assert agents_script._tool_summary(tools) == "mcp:nw-hr-kb@gateway, mcp:x@direct, function:lookup"
+    assert agents_script._tool_summary(tools) == (
+        "mcp:nw-hr-kb@ai-gateway, mcp:x@direct, mcp:api@apim, function:lookup")
     assert agents_script._tool_summary([]) == "none"
+
+
+def test_the_apim_connection_is_never_attached_to_an_ai_gateway_tool_server(monkeypatch):
+    monkeypatch.setenv("MCP_GATEWAY_CONNECTION", "apim-gateway-connection")
+    apim_url = "https://apim-northwind.azure-api.net/northwind/mcp/tech-lookup"
+    cfg = {"name": "agent-one", "instructions": "x", "tools": [
+        {"type": "mcp", "server_label": "apim", "server_url": apim_url},
+        {"type": "mcp", "server_label": "ai", "server_url": HR_TOOLSERVER},
+        {"type": "mcp", "server_label": "own", "server_url": apim_url, "project_connection_id": "explicit-connection"},
+    ]}
+    apim, ai, own = agents_script._tools_for_agent(cfg)
+    assert apim["server_url"] == apim_url and apim["project_connection_id"] == "apim-gateway-connection"
+    # The AI Gateway authenticates with its own key, never with the API Management subscription key.
+    assert ai["server_url"] == HR_TOOLSERVER and "project_connection_id" not in ai
+    assert own["project_connection_id"] == "explicit-connection"
 
 
 def test_dry_run_shows_the_routed_knowledge_base_and_needs_no_search_endpoint(monkeypatch, capsys, prompt_environment):
@@ -585,7 +602,7 @@ def test_dry_run_shows_the_routed_knowledge_base_and_needs_no_search_endpoint(mo
     asyncio.run(agents_script.main(dry_run=True))
     out = capsys.readouterr().out
     assert "Gateway MCP: 1 knowledge-base route(s); knowledge bases without a route are an error" in out
-    assert "northwind-hr-assistant (model=gpt-4o; tools=mcp:nw-hr-kb@gateway)" in out
+    assert "northwind-hr-assistant (model=gpt-4o; tools=mcp:nw-hr-kb@ai-gateway)" in out
     assert "@direct" not in out and "nothing was sent to Foundry" in out
 
 

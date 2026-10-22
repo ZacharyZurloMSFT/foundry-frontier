@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     harness_prompt_path: str = Field(default="", alias="COPILOT_HARNESS_PROMPT_PATH")
     harness_runtime_dir: str = Field(default="", alias="COPILOT_HARNESS_RUNTIME_DIR")
     harness_resolution_mcp: str = Field(default="", alias="MCP_WORK_ORDER_URL")
+    harness_gateway_key: SecretStr = Field(default=SecretStr(""), alias="MCP_GATEWAY_SUBSCRIPTION_KEY")
     harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
     harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")
     harness_concurrency: int = Field(default=2, ge=1, le=8, alias="COPILOT_HARNESS_MAX_CONCURRENT_RUNS")
