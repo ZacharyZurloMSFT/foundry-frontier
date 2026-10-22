@@ -42,9 +42,9 @@ def profile_for(surface: str) -> AssistantProfile:
 async def bind(profile: AssistantProfile, ctx: Context, context: ChatContext) -> tuple[str, ScopeSummary, TurnFactory]:
     """Authorise the caller for this surface; return its actor, what it may read and how to run a turn."""
     if profile.kind == "extractive_help":
+        caller = await open_caller(ctx, profile)
         if context.claim_id or context.policy_id:
             raise BusinessError("context_not_supported", "This assistant does not use your claims or policies.", 422)
-        caller = await open_caller(ctx, profile)
 
         def help_turn(message: str, history: list[dict[str, str]], session_id: str, persist: Persist):
             return run_help_turn(profile=profile, caller=caller, message=message, history=history,

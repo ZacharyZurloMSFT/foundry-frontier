@@ -34,7 +34,7 @@ const VARIANTS: Record<string, Variant> = {
     articles: true, heading: () => "Ask the Help Center", scope: () => "Help articles only · no personal records",
     checking: "Searching the Help Center articles…",
     placeholder: "Ask how reporting a loss, evidence, deductibles, rentals or billing work. The Help Center cannot see your policy or claims, so do not enter personal details.",
-    reads: "This assistant reads only published help articles, never your policy or claims. Every sentence it shows is a verbatim excerpt of those articles.",
+    reads: "This assistant reads only published help articles, never your policy or claims. Anything it quotes is a verbatim excerpt of those articles, and when no article answers your question it says so instead of guessing.",
   },
 };
 export const variantFor = (surface: string): Variant => VARIANTS[surface] ?? RECORDS;

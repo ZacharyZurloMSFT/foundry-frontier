@@ -391,6 +391,8 @@ async def test_authorisation_and_request_contract_are_enforced_before_any_search
     for oid in (EMPLOYEE, PRESENTER):
         denied = await ask(client, identity_, oid=oid)
         assert denied.status_code == 403 and denied.json()["error"]["code"] == "assistant_forbidden"
+        with_hint = await ask(client, identity_, oid=oid, context={"claim_id": "CLM-2001"})
+        assert with_hint.status_code == 403 and with_hint.json()["error"]["code"] == "assistant_forbidden"
     stranger = await client.post(url, json={"message": "hi"}, headers=auth(identity_, CUSTOMER_A, "run-b"))
     assert stranger.status_code == 403
     hints = []

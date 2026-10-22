@@ -28,6 +28,7 @@ work order dispatched. One `azd up` deploys everything.
 ## Testing before opening a PR
 - `ruff check apps/api evals pipelines data/seed`
 - `python evals/smoke_eval.py --self-check`
+- `python evals/assistant_eval.py --self-check`          (if assistants, help articles or `data/golden/assistant.jsonl` touched)
 - `bicep build infra/main.bicep --stdout > /dev/null`  (if infra touched)
 - `(cd apps/web-tech && npm run build)`                  (if web touched)
 

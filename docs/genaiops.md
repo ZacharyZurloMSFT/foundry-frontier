@@ -50,6 +50,15 @@ flowchart LR
 **Fail-fast principle:** cheap tiers run first so obvious breakage never burns
 Azure quota. Only the tier that catches the failure runs to completion.
 
+**Identity-bound assistants** add an offline contract check *alongside* the four
+tiers (it does not replace or weaken any of them). `python evals/assistant_eval.py
+--self-check` validates the golden set `data/golden/assistant.jsonl` (Claims
+Concierge and customer Help Center rows) and proves the deterministic grader
+catches another customer's records, decision language and non-verbatim Help Center
+excerpts. CI runs it through `apps/api/tests/test_assistants_golden.py`; live runs
+are an operator-approved step and are not wired into `evals/baseline.json`. See
+[evals/README.md](../evals/README.md#identity-bound-assistants).
+
 ## Progressive delivery
 
 | Env         | Trigger                          | GitHub Environment | Reviewers        | Region             |

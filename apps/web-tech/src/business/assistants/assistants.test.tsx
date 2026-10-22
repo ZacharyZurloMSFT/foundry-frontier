@@ -270,5 +270,15 @@ describe("embedded help center", () => {
     for (const text of ["Help center", "General questions", "Ask the Help Center", "cannot see your policy or claims", "ask the Claims Concierge there"]) expect(both).toContain(text);
     const onlyHelp = page(access(helpSurface));
     expect(onlyHelp).toContain("Ask the Help Center"); expect(onlyHelp).not.toContain("Claims Concierge there");
+    expect(onlyHelp).not.toContain("not available for this account");
+  });
+  it("says so when the server no longer lists the Help Center, but never while the status is still loading", () => {
+    const page = (value: AssistantAccess) => withAssistants(value, createElement(HelpCenter));
+    const withdrawn = page(access(surface));
+    expect(withdrawn).toContain("The Help Center is not available for this account right now"); expect(withdrawn).toContain("Your policies and claims are unaffected");
+    expect(withdrawn).not.toContain("<textarea");
+    const loading = page(noAssistants);
+    expect(loading).not.toContain("not available for this account"); expect(loading).not.toContain("<textarea"); expect(loading).toContain("Help center");
+    expect(page({ ...access(helpSurface), api: null })).not.toContain("not available for this account");
   });
 });
