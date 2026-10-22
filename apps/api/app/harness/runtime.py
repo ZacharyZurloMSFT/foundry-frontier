@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from copilot import CopilotClient
 
 logger = logging.getLogger(__name__)
-SDK_VERSION = "1.0.14"
+SDK_VERSION = "1.0.22"
 
 
 async def sdk_call(stage, operation, run_id=""):

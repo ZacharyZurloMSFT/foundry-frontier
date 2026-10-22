@@ -463,7 +463,7 @@ The insurer-branded portal is now the default web experience (set `VITE_INSURANC
 ## Agent Harness (opt-in)
 
 The **Agent Harness** workspace is accessible from the landing page and each
-department's sidebar. It runs the Python **GitHub Copilot SDK 1.0.14** with its
+department's sidebar. It runs the Python **GitHub Copilot SDK 1.0.22** with its
 matching runtime inside FastAPI. In insurance mode the SDK chooses among
 triage, canonical policy/claim lookup, authoritative policy lookup and
 pending-only claim-action drafting. Retail mode retains its separate prompt
