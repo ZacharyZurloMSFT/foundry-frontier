@@ -206,7 +206,7 @@ jobs:
             esac
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
           # The insurance-branded apps ship from the same api/web-tech sources.
-          for pair in api:insurance-api web-tech:insurance-portal; do
+          for pair in web-tech:insurance-portal; do
             if jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null; then
               az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-${pair##*:}" \
                 --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
@@ -256,9 +256,6 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s' "$ACR_NAME.azurecr.io/web-tech@$digest" > ".release-state/image-insurance-portal"
           fi
-          if jq -e 'index("api")' <<< "$SERVICES_JSON" > /dev/null; then
-            cp ".release-state/image-api" ".release-state/image-insurance-api"
-          fi
       - name: Release digest-pinned images, preserving all configuration and opt-in flags
         shell: bash
         run: |
@@ -276,7 +273,7 @@ jobs:
             fi
             python scripts/release-app.py "${args[@]}"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          for pair in api:insurance-api web-tech:insurance-portal; do
+          for pair in web-tech:insurance-portal; do
             target="${pair##*:}"
             jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null || continue
             test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
@@ -285,9 +282,6 @@ jobs:
               --image "$(cat ".release-state/image-$target")" --revision "$revision"
               --expected-revision "$(jq -er .revision ".release-state/before-$target.json")"
               --rollback-file ".release-state/rollback-$target.json" --apply)
-            if [[ "$target" == insurance-api ]]; then
-              args+=(--git-sha "$SOURCE_SHA" --deployed-at "$DEPLOYED_AT" --github-repository "$GITHUB_REPOSITORY")
-            fi
             python scripts/release-app.py "${args[@]}"
           done
       - name: Preserve secret-free rollback records even when readiness is unknown
