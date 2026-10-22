@@ -26,9 +26,11 @@ BACKENDS = {
     "northwind": {"api": "ca-api", "tech-lookup": "ca-mcp-tech-lookup", "work-order": "ca-mcp-work-order"},
     "insurance": {"api": "ca-insurance-api", "tech-lookup": "ca-insurance-lookup", "work-order": "ca-insurance-review"},
 }
+# Tools each stack's MCP servers must expose. The northwind servers run the repository's canonical image (retail and
+# insurance tools); the insurance stack's servers expose only the insurance tools.
 MCP_TOOLS = {
-    "tech-lookup": {"lookup_order", "lookup_policy", "lookup_claim"},
-    "work-order": {"propose_resolution", "draft_claim_action"},
+    "northwind": {"tech-lookup": {"lookup_order"}, "work-order": {"propose_resolution"}},
+    "insurance": {"tech-lookup": {"lookup_policy", "lookup_claim"}, "work-order": {"draft_claim_action"}},
 }
 MIN_MCP_PROTOCOL = "2025-06-18"
 PREFLIGHT_HEADERS = "authorization,content-type,x-department,x-demo-run,idempotency-key,x-synthetic-data"
@@ -153,7 +155,8 @@ def mcp_call(client: httpx.Client, url: str, payload: dict, key: str | None = No
     return client.post(url, json=payload, headers=headers)
 
 
-def check_mcp(client: httpx.Client, base: str, kind: str, label: str, key: str | None, report: Report) -> None:
+def check_mcp(client: httpx.Client, base: str, kind: str, stack: str, key: str | None, report: Report) -> None:
+    label = stack
     url = f"{base}/mcp/{kind}"
     anonymous = mcp_call(client, url, INITIALIZE)
     report.check(f"{label} MCP {kind} requires a subscription key", anonymous.status_code == 401, f"HTTP {anonymous.status_code}")
@@ -169,7 +172,9 @@ def check_mcp(client: httpx.Client, base: str, kind: str, label: str, key: str |
                  f"HTTP {init.status_code} protocolVersion={version or '?'}")
     tools = mcp_call(client, url, TOOLS_LIST, key)
     names = {t.get("name") for t in ((parse_mcp(tools) or {}).get("result") or {}).get("tools", [])}
-    report.check(f"{label} MCP {kind} tools/list", MCP_TOOLS[kind] <= names, f"tools={sorted(n for n in names if n)}")
+    expected = MCP_TOOLS[stack][kind]
+    report.check(f"{label} MCP {kind} tools/list", expected <= names,
+                 f"tools={sorted(n for n in names if n)}" + ("" if expected <= names else f" missing={sorted(expected - names)}"))
 
 
 def check_direct_lockdown(client: httpx.Client, stack: str, aca_suffix: str, report: Report, timeout: float) -> None:
@@ -194,21 +199,36 @@ def check_direct_lockdown(client: httpx.Client, stack: str, aca_suffix: str, rep
         report.check(f"{stack} direct WebSocket is rejected", False, f"{type(exc).__name__}: {exc}")
 
 
-def check_streaming(client: httpx.Client, base: str, label: str, report: Report) -> None:
+STREAM_MIN_TOTAL = 3.0  # a response that finishes sooner cannot prove anything about buffering
+STREAM_MIN_GAP = 1.0  # the first line must arrive this long before the last one
+
+
+def check_streaming(client: httpx.Client, base: str, label: str, report: Report, *,
+                    min_total: float = STREAM_MIN_TOTAL, min_gap: float = STREAM_MIN_GAP) -> None:
+    """/chat emits its session line at once and the model events seconds later, so a buffering gateway shows up as
+    every line arriving together at the end."""
+    name = f"{label} NDJSON streaming"
     started = time.monotonic()
-    first = None
+    first = last = None
     lines = 0
-    with client.stream("POST", f"{base}/qa", json={"question": "Reply with the single word ready."}) as response:
+    with client.stream("POST", f"{base}/chat", json={"message": "Reply with the single word ready."},
+                       headers={"X-Department": "contact-center"}) as response:
         if response.status_code in (503, 404):
-            report.skip(f"{label} NDJSON streaming", f"/qa unavailable (HTTP {response.status_code})")
+            report.skip(name, f"/chat unavailable (HTTP {response.status_code})")
             return
         for line in response.iter_lines():
             if line.strip():
                 lines += 1
-                first = first if first is not None else time.monotonic() - started
-    total = time.monotonic() - started
-    ok = response.status_code == 200 and lines >= 2 and first is not None and total - first >= 0.2
-    report.check(f"{label} NDJSON streaming is not buffered", ok, f"lines={lines} first={first or 0:.2f}s total={total:.2f}s")
+                last = time.monotonic() - started
+                first = last if first is None else first
+    if response.status_code != 200 or first is None:
+        report.check(f"{name} is not buffered", False, f"HTTP {response.status_code} lines={lines}")
+        return
+    detail = f"lines={lines} first={first:.2f}s last={last:.2f}s"
+    if last < min_total:
+        report.skip(name, f"{detail}: answered too fast to tell whether the gateway buffers")
+        return
+    report.check(f"{name} is not buffered", lines >= 2 and last - first >= min_gap, detail)
 
 
 def run(args: argparse.Namespace, client: httpx.Client, environ: dict[str, str] | None = None) -> Report:
