@@ -36,8 +36,8 @@ param extraAllowedOrigins array = [
   'http://localhost:5174'
 ]
 
-@description('Entra audience (GUID or api://GUID) for the gateway token APIM injects as X-Northwind-Gateway-Token. Empty = do not inject yet.')
-param gatewayAudience string = ''
+@description('Entra audience (GUID or api://GUID) for the gateway token APIM injects as X-Northwind-Gateway-Token: the client ID of the northwind-gateway application created by scripts/configure-gateway-identity.py. Empty = do not inject.')
+param gatewayAudience string = '0940b5c3-18ec-46f0-8962-7894247c2710'
 
 @description('Optional delegated-token pre-validation for /api/v1: tenantId, audience, clientIds (array) and scope. Empty = backend validation only.')
 param businessAuth object = {}
