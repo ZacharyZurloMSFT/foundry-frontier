@@ -579,8 +579,9 @@ def test_tool_summary_marks_where_each_mcp_tool_goes():
     assert agents_script._tool_summary([]) == "none"
 
 
-def test_the_apim_connection_is_never_attached_to_an_ai_gateway_tool_server(monkeypatch):
-    monkeypatch.setenv("MCP_GATEWAY_CONNECTION", "apim-gateway-connection")
+def test_the_apim_connections_are_never_attached_to_an_ai_gateway_tool_server(monkeypatch):
+    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_TECH_LOOKUP", "apim-tech-lookup")
+    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_WORK_ORDER", "apim-work-order")
     apim_url = "https://apim-northwind.azure-api.net/northwind/mcp/tech-lookup"
     cfg = {"name": "agent-one", "instructions": "x", "tools": [
         {"type": "mcp", "server_label": "apim", "server_url": apim_url},
@@ -588,8 +589,8 @@ def test_the_apim_connection_is_never_attached_to_an_ai_gateway_tool_server(monk
         {"type": "mcp", "server_label": "own", "server_url": apim_url, "project_connection_id": "explicit-connection"},
     ]}
     apim, ai, own = agents_script._tools_for_agent(cfg)
-    assert apim["server_url"] == apim_url and apim["project_connection_id"] == "apim-gateway-connection"
-    # The AI Gateway authenticates with its own key, never with the API Management subscription key.
+    assert apim["server_url"] == apim_url and apim["project_connection_id"] == "apim-tech-lookup"
+    # The AI Gateway authenticates with its own key, never with an API Management subscription key.
     assert ai["server_url"] == HR_TOOLSERVER and "project_connection_id" not in ai
     assert own["project_connection_id"] == "explicit-connection"
 

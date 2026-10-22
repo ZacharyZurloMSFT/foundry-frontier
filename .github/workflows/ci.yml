@@ -53,6 +53,7 @@ jobs:
             scripts/tests/test_export_openapi.py \
             scripts/tests/test_gateway_apps.py \
             scripts/tests/test_gateway_outputs.py \
+            scripts/tests/test_create_prompt_agents_gateway.py \
             scripts/tests/test_apim_smoke.py \
             scripts/tests/test_gateway_identity.py \
             scripts/tests/test_oidc_apim.py \

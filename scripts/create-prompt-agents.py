@@ -29,14 +29,15 @@ deployment, because prompt-agent function tools don't yet work on
 gpt-5.x). Falls back to `FOUNDRY_WORKER_DEPLOYMENT` for older
 environments that predate the split.
 
-API Management gateway (`apim-northwind`): when `MCP_GATEWAY_CONNECTION` names a
-project connection (a RemoteTool/CustomKeys connection holding the
-`Ocp-Apim-Subscription-Key`), every yaml `type: mcp` tool whose `server_url`
-points at the gateway (a `*.azure-api.net` host, or the host of
-`NORTHWIND_GATEWAY_URL`) authenticates through it via `project_connection_id`,
-unless the yaml sets its own. Gateway URLs are never rewritten; direct Container
-App URLs behave exactly as before. That key is never attached to a URL on the AI
-Gateway host.
+API Management gateway (`apim-northwind`): a yaml `type: mcp` tool whose `server_url` points at
+the gateway (a `*.azure-api.net` host, or the host of `NORTHWIND_GATEWAY_URL`) authenticates through a
+project connection (RemoteTool/CustomKeys holding the `Ocp-Apim-Subscription-Key`) named by
+`MCP_GATEWAY_CONNECTION_TECH_LOOKUP` or `MCP_GATEWAY_CONNECTION_WORK_ORDER`, chosen by the
+URL's `/mcp/<kind>` ending, unless the yaml sets its own `project_connection_id`. Foundry uses
+a referenced connection's *target* as the MCP endpoint, so each connection's target must be
+exactly the tool's `server_url`; one connection can never serve two endpoints. Gateway URLs are
+never rewritten; direct Container App URLs behave exactly as before. Those connections are never
+attached to a URL on the AI Gateway host.
 
 AI Gateway routing (opt-in; unset means the behaviour above, unchanged).
 When `AI_GATEWAY_MODEL_CONNECTION` names the Foundry `ApiManagement` model
@@ -360,6 +361,26 @@ def _is_gateway_url(url: str) -> bool:
     return host.endswith(".azure-api.net") or (custom is not None and host == custom)
 
 
+GATEWAY_MCP_CONNECTION_VARIABLES = {
+    "tech-lookup": "MCP_GATEWAY_CONNECTION_TECH_LOOKUP",
+    "work-order": "MCP_GATEWAY_CONNECTION_WORK_ORDER",
+}
+
+
+def _gateway_connection_for(url: str) -> tuple[str | None, str | None]:
+    """The (connection name, variable name) for a gateway MCP URL ending in /mcp/<kind>.
+
+    Foundry sends an MCP tool's calls to the *target* of the connection it references, so every MCP endpoint
+    needs its own connection whose target is exactly its URL. A single shared connection would misroute."""
+    try:
+        segments = [segment for segment in urlsplit(url).path.split("/") if segment]
+    except ValueError:
+        return None, None
+    kind = segments[-1] if len(segments) >= 2 and segments[-2] == "mcp" else None
+    variable = GATEWAY_MCP_CONNECTION_VARIABLES.get(kind or "")
+    return (os.environ.get(variable, "").strip() or None) if variable else None, variable
+
+
 def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
                                mcp: GatewayMcp | None = None) -> list[dict[str, Any]]:
     """Translate the yaml `knowledge:` block into MCPTool entries that
@@ -486,11 +507,15 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
                 mcp_entry["headers"] = {k: _expand_env(v) for k, v in headers.items()}
             if t.get("project_connection_id"):
                 mcp_entry["project_connection_id"] = _expand_env(t["project_connection_id"])
-            elif gateway and not _on_gateway(server_url) and os.environ.get("MCP_GATEWAY_CONNECTION", "").strip():
-                # Foundry attaches the connection's CustomKeys (the gateway subscription key) to every call.
-                mcp_entry["project_connection_id"] = os.environ["MCP_GATEWAY_CONNECTION"].strip()
-                print(f"  ~ {cfg['name']}: MCP server is behind the API gateway; "
-                      f"using project connection '{mcp_entry['project_connection_id']}'.")
+            elif gateway and not _on_gateway(server_url):
+                connection, variable = _gateway_connection_for(server_url)
+                if connection:
+                    mcp_entry["project_connection_id"] = connection
+                    print(f"  ~ {cfg['name']}: MCP server is behind the API gateway; using project connection "
+                          f"'{connection}' (its target must be exactly {server_url}).")
+                else:
+                    print(f"  ! {cfg['name']}: MCP server is behind the API gateway but no project connection is "
+                          f"configured ({variable or 'unrecognised MCP endpoint'}); its calls will be rejected (401).")
             resolved.append(mcp_entry)
         elif kind == "knowledge":
             # Handled in _knowledge_tools_for_agent (below).

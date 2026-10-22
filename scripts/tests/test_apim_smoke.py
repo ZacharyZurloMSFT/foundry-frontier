@@ -6,6 +6,7 @@ import json
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,8 +24,15 @@ KEY = "k" * 32
 SSE_INIT = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}\n\n'
 
 
-def sse_tools(kind: str) -> str:
-    tools = [{"name": name} for name in sorted(smoke.MCP_TOOLS[kind])]
+SERVED_TOOLS = {
+    "northwind": {"tech-lookup": {"lookup_order", "lookup_policy", "lookup_claim"},
+                  "work-order": {"propose_resolution", "draft_claim_action"}},
+    "insurance": {"tech-lookup": {"lookup_policy", "lookup_claim"}, "work-order": {"draft_claim_action"}},
+}
+
+
+def sse_tools(stack: str, kind: str, drop: str | None = None) -> str:
+    tools = [{"name": name} for name in sorted(SERVED_TOOLS[stack][kind] - {drop})]
     return "event: message\ndata: " + json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"tools": tools}}) + "\n\n"
 
 
@@ -54,14 +62,15 @@ class FakeGateway:
         if path.endswith("/api/v1/me"):
             return httpx.Response(self.broken.get("business_status", 401), json={})
         if "/mcp/" in path and request.method == "POST":
-            kind = path.rsplit("/", 1)[-1]
+            stack, kind = path.split("/")[1], path.rsplit("/", 1)[-1]
             key = request.headers.get("ocp-apim-subscription-key")
             if self.broken.get("open_mcp"):
                 key = KEY
             if key != KEY:
                 return httpx.Response(401, json={"message": "Access denied"})
             method = json.loads(request.content)["method"]
-            body = SSE_INIT.replace("2025-06-18", self.broken.get("protocol", "2025-06-18")) if method == "initialize" else sse_tools(kind)
+            body = (SSE_INIT.replace("2025-06-18", self.broken.get("protocol", "2025-06-18")) if method == "initialize"
+                    else sse_tools(stack, kind, self.broken.get("missing_tool")))
             return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
         return httpx.Response(404, json={"message": "Resource not found"})
 
@@ -124,6 +133,24 @@ def test_old_mcp_protocol_fails(monkeypatch):
     assert any("initialize" in name for name in failed(report))
 
 
+def test_a_missing_expected_tool_fails_and_names_it(monkeypatch):
+    report = run(FakeGateway(missing_tool="lookup_order"), monkeypatch)
+    assert failed(report) == {"northwind MCP tech-lookup tools/list"}
+    assert "missing=['lookup_order']" in next(detail for name, _, detail in report.rows if name == "northwind MCP tech-lookup tools/list")
+
+
+def test_each_stack_is_checked_against_its_own_tools(monkeypatch):
+    # The insurance servers legitimately expose no retail tools; requiring them was a real false failure.
+    assert "lookup_order" not in smoke.MCP_TOOLS["insurance"]["tech-lookup"]
+    assert "propose_resolution" not in smoke.MCP_TOOLS["insurance"]["work-order"]
+    codes = iter([403, 101])
+    monkeypatch.setattr(smoke, "websocket_handshake", lambda url, origin, timeout=20: next(codes))
+    with httpx.Client(transport=httpx.MockTransport(FakeGateway())) as client:
+        report = smoke.run(args(stack="insurance"), client, {"NORTHWIND_MCP_KEY_INSURANCE": KEY})
+    assert not report.failed, report.markdown()
+    assert any(name == "insurance MCP work-order tools/list" and status == "PASS" for name, status, _ in report.rows)
+
+
 def test_mcp_without_key_checks_only_the_public_behaviour(monkeypatch):
     report = run(FakeGateway(), monkeypatch, environ={})
     assert not report.failed
@@ -156,19 +183,45 @@ def test_lockdown_checks(monkeypatch, unlocked):
     assert all("stays reachable" not in name for name, _, _ in report.failed)
 
 
-def test_streaming_check_detects_buffering(monkeypatch):
-    def stream(delay: float):
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text='{"kind":"assistant_delta"}\n{"kind":"done"}\n')
-        return handler
-    report = smoke.Report()
-    with httpx.Client(transport=httpx.MockTransport(stream(0))) as client:
-        smoke.check_streaming(client, GATEWAY + "/x", "x", report)
-    assert report.rows[0][0].endswith("not buffered") and report.rows[0][1] == "FAIL"
-    unavailable = smoke.Report()
-    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))) as client:
-        smoke.check_streaming(client, GATEWAY + "/x", "x", unavailable)
-    assert unavailable.rows[0][1] == "SKIP"
+def test_streaming_check_distinguishes_streaming_from_buffering():
+    class Delayed(httpx.SyncByteStream):
+        """Yields the session line (optionally after a wait), pauses like a model call, then the rest."""
+
+        def __init__(self, before_first: float, between: float):
+            self.before_first, self.between = before_first, between
+
+        def __iter__(self):
+            time.sleep(self.before_first)
+            yield b'{"kind":"session"}\n'
+            time.sleep(self.between)
+            yield b'{"kind":"assistant_delta"}\n{"kind":"done"}\n'
+
+    def outcome(handler):
+        report = smoke.Report()
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            smoke.check_streaming(client, GATEWAY + "/northwind", "x", report, min_total=0.3, min_gap=0.15)
+        return report.rows[0]
+
+    streaming = outcome(lambda r: httpx.Response(200, stream=Delayed(0, 0.4)))
+    assert streaming[0].endswith("not buffered") and streaming[1] == "PASS", streaming
+    buffered = outcome(lambda r: httpx.Response(200, stream=Delayed(0.4, 0)))
+    assert buffered[0].endswith("not buffered") and buffered[1] == "FAIL", buffered
+    too_fast = outcome(lambda r: httpx.Response(200, stream=Delayed(0, 0)))
+    assert too_fast[1] == "SKIP" and "too fast" in too_fast[2], too_fast
+    assert outcome(lambda r: httpx.Response(503))[1] == "SKIP"
+    assert outcome(lambda r: httpx.Response(500, text="boom"))[1] == "FAIL"
+
+
+def test_streaming_check_posts_to_chat_with_the_department_header():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(path=request.url.path, department=request.headers.get("x-department"), body=json.loads(request.content))
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        smoke.check_streaming(client, GATEWAY + "/insurance", "insurance", smoke.Report())
+    assert seen["path"] == "/insurance/chat" and seen["department"] == "contact-center" and "message" in seen["body"]
 
 
 def test_parse_mcp_handles_sse_and_json():

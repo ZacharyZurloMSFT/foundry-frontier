@@ -94,9 +94,9 @@ All optional; empty means unset and keeps the current direct behaviour (fresh `a
 | Fronts | models; header-free MCP (insurance lookup, knowledge bases, claim-action review) | REST, WebSocket and MCP surfaces of the apps in `rg-northwind-apps` |
 | Client headers | **dropped** before the MCP backend | forwarded |
 | Caller auth | Entra token (Models/Tools User) or gateway runtime key | subscription key `Ocp-Apim-Subscription-Key` in the `MCP_GATEWAY_CONNECTION` project connection |
-| Agent settings | `AI_GATEWAY_*`, `ORDERS_MCP_GATEWAY` | `NORTHWIND_GATEWAY_*`, `MCP_GATEWAY_CONNECTION` |
+| Agent settings | `AI_GATEWAY_*`, `ORDERS_MCP_GATEWAY` | hosted agents: `NORTHWIND_GATEWAY_*`, `MCP_GATEWAY_CONNECTION`; prompt agents: one connection per MCP endpoint, `MCP_GATEWAY_CONNECTION_TECH_LOOKUP` / `MCP_GATEWAY_CONNECTION_WORK_ORDER` |
 
-For one hosted role the two routes are mutually exclusive: setting both `MCP_GATEWAY_CONNECTION` and an `ORDERS_MCP_GATEWAY` entry for `orderlookup` or `resolutiondraft` is a startup error. `policylookup` (the knowledge base) exists only on the AI Gateway, and `resolutiondraft` can only use `apim-northwind` or stay direct. The hosted response metadata `mcp_route` reports `ai-gateway`, `api-management` or `direct`, and `create-prompt-agents.py --dry-run` marks each MCP tool `@ai-gateway`, `@apim` or `@direct`; the `apim-northwind` connection key is never attached to an AI Gateway URL.
+For one hosted role the two routes are mutually exclusive: setting both `MCP_GATEWAY_CONNECTION` and an `ORDERS_MCP_GATEWAY` entry for `orderlookup` or `resolutiondraft` is a startup error. `policylookup` (the knowledge base) exists only on the AI Gateway, and `resolutiondraft` can only use `apim-northwind` or stay direct. The hosted response metadata `mcp_route` reports `ai-gateway`, `api-management` or `direct`, and `create-prompt-agents.py --dry-run` marks each MCP tool `@ai-gateway`, `@apim` or `@direct`; the `apim-northwind` connections are never attached to an AI Gateway URL.
 
 ## Findings to act on
 
