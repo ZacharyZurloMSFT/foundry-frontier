@@ -1,0 +1,21 @@
+<!--
+  Voice Live WebSocket API (one per stack), attached to its onHandshake operation (the only policy scope APIM allows
+  for WebSocket APIs). The browser Origin header and the first-frame ticket are enforced by the backend itself, so
+  only rate limiting and the gateway token are applied. cors and validate-* policies are not supported on a handshake.
+-->
+<policies>
+  <inbound>
+    <base />
+    <rate-limit-by-key calls="60" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    __GATEWAY_TOKEN__
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

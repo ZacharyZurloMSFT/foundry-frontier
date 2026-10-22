@@ -1,0 +1,20 @@
+    <!-- Pre-validate the delegated Entra token on the connected business API; the backend still validates it. -->
+    <choose>
+      <when condition='@(context.Operation.UrlTemplate.StartsWith("/api/v1/"))'>
+        <validate-jwt header-name="Authorization" require-scheme="Bearer" require-expiration-time="true" require-signed-tokens="true" clock-skew="30" failed-validation-httpcode="401" failed-validation-error-message="A valid delegated insurance API access token is required.">
+          <openid-config url="https://login.microsoftonline.com/__TENANT_ID__/v2.0/.well-known/openid-configuration" />
+          <audiences>
+            <audience>__AUDIENCE__</audience>
+          </audiences>
+          <issuers>
+            <issuer>https://login.microsoftonline.com/__TENANT_ID__/v2.0</issuer>
+          </issuers>
+          <required-claims>
+            <claim name="scp" match="any" separator=" ">
+              <value>__SCOPE__</value>
+            </claim>
+            <claim name="azp" match="any">__CLIENT_ID_VALUES__</claim>
+          </required-claims>
+        </validate-jwt>
+      </when>
+    </choose>
