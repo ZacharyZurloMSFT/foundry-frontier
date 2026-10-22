@@ -205,8 +205,8 @@ jobs:
                 ;;
             esac
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          # The insurance-branded apps ship from the same api/web-tech sources.
-          for pair in web-tech:insurance-portal; do
+          # The insurance-branded apps ship from the same api/web sources.
+          for pair in web-tech:insurance-portal web-voice:insurance-voice; do
             if jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null; then
               az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-${pair##*:}" \
                 --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
@@ -233,13 +233,22 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s' "$ACR_NAME.azurecr.io/$service@$digest" > ".release-state/image-$service"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+          if jq -e 'index("web-tech") or index("web-voice")' <<< "$SERVICES_JSON" > /dev/null; then
+            # Insurance-branded SPAs: same sources, built against the insurance API, through the gateway when configured.
+            if [[ -n "${NORTHWIND_GATEWAY_URL:-}" ]]; then
+              [[ "$NORTHWIND_GATEWAY_URL" =~ ^https://[a-z0-9-]+\.azure-api\.net$ ]]
+              insurance_base="$NORTHWIND_GATEWAY_URL/insurance"
+            else
+              insurance_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
+                --name ca-insurance-api --query properties.configuration.ingress.fqdn -o tsv)"
+              [[ "$insurance_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+              insurance_base="https://$insurance_fqdn"
+            fi
+          fi
           if jq -e 'index("web-tech")' <<< "$SERVICES_JSON" > /dev/null; then
-            # Insurance portal: same source, built against the insurance API with its Entra sign-in settings.
-            insurance_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
-              --name ca-insurance-api --query properties.configuration.ingress.fqdn -o tsv)"
-            [[ "$insurance_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+            # Insurance portal, with its Entra sign-in settings.
             (cd apps/web-tech \
-              && VITE_API_BASE_URL="https://$insurance_fqdn" \
+              && VITE_API_BASE_URL="$insurance_base" \
                  VITE_INSURANCE_BUSINESS_ENABLED=true \
                  VITE_INSURANCE_AUTH_TENANT_ID="${VITE_INSURANCE_AUTH_TENANT_ID:-$AZURE_TENANT_ID}" \
                  VITE_INSURANCE_AUTH_CLIENT_ID="${VITE_INSURANCE_AUTH_CLIENT_ID:-0d7bda00-80e1-4004-a78d-9072bc8f836d}" \
@@ -255,6 +264,19 @@ jobs:
             digest="$(jq -er '."containerimage.digest"' ".release-state/build-insurance-portal.json")"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s' "$ACR_NAME.azurecr.io/web-tech@$digest" > ".release-state/image-insurance-portal"
+          fi
+          if jq -e 'index("web-voice")' <<< "$SERVICES_JSON" > /dev/null; then
+            # Insurance voice client: the same bundle, pointed at the insurance API.
+            (cd apps/web-voice && VITE_API_BASE_URL="$insurance_base" npm run build)
+            tag="$ACR_NAME.azurecr.io/web-voice:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-insurance"
+            docker buildx build --platform linux/amd64 --push --tag "$tag" \
+              --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.created=$deployed_at" \
+              --metadata-file ".release-state/build-insurance-voice.json" apps/web-voice
+            digest="$(jq -er '."containerimage.digest"' ".release-state/build-insurance-voice.json")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s' "$ACR_NAME.azurecr.io/web-voice@$digest" > ".release-state/image-insurance-voice"
           fi
       - name: Release digest-pinned images, preserving all configuration and opt-in flags
         shell: bash
@@ -273,7 +295,7 @@ jobs:
             fi
             python scripts/release-app.py "${args[@]}"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          for pair in web-tech:insurance-portal; do
+          for pair in web-tech:insurance-portal web-voice:insurance-voice; do
             target="${pair##*:}"
             jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null || continue
             test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
