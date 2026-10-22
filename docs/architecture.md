@@ -273,6 +273,111 @@ then creates one deterministic approval item per run. Human decisions use
 conditional updates. Model-generated text is never proof of approval or of
 successful persistence. Existing non-harness resolution behavior is retained.
 
+## Identity-bound embedded assistants
+
+Policyholder-facing AI lives inside the portal sections it helps with, not in a
+separate workspace. `apps/api/app/assistants` (kept outside `app/business`, which
+stays independent of AI providers) adds `GET /api/v1/assistants/status` and
+`POST /api/v1/assistants/{surface}/chat` beside the connected business API, reusing
+its Entra bearer verification, `X-Demo-Run` context, route class and typed errors.
+
+```mermaid
+sequenceDiagram
+  participant B as Browser (MSAL, in-memory token)
+  participant A as FastAPI /api/v1/assistants
+  participant S as InsuranceBusinessService (read-only snapshot)
+  participant M as Foundry model (Responses API)
+  B->>A: POST /assistants/concierge/chat (Bearer, X-Demo-Run, message, record hints)
+  A->>A: verify Entra token, resolve role and policyholder from the run
+  A->>S: re-authorise record hints (not_found otherwise)
+  A->>M: instructions + question + pinned data + tool schemas (ids only)
+  M-->>A: tool call get_claim("CLM-2001")
+  A->>S: get_claim(run, subject, id) -> customer view
+  A-->>M: whitelisted projection (visible fields only)
+  M-->>A: JSON answer + policy_refs
+  A->>A: parse, cite-only-what-was-shown, ids-only-what-was-read, no determinations
+  A-->>B: NDJSON session, tool, assistant_delta, citations, done
+```
+
+- **Scope is server-owned.** The principal comes from the verified token and the
+  role/`policyholder_id` from the run mapping. Request bodies accept only a
+  message, a session id and optional `claim_id`/`policy_id` hints; tools accept
+  record ids only. Every call goes through the same `_visible()`/customer-view rules
+  as the portal, so a foreign id is indistinguishable from a missing one.
+- **One immutable snapshot per turn.** `TurnSnapshot` reads the run once and refuses
+  writes, so an answer is consistent and the assistant path cannot mutate a case.
+- **Projections, not records.** Tool results are whitelisted fields (no internal
+  notes, author/actor ids, assignment, contact details or VIN). Record text is
+  untrusted data inside the JSON user message and tool outputs, never the
+  developer instructions.
+- **Fail closed.** The model must return `{"answer","citations","human_review"}`.
+  The server rejects an answer that does not parse, cites wording it was not
+  shown, names an id it did not read, or reads like a coverage, claim or payment
+  decision (a superset of `evals/insurance_gates.unsafe_conclusion`). Citations are
+  rendered by the server from the snapshot, never from model text. The deployment's
+  Foundry guardrail (including Prompt Shields) is the input/output filter; a
+  content-filter error becomes a neutral message.
+- **Sessions.** `asst-<surface>-<uuid>` ids are bound to the actor
+  (`ownerKey`), bounded and TTL'd. An exchange (question and answer) is one Cosmos
+  document written only after the answer passed every check, so a blocked or failed
+  attempt, or a failed save, never leaves a question behind to become model context.
+  The legacy `/session/{sid}/messages` route and `append_message`/`load_conversation`
+  refuse `asst-` ids, because they have no caller identity. Transcripts stay in memory
+  in the browser and are cleared when the signed-in actor changes.
+- **Capacity.** One in-flight request per actor and a global limit; reservations
+  are released when a stream ends, errors or is cancelled.
+- **Observability.** `assistant.turn` spans carry surface, role, a hashed actor,
+  tool-call count and outcome; `AI-conversation` log records carry metadata only. Each
+  answer's model deployment and prompt SHA (stamped by
+  `scripts/bundle-harness-assets.py`) are shown in the UI.
+- **Surfaces.** A surface is a profile in `profiles.py` (roles, tools, prompt, department
+  stamp, and a `kind`) plus a prompt in `agents/insurance/assistants/`. Adding one means: a
+  profile and prompt, a tool allowlist (customer-safe tools only for customer roles),
+  its corpus or records, a panel mount, and golden rows in `data/golden/assistant.jsonl`.
+
+### Customer Help Center (an `extractive_help` surface)
+
+The second surface reads **no personal record**. It replaces the HR-document pattern for
+customers with a general help desk over published help articles.
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant A as FastAPI /api/v1/assistants/help_center/chat
+  participant X as Azure AI Search (nw-insurance-help-customer-v1)
+  participant M as Foundry model (no tools)
+  B->>A: POST (Bearer, X-Demo-Run, message; no record hints allowed)
+  A->>A: verify token, role gate (policyholder), reject claim/policy hints (422)
+  A->>X: plain-word query + filter publisher/business_domain/synthetic/audience=customer
+  X-->>A: up to 5 articles (id, title, content, version, topic, effective_from)
+  A->>M: instructions + question + articles as DATA, select verbatim excerpts as JSON
+  M-->>A: {"selections":[{"source_id","quote"}],"unknown":false}
+  A->>A: quote must be an exact substring of that retrieved article; no decision language
+  A-->>B: NDJSON session, assistant_delta (quotes), sources, done
+```
+
+- **Isolation.** The index is publisher-owned and audience-scoped; the API pins its name
+  (`NORTHWIND_HELP_CENTER_INDEX` must equal `nw-insurance-help-customer-v1`), its
+  `urn:northwind:synthetic:help-center:` source prefix and a mandatory `audience eq 'customer'`
+  filter. Every retrieved row must carry complete, well-formed provenance or the turn fails.
+  The adjuster, HR and IT index is a different resource and is never queried.
+- **Extractive by construction.** The model returns excerpt selections, never prose. The
+  server renders every character the customer sees from retrieved article text, plus the
+  article title under each excerpt, so an answer is exactly what Northwind published.
+  Quotes must be verbatim (at least four words, at most 600 characters, at most four), and
+  anything that reads like a coverage, claim or payment decision is withheld.
+- **Honest no-match.** No evidence, `unknown: true`, a personal-record question or a request for
+  a decision all produce one fixed message (no model call when nothing was retrieved).
+- **Operating model.** `scripts/publish-customer-help.py` previews by default; `--apply` writes only
+  the publisher-owned index. Content changes go through a PR (articles are Markdown with
+  `id/topic/version/effective_from` front matter), the publisher, and the golden set.
+
+Next, in a separate plan: an adjuster case copilot and authenticated Approvals in the
+case view, a staff help desk (adjuster procedures and IT, HR content retired, its own
+audience-isolated index that reuses the `extractive_help` kind), and a decision on whether
+the bake-off, safety and trace labs return as presenter-only pages. Until then those tabs exist
+only in the legacy shell.
+
 ## Model routing
 
 | Model            | Role                                                                        |

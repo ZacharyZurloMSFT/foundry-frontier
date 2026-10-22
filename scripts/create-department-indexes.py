@@ -131,7 +131,9 @@ def _upload_department_markdown(svc: BlobServiceClient, dept: Department) -> int
     cc = svc.get_container_client(_BLOB_CONTAINER)
     settings = ContentSettings(content_type="text/markdown")
     count = 0
-    for path in sorted(dept.seed_dir.rglob("*.md")):
+    # Top-level files only. Audience-specific content lives in a subfolder (for example
+    # seed/customer) and is published to its own isolated index, never to the department index.
+    for path in sorted(dept.seed_dir.glob("*.md")):
         if path.name.upper() == "README.MD":
             continue
         blob_name = f"{dept.slug}/{path.name}"

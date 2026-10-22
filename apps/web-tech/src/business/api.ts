@@ -7,23 +7,27 @@ export class BusinessError extends Error {
 }
 export function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "The request could not be completed."; }
 export type TokenProvider = () => Promise<string>;
+export interface ExchangeOptions { signal?: AbortSignal; readOnly?: boolean }
 export class BusinessApi {
   constructor(private readonly config: BusinessConfig, private readonly token: TokenProvider) {}
-  async exchange(path: string, method = "GET", body?: BodyInit, extraHeaders?: HeadersInit): Promise<Response> {
+  async exchange(path: string, method = "GET", body?: BodyInit, extraHeaders?: HeadersInit, options: ExchangeOptions = {}): Promise<Response> {
     // Acquire before sending; interactive-required must never automatically replay a command.
     const token = await this.token();
     const headers = new Headers({ Authorization: `Bearer ${token}`, "X-Demo-Run": this.config.runId, Accept: "application/json" });
     new Headers(extraHeaders).forEach((value, name) => {
       if (name !== "authorization" && name !== "x-demo-run") headers.set(name, value);
     });
-    const write = method !== "GET";
+    // A read-only POST (for example an assistant question) changes no record, so a lost connection has no unknown outcome.
+    const write = method !== "GET" && !options.readOnly;
     let response: Response;
     try {
       response = await fetch(`${this.config.apiBase}/api/v1${path}`, {
         method, headers, credentials: "omit", cache: "no-store", redirect: "error",
+        ...(options.signal ? { signal: options.signal } : {}),
         ...(body !== undefined ? { body } : {}),
       });
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       throw new BusinessError(write ? "The connection ended. The outcome is unknown; check the current case before another action." : "Unable to reach the insurance service.", 0, "network_error", null, write);
     }
     return response;

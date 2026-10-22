@@ -43,7 +43,7 @@ describe("business portal presentation and boundaries", () => {
   });
   it("shows conventional synthetic reporting fields with no dummy integration buttons", () => {
     const html = renderToStaticMarkup(createElement(ReportLoss, { api, identity: identityExample, initialPolicy: policyExample, onCreated: noop, onClaims: noop, onError: noop }));
-    for (const text of ["loss-policy", "loss-date", "loss-state", "loss-description", "Auto collision", "Auto hail", "synthetic information only", "not integrated"]) expect(html).toContain(text);
+    for (const text of ["loss-policy", "loss-date", "loss-state", "loss-description", "Auto collision", "Auto hail", "synthetic information only", "not part of this form"]) expect(html).toContain(text);
     expect(html).not.toMatch(/Upload file|Extract now|Start voice|Ask assistant/);
   });
   it("keeps customer case views read-only and filters employee-only note and timeline contents defensively", () => {

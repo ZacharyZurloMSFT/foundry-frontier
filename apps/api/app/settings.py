@@ -90,6 +90,21 @@ class Settings(BaseSettings):
     adjuster_support_timeout: int = Field(default=60, ge=1, le=180, alias="ADJUSTER_SUPPORT_TIMEOUT_SECONDS")
     adjuster_support_concurrency: int = Field(default=4, ge=1, le=16, alias="ADJUSTER_SUPPORT_MAX_CONCURRENT_REQUESTS")
 
+    # Identity-bound assistants embedded in the connected portal. Disabled by default; a surface
+    # must be listed explicitly (comma-separated) before it can be reached.
+    assistants_enabled: bool = Field(default=False, alias="NORTHWIND_ASSISTANTS_ENABLED")
+    assistant_surfaces: str = Field(default="", alias="NORTHWIND_ASSISTANT_SURFACES")
+    assistant_model: str = Field(default="", alias="NORTHWIND_ASSISTANT_MODEL")
+    assistant_timeout: int = Field(default=60, ge=5, le=180, alias="NORTHWIND_ASSISTANT_TIMEOUT_SECONDS")
+    assistant_max_tool_calls: int = Field(default=6, ge=1, le=12, alias="NORTHWIND_ASSISTANT_MAX_TOOL_CALLS")
+    assistant_concurrency: int = Field(default=4, ge=1, le=16, alias="NORTHWIND_ASSISTANT_MAX_CONCURRENT_REQUESTS")
+    assistant_history_ttl_seconds: int = Field(default=86400, ge=300, le=604800, alias="NORTHWIND_ASSISTANT_HISTORY_TTL_SECONDS")
+    # Customer help center (extractive Search RAG over an audience-isolated index).
+    help_center_index: str = Field(default="nw-insurance-help-customer-v1", alias="NORTHWIND_HELP_CENTER_INDEX")
+    help_center_search_endpoint: str = Field(default="", alias="NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT")
+    help_center_search_auth: Literal["entra_id", "query_key"] = Field(default="entra_id", alias="NORTHWIND_HELP_CENTER_SEARCH_AUTH")
+    help_center_query_key: SecretStr = Field(default=SecretStr(""), alias="NORTHWIND_HELP_CENTER_SEARCH_QUERY_KEY")
+
     # Observability
     appinsights_connection_string: str = Field(default="", alias="APPLICATIONINSIGHTS_CONNECTION_STRING")
 

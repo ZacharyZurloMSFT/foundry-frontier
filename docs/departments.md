@@ -23,6 +23,22 @@ Internal slugs `order-concierge`, `employee-help-desk`, `claims-warranty` and
 
 ## Active insurance surfaces and rollout boundary
 
+In the signed-in portal, AI is **embedded in the sections it helps with** rather than
+hosted in a separate workspace: the policyholder Claims Concierge sits in Policies,
+My claims and each claim, and reads only the caller's own records, while the customer
+Help Center (a Help center tab and a collapsed panel beside Report a loss) answers general
+questions from published help articles and reads no records. Both run through an
+identity-bound API (`/api/v1/assistants`, see
+[architecture](./architecture.md#identity-bound-embedded-assistants)). The Help Center's
+articles live under the `employee-help-desk` department
+(`seed/customer/*.md`, published to their own `nw-insurance-help-customer-v1` index by
+`scripts/publish-customer-help.py`); that department's HR and IT corpus stays in the
+legacy shell and is never offered to customers. The department
+tabs described below (multi-agent chat, Approvals, Document Intelligence, support chat,
+contact center, bake-off, safety) remain in the legacy shell
+(`VITE_INSURANCE_BUSINESS_ENABLED=false`); staff-facing assistants and Approvals will be
+embedded in their own sections in a later release.
+
 Claims / Policies loads synthetic policyholders, auto policies, coverage
 schedules, endorsements, loss dates and evidence from `GET /insurance/fixtures`.
 It prepares `POST /insurance/actions/draft` payloads with linked claim,
@@ -179,6 +195,32 @@ and workflow-bound, pending-only action persistence. No additional Foundry
 project or Container App is
 provisioned. `COPILOT_HARNESS_ENABLED` controls execution independently of
 workspace visibility.
+
+## Adding an embedded assistant surface
+
+Assistants in the portal are surfaces, not departments, so they need no Foundry project
+or Bicep change:
+
+1. Add a profile to `apps/api/app/assistants/profiles.py` (roles, department stamp,
+   tool allowlist, suggestions, and `kind`: `scoped_tools` for assistants that read a
+   caller's records, `extractive_help` for assistants that quote a document corpus) and a
+   prompt in `agents/insurance/assistants/<surface>.yaml`
+   whose `surface:` matches the profile (use `_` in the id and `-` in the file name).
+   `scripts/bundle-harness-assets.py` packages and SHA-stamps it.
+2. Give customer roles customer-safe tools only: ids as arguments, whitelisted
+   projections, no identity, no writes. Extend `ToolBox` rather than reading storage
+   from a handler.
+3. For a document corpus, publish an **audience-isolated** index (one index per
+   audience, never a filter on a shared index) with a publisher script modelled on
+   `scripts/publish-customer-help.py` (preview by default, `--apply` only writes the
+   publisher-owned index), and map the surface to it on the server. A help desk for staff
+   would reuse `extractive_help` with its own index, prompt and roles.
+4. Mount `<AssistantPanel surface="..." context={...} />` in the section it helps with
+   (or `<AssistantDisclosure>` beside a form; never inside one, because the panel has its
+   own form); it renders only when `/api/v1/assistants/status` lists the surface for the caller.
+5. Add golden rows to `data/golden/assistant.jsonl` (including scope, injection and
+   determination bait) and make the offline tests pass before enabling the surface in
+   `NORTHWIND_ASSISTANT_SURFACES`.
 
 ## Adding a new department
 

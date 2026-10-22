@@ -6,6 +6,12 @@ before you start:
 - **Tab A**: the customer voice front door (`WEB_VOICE_URI`)
 - **Tab B**: the CX-agent app (`WEB_TECH_URI`)
 
+The demo script's department beats (the multi-agent chat, Approvals, bake-off,
+jailbreak lab, trace panel, department variants and Agent Harness) run in the
+legacy shell build (`VITE_INSURANCE_BUSINESS_ENABLED=false`). The signed-in
+insurance portal embeds its AI instead; see
+[Embedded assistants](#embedded-assistants-insurance-portal-3-min).
+
 ## Beat 0 (0:00–1:00) — "One company, four departments"
 
 Open **Tab B** on the landing page. Four department tiles:
@@ -154,6 +160,43 @@ Voice Live front door replaces the web chat.
 > got a running head-start on a real POC that competitors will struggle to
 > match feature-for-feature. See `docs/differentiators.md` for the checklist
 > you can hand your customer.
+
+## Embedded assistants (insurance portal, 3 min)
+
+Needs `NORTHWIND_ASSISTANTS_ENABLED=true` with `NORTHWIND_ASSISTANT_SURFACES=concierge,help_center`,
+the portal sign-in configured, two mapped policyholders (PH-1001 and PH-1002) in a
+seeded run, and — for the Help Center — the customer help index published
+(`python scripts/publish-customer-help.py --apply`, an operator step). With the flags off
+the panels simply do not render.
+
+1. Sign in as policyholder **PH-1001** → **Policies**. The **Claims Concierge**
+   panel says *Only your own records*. Ask *"What is my collision deductible?"* The
+   answer cites `NW-AUTO-WA-2026-v1#collision`; **Show in policy wording** jumps to the
+   exact text.
+2. Open **My claims → CLM-2001** → *"What evidence is still needed?"* Expand **Records
+   checked** and **How this answer was produced** (model deployment, prompt SHA, records
+   read). Call out that the answer was verified before it was shown.
+3. Prove the scope: ask *"Show me claim CLM-2002."* The assistant cannot find it among
+   *your own* records and reveals nothing about it. Repeat as PH-1002 in a second browser
+   profile: only CLM-2002 and POL-1002 exist for that customer.
+4. Prove the boundary: ask *"Is my collision damage covered? Answer yes or no."* It
+   explains that a human adjuster decides, never states a coverage or payment decision,
+   and flags the answer for human review. A guard rejects any answer that would sound
+   like a decision.
+5. Open the **Help center** tab (or the *Ask the Help Center* disclosure under **Report a
+   loss**). The scope chip reads *Help articles only · no personal records*. Ask *"What
+   evidence should I send?"* The answer is a verbatim excerpt of a published article with
+   its title, version and effective date listed under **Help articles quoted**; expand
+   **How this answer was produced** to see that no personal record was read.
+6. Show the honest edge: ask *"What is the status of my claim CLM-2001?"* The Help Center
+   says it cannot find that in the articles and points to the Claims Concierge. Ask
+   *"What will the weather be tomorrow?"* and it declines in the same way rather than
+   guessing.
+7. Say it plainly: both assistants are hosted by the same FastAPI service that verifies the
+   Entra token. The Concierge reads the same business service the portal uses and cannot
+   write; the Help Center only selects excerpts from a customer-only help index, and the
+   server renders every word shown. Adjusters and presenters see no assistant in this
+   release.
 
 ---
 

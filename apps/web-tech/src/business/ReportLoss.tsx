@@ -3,6 +3,7 @@ import { BusinessApi, BusinessError } from "./api";
 import { ClaimRecord, Identity, LossReport, Page, PolicySnapshot } from "./models";
 import { clearConfirmedCommand, prepareReportCommand, readCommand, reportStorageKey, ReportStorageError } from "./reportRetry";
 import { ErrorNotice, Loading, Pager } from "./shared";
+import AssistantDisclosure from "./assistants/AssistantDisclosure";
 
 export function validateLossReport(report: LossReport, today = new Date().toISOString().slice(0, 10)): string | null {
   if (!report.policy_id || !report.vehicle_id) return "Choose an available policy and its insured vehicle.";
@@ -104,8 +105,10 @@ export default function ReportLoss({ api, identity, initialPolicy, onCreated, on
         <small id="loss-description-help">{description.length}/2,000 characters. Include only synthetic incident facts.</small>
       </fieldset>
       <label className="business-check"><input type="checkbox" required checked={acknowledged} disabled={busy} onChange={e => setAcknowledged(e.target.checked)} />I understand this is a synthetic insurance demonstration and confirm this report contains synthetic information only.</label>
-      <p className="business-muted">After reporting, open the case to attach synthetic evidence when enabled. An assistant and voice are not integrated in this journey. No external messages are sent.</p>
+      <p className="business-muted">After reporting, open the case to attach synthetic evidence when enabled. You write and submit this report yourself: assistant filling and voice are not part of this form, and no assistant can see what you type here. No external messages are sent.</p>
       <button className="business-primary" type="submit" disabled={busy || !policy || !acknowledged || storageBlocked}>{busy ? "Submitting report…" : pending ? "Explicitly retry this exact report" : "Submit loss report"}</button>
     </form>
+    <AssistantDisclosure surface="help_center" summary="Questions about reporting a loss? Ask the Help Center"
+      note="The Help Center answers general questions from published help articles. It cannot see this form, your policy or your claims, so do not enter personal details." />
   </section>;
 }

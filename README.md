@@ -58,10 +58,11 @@ existing key authentication alongside Azure AD. The CU analyzer
 the Foundry account default project was not changed.
 
 Capability switches are `ADJUSTER_SUPPORT_ENABLED`, `COPILOT_HARNESS_ENABLED`,
-`NORTHWIND_CU_ENABLED`, `VOICE_LIVE_ENABLED` and `VOICE_LIVE_READY`. Keep
-them disabled until their real dependencies and supported transport are
-verified. CU upload limit is 10 MiB; extracted facts still require human
-review, especially missing or low-confidence fields.
+`NORTHWIND_CU_ENABLED`, `VOICE_LIVE_ENABLED`, `VOICE_LIVE_READY` and
+`NORTHWIND_ASSISTANTS_ENABLED` with an explicit `NORTHWIND_ASSISTANT_SURFACES`
+allowlist. Keep them disabled until their real dependencies and supported
+transport are verified. CU upload limit is 10 MiB; extracted facts still require
+human review, especially missing or low-confidence fields.
 
 ### Connected manual business journey (deployed, activation gated)
 
@@ -264,11 +265,15 @@ profile remains read-only and does not update the existing API's environment or
 ingress policy; any eventual activation requires an explicitly scoped deployment.
 
 **Still pending:** private Storage/DNS activation, real sign-in and durable
-evidence/worker activation, assistant/MCP/voice migration to dynamic scoped claims,
+evidence/worker activation, MCP/voice migration to dynamic scoped claims and
+staff-facing assistants (the policyholder Claims Concierge and customer Help Center
+already read dynamic, identity-scoped claims or published help articles; see
+[Embedded assistants](#embedded-assistants-identity-bound)),
 review/application commands, presenter reset, retention and release acceptance.
-The new manual portal deliberately does not call legacy fixture-based agents,
-employee knowledge or technical labs for new claims. Do not present it as a full
-PRD release or as certified live identity/voice/evidence acceptance.
+The manual portal never calls the legacy fixture-based agents or the HR/IT
+employee knowledge; its embedded assistants use their own identity-bound API.
+Do not present it as a full PRD release or as certified live
+identity/voice/evidence acceptance.
 
 Do not run an unscoped `azd up` against the migrated deployment. Use the
 split-group reuse profile and scoped app deployments below. Insurance agents
@@ -458,7 +463,55 @@ runtime's dependency set; use an isolated environment for `agents/hosted/require
 
 ## Insurance portal with Entra sign-in
 
-The insurer-branded portal is now the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting; adjusters and presenters additionally get an **AI workspace** (claims concierge, document intelligence, approvals, bake-off, safety). The Agent Harness UI has been removed from the web app for now. The portal passes its Entra access token to the AI workspace's API calls. Backend enforcement of that token on the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …) is not yet implemented.
+The insurer-branded portal is the default web experience (set `VITE_INSURANCE_BUSINESS_ENABLED=false` to fall back to the legacy department-tile shell). Configure the Entra IDs produced by `scripts/configure-insurance-identity.py` to enable sign-in. Public pages are branded for Northwind Insurance; after Microsoft Entra sign-in the server-assigned role decides what you see: policyholders get policies, claims and loss reporting, plus the embedded assistants below when the operator enables them; adjusters and presenters get the manual case workbench and claim documents/evidence review. The portal no longer has a separate "AI workspace" tab. The claims concierge, document intelligence, approvals, bake-off and safety tabs remain only in the legacy shell until staff-facing assistants and approvals are embedded in their own sections. The Agent Harness UI has been removed from the web app for now. The portal does not call the legacy AI endpoints (`/chat`, `/hitl`, `/voice`, …); backend enforcement of Entra tokens on those endpoints is not yet implemented, so they are for the legacy shell only.
+
+## Embedded assistants (identity-bound)
+
+AI is embedded where the work happens instead of living in one workspace. Two assistants ship for policyholders:
+
+| Where | Assistant | What it answers | Scope the server enforces |
+| --- | --- | --- | --- |
+| Policies | Claims Concierge | "What does my coverage say?" | the caller's own policies only |
+| Policy detail | Claims Concierge | questions pinned to one policy | that policy, only if it is the caller's |
+| My claims | Claims Concierge | "Where do my claims stand?" | the caller's own claims, customer-visible fields only |
+| Claim detail | Claims Concierge | status, outstanding evidence, review flags, next steps | that claim's customer view plus the wording recorded with it |
+| Help center tab, Report a loss | Help Center | general how-tos: reporting a loss, evidence, deductibles, rental and towing, billing, privacy, how the assistants work | the published customer help articles only; no personal record is read |
+
+Design (see [architecture](./docs/architecture.md#identity-bound-embedded-assistants)):
+
+- FastAPI verifies the Entra token, resolves the caller's role and policyholder from the run mapping, and binds the model's tools to that caller. Request bodies and model arguments can never supply an identity; record hints are re-authorised before any model call, and foreign ids look exactly like missing ones.
+- Tools return whitelisted projections of the customer view (no internal notes, internal timeline notes, author/actor ids, assigned adjuster or contact details). A turn reads one immutable run snapshot and cannot write.
+- An answer is shown only after it parses, cites only wording the model was shown, names only records it read, and avoids coverage/claim/payment determinations. Any failure produces an error event and no answer, and failed turns are not saved.
+- Conversations are owner-bound, bounded, expire (Cosmos `ttl`) and are never stored in browser storage.
+- The panel shows its scope, the records it checked, the cited wording (linked to the policy text) and the model and prompt version behind each answer.
+
+Routes (same bearer token and `X-Demo-Run` as the rest of `/api/v1`): `GET /api/v1/assistants/status` lists the surfaces the caller's role may use (the UI renders nothing otherwise) and `POST /api/v1/assistants/{surface}/chat` streams NDJSON events (`session`, `tool`, `assistant_delta`, `citations` or `sources`, `error`, `done`).
+
+### Help Center (customer help articles)
+
+The Help Center replaces the old HR-document assistant for customers: it answers general questions from **published help articles** instead of any personal record.
+
+- Content is source-controlled in `data/northwind/departments/employee-help-desk/seed/customer/*.md` (twelve fictional articles: claim steps, evidence, deductibles and limits, reading a policy, rental and towing, billing, privacy, contacting a person, glossary, the assistants) and is published to its own Azure AI Search index, `nw-insurance-help-customer-v1`, filtered on `publisher`, `business_domain`, `synthetic` and `audience eq 'customer'`. The adjuster/HR/IT index is never queried.
+- `python scripts/publish-customer-help.py` previews (no network, no writes); `--apply` creates or refreshes only that publisher-owned index and is an operator action from a network that can reach Search (Entra auth by default).
+- The model only **selects** exact excerpts. The server checks every excerpt is a verbatim substring of a retrieved article, renders all the text shown, and returns the quoted articles as a `sources` event (title, version, effective date). When nothing matches, or the question is about the caller's own policy or claim or asks for a decision, the answer is one fixed message that points to the Claims Concierge or Northwind Claims. Answers that read like a coverage, claim or payment decision are withheld, as for the Concierge.
+- It reads no record, rejects claim and policy hints with a typed `422`, and keeps the same owner-bound, expiring history and one-request-per-actor limit.
+
+| Assistant configuration | Default and boundary |
+| --- | --- |
+| `NORTHWIND_ASSISTANTS_ENABLED` | `false`; master switch |
+| `NORTHWIND_ASSISTANT_SURFACES` | empty; explicit comma-separated allowlist, for example `concierge,help_center` |
+| `NORTHWIND_ASSISTANT_MODEL` | empty; defaults to `FOUNDRY_PLANNER_DEPLOYMENT` |
+| `NORTHWIND_ASSISTANT_TIMEOUT_SECONDS` | `60` (5–180) |
+| `NORTHWIND_ASSISTANT_MAX_TOOL_CALLS` | `6` (1–12); Concierge only |
+| `NORTHWIND_ASSISTANT_MAX_CONCURRENT_REQUESTS` | `4` (1–16); one request per actor at a time |
+| `NORTHWIND_ASSISTANT_HISTORY_TTL_SECONDS` | `86400` (300–604800) |
+| `NORTHWIND_HELP_CENTER_INDEX` | `nw-insurance-help-customer-v1`; any other value makes the Help Center unavailable |
+| `NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT` | empty; falls back to `AZURE_SEARCH_ENDPOINT` (HTTPS, no path) |
+| `NORTHWIND_HELP_CENTER_SEARCH_AUTH` | `entra_id`; or `query_key` with `NORTHWIND_HELP_CENTER_SEARCH_QUERY_KEY` (no automatic key fallback) |
+
+The assistants also need `NORTHWIND_BUSINESS_DOMAIN=insurance`, the business API and sign-in configuration above, a `FOUNDRY_PROJECT_ENDPOINT` with a deployment the managed identity may call, and Cosmos; the Help Center additionally needs the published index and read access to it for the API's identity. The status route reports configuration, not verified inference: a real run is an operator action within the existing spend approvals. Prompts are source-controlled in `agents/insurance/assistants/` and packaged and SHA-stamped by `scripts/bundle-harness-assets.py`. No Bicep or `azd up` change is required: set the variables on the existing Container App through a scoped release, and keep them disabled until negative access has been rehearsed with two real policyholders.
+
+Evaluate with `python evals/assistant_eval.py --self-check` (offline), or grade a recorded or live run against the golden set `data/golden/assistant.jsonl` (Concierge scoping plus Help Center grounding, no-match, personal-record, decision and injection rows); see [evals/README.md](./evals/README.md#identity-bound-assistants). `evals/baseline.json` is intentionally unchanged until a reviewer approves live numbers.
 
 ## Agent Harness (opt-in)
 
@@ -696,7 +749,7 @@ data/
     company.yaml               Top-level manifest (company + 4 departments)
     departments/
       order-concierge/         Points back at data/seed + data/golden + agents/
-      employee-help-desk/      HR/IT corpus + hr-assistant prompt agent
+      employee-help-desk/      HR/IT corpus + hr-assistant prompt agent; seed/customer = customer Help Center articles
       claims-warranty/         Claims corpus + CU analyzer + triage agent
       contact-center/          Call scripts + intent classifier + Voice Live prompts
 pipelines/

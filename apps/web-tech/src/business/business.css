@@ -198,5 +198,27 @@ html[data-theme="dark"][data-insurance-business="true"] {
 .business-trust li { display: flex; flex-direction: column; gap: 4px; }
 .business-trust strong { font-size: 1.25rem; color: var(--cp-accent); }
 .business-trust span { color: var(--cp-text-muted); font-size: 0.9rem; }
-.business-staff-workspace { border: 1px solid var(--cp-border); border-radius: 12px; overflow: hidden; min-height: 70vh; }
+.business-assistant { display: grid; gap: 16px; border-color: var(--cp-accent); }
+.business-assistant > * { margin: 0; }
+.business-assistant .business-heading { margin-bottom: 0; }
+.business-assistant-log { display: grid; gap: 16px; max-height: 520px; overflow-y: auto; padding: 4px; }
+.business-assistant-log:empty { display: none; }
+.business-assistant-turn { display: grid; gap: 12px; border-top: 1px solid var(--cp-border); padding-top: 16px; }
+.business-assistant-turn:first-child { border-top: none; padding-top: 0; }
+.business-assistant-turn p { margin: 0; }
+.business-assistant-question { background: var(--cp-surface-soft); border-radius: 0.625rem; padding: 12px 16px; overflow-wrap: anywhere; }
+.business-assistant-answer { border-left: 3px solid var(--cp-accent); padding-left: 16px; display: grid; gap: 12px; }
+.business-assistant-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; font-size: .8125rem; color: var(--cp-text-muted); }
+.business-assistant-steps .business-badge { text-transform: none; }
+.business-assistant-sources { border: 1px solid var(--cp-border); border-radius: 0.625rem; padding: 12px 16px; }
+.business-assistant-sources[open] > summary { margin-bottom: 12px; }
+.business-assistant-sources .business-facts { margin: 0 0 12px; }
+.business-assistant-chips button { font-size: .875rem; text-align: left; }
+.business-assistant textarea { margin-bottom: 12px; }
+.business-assistant-unavailable { border-style: dashed; }
+.business-help-sources { border: 1px solid var(--cp-border); border-radius: 0.625rem; padding: 12px 16px; font-size: .875rem; }
+.business-help-sources ul { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.business-assistant-disclosure { border: 1px solid var(--cp-border); border-radius: 0.625rem; padding: 12px 16px; margin-top: 16px; }
+.business-assistant-disclosure > summary { cursor: pointer; font-weight: 600; }
+.business-assistant-disclosure[open] > summary { margin-bottom: 12px; }
 @media (max-width: 720px) { .business-trust ul { grid-template-columns: 1fr 1fr; } }

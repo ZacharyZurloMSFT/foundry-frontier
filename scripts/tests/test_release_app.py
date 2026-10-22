@@ -442,6 +442,9 @@ def test_existing_rollback_is_never_overwritten(record):
     (["apps/mcp-work-order/app/main.py"], ["mcp-work-order"]),
     (["scripts/bundle-harness-assets.py"], list(release_app.SERVICES)),
     (["agents/copilot-harness/instructions.prompty"], list(release_app.SERVICES)),
+    (["agents/insurance/assistants/concierge.yaml"], ["api"]),
+    (["agents/insurance/assistants/help-center.yaml", "apps/web-tech/src/business/HelpCenter.tsx"], ["api", "web-tech"]),
+    (["agents/insurance/other/notes.yaml"], []),
     ([".github/workflows/deploy-apps.yml"], list(release_app.SERVICES)),
     (["apps/web-tech-evil/anything"], []),
 ])

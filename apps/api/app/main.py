@@ -31,6 +31,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .bakeoff import ModelSpec, stream_bakeoff
+from .assistants.routes import router as assistants_router
 from .business.routes import router as business_router
 from .adjuster_support import SupportRequest, router as adjuster_router, support_chat
 from .company import (
@@ -51,6 +52,7 @@ from .observability import (
 )
 from .orchestrator_client import ask_single_turn, run_agent_turn, run_turn
 from .repositories import (
+    ASSISTANT_SESSION_PREFIX,
     append_message,
     delete_hitl,
     list_hitl_pending,
@@ -83,6 +85,7 @@ app.include_router(claims_router)
 app.include_router(voice_router)
 app.include_router(adjuster_router)
 app.include_router(business_router)
+app.include_router(assistants_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -263,6 +266,9 @@ async def new_session() -> dict:
 
 @app.get("/session/{sid}/messages")
 async def get_messages(sid: str) -> dict:
+    # No caller identity here, so owner-bound assistant transcripts are never served by this legacy route.
+    if sid.startswith(ASSISTANT_SESSION_PREFIX):
+        raise HTTPException(404, "Session not found.")
     return {"messages": await load_conversation(sid)}
 
 
