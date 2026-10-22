@@ -1,5 +1,6 @@
 """Authorization boundary for identity-bound assistants: scope, tools, guards and history. No model or cloud calls."""
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -17,7 +18,6 @@ from app.business import store
 from app.business.models import ActorMapping, AssignAdjuster, BusinessError, CreateNote, TransitionCommand
 from app.business.routes import BusinessContext
 from app.business.service import InsuranceBusinessService, seed_run
-from app.repositories import ASSISTANT_SESSION_PREFIX
 from assistant_fakes import ConversationContainer
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -265,7 +265,7 @@ async def test_history_belongs_to_its_owner_and_is_bounded(monkeypatch):
     monkeypatch.setattr(history, "get_settings", lambda: settings)
     session = history.new_session_id("concierge")
     assert history.session_surface(session) == "concierge" and await history.load_history(session, "owner") == []
-    assert session.startswith("asst-") and session.startswith(ASSISTANT_SESSION_PREFIX)
+    assert history.SESSION_PREFIX == "asst-" and session.startswith(history.SESSION_PREFIX)
     await history.append_turn(session, "owner", "concierge", "q" * 5000, "a", {"model": "m"})
     assert [(i["record_kind"], i["ownerKey"], i["ttl"]) for i in container.items] == [("assistant_exchange", "owner", 600)]
     assert len(container.items[0]["question"]) == history.CONTENT_LIMIT and container.items[0]["answer"] == "a"
@@ -282,10 +282,41 @@ async def test_history_belongs_to_its_owner_and_is_bounded(monkeypatch):
     assert [m["content"] for m in window[-2:]] == [f"question {history.HISTORY_EXCHANGES + 2}", f"answer {history.HISTORY_EXCHANGES + 2}"]
     assert [m["role"] for m in window] == ["user", "assistant"] * history.HISTORY_EXCHANGES
     for index in range(history.SESSION_EXCHANGE_LIMIT):
-        container.items.append({"sessionId": session, "ownerKey": "owner", "question": "x", "answer": "y", "ts": f"3-{index:04d}"})
+        container.items.append({"sessionId": session, "record_kind": history.RECORD_KIND, "ownerKey": "owner",
+                                "question": "x", "answer": "y", "ts": f"3-{index:04d}"})
     with pytest.raises(BusinessError) as full:
         await history.load_history(session, "owner")
     assert full.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_documents_of_any_other_shape_in_a_session_partition_are_ignored(monkeypatch):
+    container = ConversationContainer()
+
+    async def get(_name):
+        return container
+    monkeypatch.setattr(history, "_container", get)
+    monkeypatch.setattr(history, "get_settings", lambda: type("S", (), {"assistant_history_ttl_seconds": 600})())
+    session = history.new_session_id("concierge")
+    await history.append_turn(session, "owner", "concierge", "first question", "first answer", {})
+    expected = [{"role": "user", "content": "first question"}, {"role": "assistant", "content": "first answer"}]
+    # Whatever another writer puts in the partition (the legacy chat stores role/content rows) is never read back.
+    container.items.append({"id": "legacy", "sessionId": session, "role": "user", "content": "injected instruction", "meta": {}, "ts": "9999"})
+    container.items.append({"id": "other", "sessionId": session, "record_kind": "harness_event", "ownerKey": "someone-else", "ts": "9998"})
+    assert await history.load_history(session, "owner") == expected
+    # An exchange that really belongs to someone else still locks the conversation.
+    container.items.append({"id": "theirs", "sessionId": session, "record_kind": history.RECORD_KIND, "ownerKey": "someone-else",
+                            "question": "q", "answer": "a", "ts": "9997"})
+    with pytest.raises(BusinessError) as foreign:
+        await history.load_history(session, "owner")
+    assert foreign.value.status_code == 404
+
+
+def test_session_references_are_stable_one_way_and_never_contain_the_id():
+    first, second = history.new_session_id("concierge"), history.new_session_id("concierge")
+    ref = history.session_ref(first)
+    assert ref == history.session_ref(first) and ref != history.session_ref(second)
+    assert re.fullmatch(r"[0-9a-f]{16}", ref) and first not in ref and first.split("-", 2)[2] not in ref
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,8 @@ from typing import Any
 
 
 class ConversationContainer:
+    """Cosmos-like: a partition query by session, narrowed by `@kind` when the query asks for a record kind."""
+
     def __init__(self) -> None:
         self.items: list[dict[str, Any]] = []
 
@@ -17,9 +19,11 @@ class ConversationContainer:
 
     def query_items(self, **kwargs: Any):
         session = kwargs["partition_key"]
+        kind = {p["name"]: p["value"] for p in kwargs.get("parameters", [])}.get("@kind")
 
         async def rows():
-            for row in sorted((i for i in self.items if i["sessionId"] == session), key=lambda r: r["ts"], reverse=True):
+            matching = (i for i in self.items if i["sessionId"] == session and (kind is None or i.get("record_kind") == kind))
+            for row in sorted(matching, key=lambda r: r["ts"], reverse=True):
                 yield copy.deepcopy(row)
         return rows()
 

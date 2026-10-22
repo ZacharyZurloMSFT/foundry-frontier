@@ -26,19 +26,7 @@ def _now() -> str:
 
 
 # ── Conversations ──────────────────────────────────────────────────────────
-# Assistant transcripts are owner-bound and are served only by /api/v1/assistants. The legacy helpers below
-# have no caller identity, so they must never read or write one, even for a caller who knows a session id.
-ASSISTANT_SESSION_PREFIX = "asst-"
-
-
-def _legacy_session(session_id: str) -> str:
-    if session_id.startswith(ASSISTANT_SESSION_PREFIX):
-        raise PermissionError("Assistant conversations are not available through legacy session APIs.")
-    return session_id
-
-
 async def append_message(session_id: str, role: str, content: str, meta: dict | None = None) -> dict:
-    _legacy_session(session_id)
     c = await _container("conversations")
     item = {
         "id": str(uuid.uuid4()),
@@ -50,18 +38,6 @@ async def append_message(session_id: str, role: str, content: str, meta: dict | 
     }
     await c.create_item(item)
     return item
-
-
-async def load_conversation(session_id: str, limit: int = 50) -> list[dict]:
-    _legacy_session(session_id)
-    c = await _container("conversations")
-    query = ("SELECT * FROM c WHERE c.sessionId = @sid AND NOT IS_DEFINED(c.ownerKey) "
-             "ORDER BY c.ts ASC OFFSET 0 LIMIT @lim")
-    params = [{"name": "@sid", "value": session_id}, {"name": "@lim", "value": limit}]
-    items: list[dict] = []
-    async for item in c.query_items(query=query, parameters=params, partition_key=session_id):
-        items.append(item)
-    return items
 
 
 # ── Workflow state ─────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ from ..settings import get_settings
 from .guards import GuardFailure, strip_fence, unsafe_determination
 from .models import Contract, DeltaEvent, DoneEvent, HelpSource, Provenance, SourcesEvent
 from .profiles import HELP_INDEX, AssistantProfile, load_prompt, model_name
-from .runtime import MAX_OUTPUT_TOKENS, TurnTrace, failure_event, message_item, require_completed
+from .runtime import MAX_OUTPUT_TOKENS, TurnTrace, message_item, require_completed
 from .scope import Caller
 
 INDEX = HELP_INDEX
@@ -235,8 +235,7 @@ async def run_help_turn(
         turn.outcome = "cancelled"
         raise
     except Exception as error:  # noqa: BLE001 - every provider/SDK failure fails closed with a bounded stream
-        turn.outcome, event = failure_event(error, stage, session_id)
-        yield event
+        yield turn.fail(error, stage)
         yield DoneEvent()
     finally:
         turn.close()

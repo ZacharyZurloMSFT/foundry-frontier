@@ -321,13 +321,19 @@ sequenceDiagram
   (`ownerKey`), bounded and TTL'd. An exchange (question and answer) is one Cosmos
   document written only after the answer passed every check, so a blocked or failed
   attempt, or a failed save, never leaves a question behind to become model context.
-  The legacy `/session/{sid}/messages` route and `append_message`/`load_conversation`
-  refuse `asst-` ids, because they have no caller identity. Transcripts stay in memory
-  in the browser and are cleared when the signed-in actor changes.
+  Transcripts are readable only through the authenticated assistants API: the
+  unauthenticated legacy session endpoints (`POST /session`,
+  `GET /session/{sid}/messages`) and their `load_conversation` helper were deleted, and
+  history reads select only `assistant_exchange` documents, so a row another writer
+  (such as the legacy chat) puts in a session's partition is ignored rather than
+  trusted. Transcripts stay in memory in the browser and are cleared when the signed-in
+  actor changes.
 - **Capacity.** One in-flight request per actor and a global limit; reservations
   are released when a stream ends, errors or is cancelled.
-- **Observability.** `assistant.turn` spans carry surface, role, a hashed actor,
-  tool-call count and outcome; `AI-conversation` log records carry metadata only. Each
+- **Observability.** `assistant.turn` spans carry surface, role, a hashed actor, a
+  one-way session reference (`assistant.session`, a SHA-256 prefix; the session id itself
+  never reaches telemetry, so it cannot be used to look a conversation up), tool-call
+  count and outcome; `AI-conversation` log records carry the same metadata only. Each
   answer's model deployment and prompt SHA (stamped by
   `scripts/bundle-harness-assets.py`) are shown in the UI.
 - **Surfaces.** A surface is a profile in `profiles.py` (roles, tools, prompt, department

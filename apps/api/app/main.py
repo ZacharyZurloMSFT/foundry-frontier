@@ -52,12 +52,10 @@ from .observability import (
 )
 from .orchestrator_client import ask_single_turn, run_agent_turn, run_turn
 from .repositories import (
-    ASSISTANT_SESSION_PREFIX,
     append_message,
     delete_hitl,
     list_hitl_pending,
     list_hitl_resolved,
-    load_conversation,
     resolve_hitl,
 )
 from .safety import CANNED_ATTACKS
@@ -257,19 +255,6 @@ async def handoff(
             yield (json.dumps(event) + "\n").encode()
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
-
-
-@app.post("/session")
-async def new_session() -> dict:
-    return {"session_id": str(uuid.uuid4())}
-
-
-@app.get("/session/{sid}/messages")
-async def get_messages(sid: str) -> dict:
-    # No caller identity here, so owner-bound assistant transcripts are never served by this legacy route.
-    if sid.startswith(ASSISTANT_SESSION_PREFIX):
-        raise HTTPException(404, "Session not found.")
-    return {"messages": await load_conversation(sid)}
 
 
 @app.post("/chat")

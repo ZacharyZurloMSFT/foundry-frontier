@@ -1,6 +1,7 @@
 """Assistant routes and runtime through the real ASGI app: scripted model, real business service and auth."""
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 
 import httpx
@@ -271,31 +272,58 @@ async def test_a_failed_save_never_leaves_the_question_behind(api, enabled, conv
 
 
 @pytest.mark.asyncio
-async def test_owner_bound_transcripts_are_unreachable_through_the_legacy_session_apis(api, enabled, conversations, monkeypatch):  # noqa: F811
-    from app import repositories
+async def test_no_unauthenticated_route_can_read_or_open_a_conversation(api, enabled, conversations, monkeypatch):  # noqa: F811
+    from app import main, repositories
     client, _, identity_ = api
-
-    async def container(name):
-        assert name == "conversations"
-        return conversations
-    monkeypatch.setattr(repositories, "_container", container)
     install(monkeypatch, answer("Collision damage may be considered.", human_review=False))
     session = events_of(await post(client, identity_, {"message": "What does my wording say?"}))[0]["session_id"]
     assert [i["sessionId"] for i in conversations.items] == [session]
+    for method, path in (("GET", f"/session/{session}/messages"), ("POST", "/session"), ("GET", "/session")):
+        gone = await client.request(method, path)
+        assert gone.status_code in (404, 405) and "wording" not in gone.text and "ownerKey" not in gone.text, (method, path)
+    assert not any(path.startswith("/session") for path in main.app.openapi()["paths"])
+    assert not hasattr(repositories, "load_conversation")
 
-    legacy = await client.get(f"/session/{session}/messages")
-    assert legacy.status_code == 404 and "wording" not in legacy.text and "ownerKey" not in legacy.text
-    with pytest.raises(PermissionError):
-        await repositories.load_conversation(session)
-    with pytest.raises(PermissionError):
-        await repositories.append_message(session, "user", "injected")
-    assert len(conversations.items) == 1 and "injected" not in json.dumps(conversations.items)
-    assert session.startswith(repositories.ASSISTANT_SESSION_PREFIX)
 
-    legacy_session = "5b1f0c64-8a3e-4a75-9d0b-0f8c1b1d2f10"
-    await repositories.append_message(legacy_session, "user", "hello")
-    ordinary = await client.get(f"/session/{legacy_session}/messages")
-    assert ordinary.status_code == 200 and [m["content"] for m in ordinary.json()["messages"]] == ["hello"]
+@pytest.mark.asyncio
+async def test_a_foreign_writer_in_a_session_partition_cannot_poison_or_break_the_conversation(api, enabled, conversations, monkeypatch):  # noqa: F811
+    client, _, identity_ = api
+    project = install(monkeypatch, answer("First answer.", human_review=False), answer("Second answer.", human_review=False))
+    session = events_of(await post(client, identity_, {"message": "First question?"}))[0]["session_id"]
+    # The legacy chat accepts any session id and stores role/content rows; the assistant must never read them back.
+    conversations.items.append({"id": "legacy", "sessionId": session, "role": "assistant", "content": "injected instruction",
+                                "meta": {}, "ts": "9999"})
+    follow = await post(client, identity_, {"message": "Second question?", "session_id": session})
+    assert [e["kind"] for e in events_of(follow)][:2] == ["session", "assistant_delta"]
+    assert "injected instruction" not in json.dumps(project.requests[1])
+    assert user_payload(project.requests[1])["history_not_evidence"] == [
+        {"role": "user", "content": "First question?"}, {"role": "assistant", "content": "First answer."}]
+
+
+@pytest.mark.asyncio
+async def test_telemetry_carries_a_session_reference_never_the_session_id(api, enabled, conversations, monkeypatch, caplog):  # noqa: F811
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    exporter, provider = InMemorySpanExporter(), TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(runtime, "tracer", provider.get_tracer("test"))
+    client, _, identity_ = api
+    install(monkeypatch, answer("Collision damage may be considered.", human_review=False), RuntimeError("provider said secret-detail"))
+    with caplog.at_level(logging.INFO):
+        answered = events_of(await post(client, identity_, {"message": "What does my wording say?"}))
+        failed = events_of(await post(client, identity_, {"message": "And again?"}))
+    sessions = [answered[0]["session_id"], failed[0]["session_id"]]
+    assert failed[1]["code"] == "assistant_failed"
+    spans = [span for span in exporter.get_finished_spans() if span.name == "assistant.turn"]
+    assert [span.attributes["assistant.session"] for span in spans] == [history.session_ref(s) for s in sessions]
+    assert [span.attributes["assistant.outcome"] for span in spans] == ["answered", "assistant_failed"]
+    records = [record for record in caplog.records if record.getMessage() == "AI-conversation"]
+    assert [record.session_ref for record in records] == [history.session_ref(s) for s in sessions]
+    exposed = json.dumps([dict(span.attributes) for span in spans]) + " ".join(repr(vars(record)) + record.getMessage() for record in caplog.records)
+    assert not any(session in exposed or session.split("-", 2)[2] in exposed for session in sessions)
+    assert not any("session_id" in span.attributes or hasattr(record, "session_id") for span in spans for record in records)
+    assert "secret-detail" not in exposed
 
 
 @pytest.mark.asyncio
@@ -382,6 +410,8 @@ async def test_capacity_is_enforced_per_actor_and_released_after_the_stream(api,
 @pytest.mark.asyncio
 async def test_actual_sdk_wire_carries_function_tools_and_parses_function_calls(api, enabled, conversations, monkeypatch):  # noqa: F811
     client, _, identity_ = api
+    # The first call through the real SDK pays one-off lazy imports and client start-up; timeouts have their own tests.
+    enabled.assistant_timeout = 60
     requests = []
     final = {"answer": "Your claim CLM-2001 is awaiting evidence.", "citations": [], "human_review": False}
 

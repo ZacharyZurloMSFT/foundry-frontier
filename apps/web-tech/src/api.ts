@@ -18,13 +18,8 @@ export function currentDepartmentSlug(): string {
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {});
   if (!headers.has("X-Department")) headers.set("X-Department", currentDepartmentSlug());
-  if (tokenProvider && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${await tokenProvider()}`);
   return fetch(`${API_BASE}${path}`, { ...init, headers });
 }
-
-/** Set by the signed-in insurance portal so staff workspaces send the Entra access token. */
-let tokenProvider: (() => Promise<string>) | null = null;
-export function setApiTokenProvider(provider: (() => Promise<string>) | null) { tokenProvider = provider; }
 
 export interface StreamEvent {
   kind: string;

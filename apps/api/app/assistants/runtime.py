@@ -22,6 +22,7 @@ from ..orchestrator_client import _extract_output_text, _project_client
 from ..settings import get_settings
 from .grounding import Grounding
 from .guards import GuardFailure, parse_answer, vet_answer
+from .history import session_ref
 from .models import CitationsEvent, Contract, DeltaEvent, DoneEvent, ErrorEvent, Provenance, ToolEvent
 from .profiles import AssistantProfile, load_prompt, model_name
 from .scope import ScopedReader
@@ -94,37 +95,46 @@ def stamp_department(profile: AssistantProfile) -> None:
 
 
 class TurnTrace:
-    """One span and one `AI-conversation` log line per turn, closed however the stream ends."""
+    """One span and one `AI-conversation` log line per turn, closed however the stream ends.
+
+    Telemetry never carries the session id: anyone who can read it must not be able to name a conversation.
+    It carries `session_ref`, a one-way reference that an operator can still compute from a reported id.
+    """
 
     def __init__(self, profile: AssistantProfile, role: str, actor_key: str, session_id: str) -> None:
-        self.profile, self.session_id = profile, session_id
+        self.profile, self.session = profile, session_ref(session_id)
         self.outcome, self.calls = "failed", 0
         stamp_department(profile)
         self.span = tracer.start_span("assistant.turn")
         self.span.set_attribute("assistant.surface", profile.surface)
         self.span.set_attribute("assistant.role", role)
         self.span.set_attribute("assistant.actor", actor_key[:12])
-        self.span.set_attribute("session_id", session_id)
+        self.span.set_attribute("assistant.session", self.session)
 
     def active(self) -> AbstractContextManager[Any]:
         """Make the span current around awaited provider calls only; a generator must never yield inside it."""
         return trace.use_span(self.span, end_on_exit=False)
+
+    def fail(self, error: Exception, stage: str) -> ErrorEvent:
+        """Record why the turn failed and return the bounded error to show instead of an answer."""
+        self.outcome, event = failure_event(error, stage, self.session)
+        return event
 
     def close(self) -> None:
         self.span.set_attribute("assistant.outcome", self.outcome)
         self.span.set_attribute("assistant.tool_calls", self.calls)
         self.span.end()
         logger.info("AI-conversation", extra={
-            "assistant": self.profile.surface, "department": self.profile.department, "session_id": self.session_id,
+            "assistant": self.profile.surface, "department": self.profile.department, "session_ref": self.session,
             "workflow": "assistant", "execution_status": self.outcome, "tool_calls": self.calls,
         })
 
 
-def failure_event(error: Exception, stage: str, session_id: str) -> tuple[str, ErrorEvent]:
+def failure_event(error: Exception, stage: str, session: str) -> tuple[str, ErrorEvent]:
     """Map any failure to a bounded error event; nothing a provider or model said is ever repeated."""
     if isinstance(error, GuardFailure):
         return error.code, ErrorEvent(code=error.code, message=error.message)
-    log_failure(logger, "assistant", stage, error, session_id)
+    log_failure(logger, "assistant", stage, error, session)
     if isinstance(error, TimeoutError):
         return "timeout", ErrorEvent(code="timeout", message="The assistant took too long, so nothing was shown. Try again.")
     if is_filtered(error):
@@ -202,8 +212,7 @@ async def run_turn(
         turn.outcome = "cancelled"
         raise
     except Exception as error:  # noqa: BLE001 - every provider/SDK failure fails closed with a bounded stream
-        turn.outcome, event = failure_event(error, stage, session_id)
-        yield event
+        yield turn.fail(error, stage)
         yield DoneEvent()
     finally:
         turn.calls = calls

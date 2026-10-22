@@ -1,17 +1,21 @@
 """Owner-bound conversation history: a session belongs to the actor that created it, and nobody else may read it.
 
 An exchange is stored as one document, so a write either saves the question with its answer or saves nothing.
+Only `assistant_exchange` documents are ever read back: anything else a writer puts in a session's partition is
+ignored, so it can neither become model context nor break the owner's conversation.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..business.models import BusinessError
-from ..repositories import ASSISTANT_SESSION_PREFIX, _container
+from ..repositories import _container
 from ..settings import get_settings
 
+SESSION_PREFIX = "asst-"
 HISTORY_EXCHANGES = 6
 CONTENT_LIMIT = 3000
 SESSION_EXCHANGE_LIMIT = 100
@@ -28,11 +32,16 @@ def _stamp() -> str:
 
 
 def new_session_id(surface: str) -> str:
-    return f"{ASSISTANT_SESSION_PREFIX}{surface}-{uuid.uuid4()}"
+    return f"{SESSION_PREFIX}{surface}-{uuid.uuid4()}"
 
 
 def session_surface(session_id: str) -> str:
     return session_id.split("-", 2)[1]
+
+
+def session_ref(session_id: str) -> str:
+    """The only form of a session id that may reach telemetry: a one-way reference, never the id itself."""
+    return hashlib.sha256(session_id.encode()).hexdigest()[:16]
 
 
 async def load_history(session_id: str, actor_key: str) -> list[dict[str, str]]:
@@ -41,8 +50,9 @@ async def load_history(session_id: str, actor_key: str) -> list[dict[str, str]]:
     rows: list[dict[str, Any]] = [
         row async for row in container.query_items(
             query=(f"SELECT TOP {SESSION_EXCHANGE_LIMIT + 1} c.ownerKey, c.question, c.answer, c.ts FROM c "
-                   "WHERE c.sessionId = @sid ORDER BY c.ts DESC"),
-            parameters=[{"name": "@sid", "value": session_id}], partition_key=session_id,
+                   "WHERE c.sessionId = @sid AND c.record_kind = @kind ORDER BY c.ts DESC"),
+            parameters=[{"name": "@sid", "value": session_id}, {"name": "@kind", "value": RECORD_KIND}],
+            partition_key=session_id,
         )
     ]
     if any(row.get("ownerKey") != actor_key for row in rows):
