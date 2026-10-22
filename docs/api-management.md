@@ -8,24 +8,38 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 [Rollout runbook](#rollout-runbook).
 
 > **Status (2026-10-22).**
-> - **Applied:** `apim-northwind` now publishes all 8 APIs (both stacks), 4 products, the 2
->   agents subscriptions, the logger and per-API diagnostics (51 objects). The first apply ran
->   through the guarded `scripts/apim-release.py` from a clean LF checkout of `main` (same
->   allow-list, plan-hash equality and SHA confirmation as the pipeline) because the pipeline's
->   OIDC setup is blocked, see [Known blocker](#known-blocker-repository-visibility).
-> - Also done: merged in #59 and #60; the five repo-managed apps run the new images (guard
->   deployed, **off**); the gateway identity exists (APIM system-assigned managed identity and
->   the secretless `northwind-gateway` Entra application, whose client ID is the template
->   default for `gatewayAudience`).
+> - **Applied:** `apim-northwind` publishes all 8 APIs (both stacks), 4 products, the 2 agents
+>   subscriptions, the logger and per-API diagnostics. The first apply created 51 objects; a
+>   second followed #61, which added `GET /gateway/status`, so both REST APIs now have 64
+>   operations. Both ran through the guarded `scripts/apim-release.py` from a clean LF checkout
+>   of `main` (same allow-list, plan-hash equality and SHA confirmation as the pipeline)
+>   because the pipeline's OIDC setup is blocked, see
+>   [Known blocker](#known-blocker-repository-visibility).
+> - **Identity:** the APIM system-assigned managed identity and the secretless
+>   `northwind-gateway` Entra application exist; the application's client ID is the template
+>   default for `gatewayAudience`. The five repo-managed apps run images that contain the guard.
+> - **Cut over:** the northwind SPAs (`ca-web-tech`, `ca-web-voice`) are built against
+>   `https://apim-northwind.azure-api.net/northwind` through the repository variable
+>   `NORTHWIND_GATEWAY_URL`.
+> - **Locked down:** every northwind backend: `ca-api`, `ca-mcp-tech-lookup` and
+>   `ca-mcp-work-order` (the two SPAs are public by design). Direct calls get 401
+>   (`gateway_required` on the API), calls through the gateway succeed, and `/health` /
+>   `/healthz` stay open for probes. The `ca-api` harness settings now point at the gateway MCP
+>   URLs with the agents key held as a Container App secret. The guard setting survived a
+>   normal app release (new revision, same variables).
 > - **Verified live:** every public smoke check and the keyed MCP checks (`initialize` and
 >   `tools/list` on all four MCP APIs); 36/36 read-only calls identical direct vs through the
->   gateway; matching error responses; bodies up to 30 MiB; NDJSON streaming is not buffered
->   (`/chat`: first line at 0.6 s, last at 13 s through APIM); the real policy fragment obtains
->   the managed-identity token and the real guard accepts it (live Microsoft signing keys) while
->   rejecting a wrong principal or audience; Foundry authenticates to the gateway, both as a
->   prompt-agent MCP tool through a project connection and through the hosted-agent code path.
-> - **Not done (consumers still call the apps directly, so nothing is locked down):** SPA, harness
->   and Foundry agent cut-over, and the guard. See the runbook and
+>   gateway (before the lock-down); matching error responses; bodies up to 30 MiB; NDJSON
+>   streaming is not buffered (`/chat`: first line at 0.6 s, last at 13 s through APIM); inside
+>   the running container the guard accepts the gateway's managed-identity token (live Microsoft
+>   signing keys) and rejects direct calls, a spoofed token header, a wrong principal and a wrong
+>   audience; `apim-smoke.py --stack northwind --expect-lockdown` passes in full (24 passes, 1 skip
+>   because Voice Live is not ready on that stack) and the insurance smoke still passes; Foundry
+>   authenticates to the gateway, both as a prompt-agent MCP tool through a project connection
+>   and through the hosted-agent code path.
+> - **Not done:** the insurance stack is still reachable directly, because its SPAs, five hosted
+>   agents and the AI Gateway registrations call it directly, and the pipeline OIDC identities
+>   are blocked. See [Remaining steps](#remaining-steps) and
 >   [what is not verified](#not-verified-live-yet).
 
 ## What exists in `rg-northwind-apps`
@@ -119,7 +133,7 @@ lets one APIM instance front two identical APIs.
 | Browser to Voice Live | No policy can be applied at WebSocket API scope; the `onHandshake` operation carries only the gateway token. Origin and the one-time connect ticket stay enforced by the backend (verified: identical 101/403 behavior as direct). |
 | Agents and harness to MCP | Product `S-agents` requires a subscription key (`Ocp-Apim-Subscription-Key`). Rate limit per subscription (default 300/min). The key is stripped before the request is forwarded. |
 | APIM to Container App | APIM's system-assigned managed identity requests an Entra app-only token for the `northwind-gateway` application and sends it as `X-Northwind-Gateway-Token`. The caller's own `Authorization` header is preserved. |
-| Direct to Container App | **Open until the lock-down step.** With `NORTHWIND_GATEWAY_AUTH_REQUIRED=true` the in-app guard (`apps/api/app/gateway_guard.py`) rejects every request without a valid gateway token (401; 503 if mis-configured; WebSocket close 1008). `/health` and `/healthz` stay exempt. |
+| Direct to Container App | **Locked on the northwind stack (`ca-api`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`); open on the insurance apps until their lock-down step.** With `NORTHWIND_GATEWAY_AUTH_REQUIRED=true` the in-app guard (`apps/api/app/gateway_guard.py`) rejects every request without a valid gateway token (401; 503 if mis-configured; WebSocket close 1008). `/health` and `/healthz` stay exempt. |
 
 Why an in-app guard instead of an IP restriction: Standard v2 has no dedicated outbound
 IP, so Container Apps ingress rules cannot identify the gateway. The guard validates an
@@ -148,6 +162,10 @@ outputs or pipeline logs. The pipeline's apply identity cannot call `listSecrets
   wrong tenant in `businessAuth` fails the deployment (fail closed).
 - Policy comments must not contain placeholders; attribute values holding quotes use
   single-quoted attributes so the XML stays strict.
+- OpenAPI import puts a *required* query parameter into the operation's URL template, so a
+  call that omits it (for example `DELETE /work-orders/{id}`, `POST /claims/upload` or
+  `POST /api/v1/claims/{id}/documents` without the parameter) gets an APIM 404 instead of the
+  backend's 422. Valid calls behave exactly as they do direct.
 
 ## Repository map
 
@@ -250,14 +268,20 @@ previews by default and only changes things with `--apply`. Order matters.
      *hosted* agents whose `MCP_*_URL` environment points at the insurance MCP apps, so moving
      them means redeploying those agent versions
      (`scripts/deploy-orders-hosted.py --business-domain insurance`).
-   - `ca-api` harness:
+   - `ca-api` harness (northwind: **done**; the harness itself is `unavailable` on that stack, so
+     only its configuration moved):
      `python scripts/configure-gateway-apps.py --app ca-insurance-api --mcp-gateway-base https://apim-northwind.azure-api.net/insurance`
      (reads the key from `NORTHWIND_MCP_KEY`; add `--apply` after reviewing the preview).
-   - SPAs: set the repository variable `NORTHWIND_GATEWAY_URL` and re-run the app release
+   - SPAs (northwind: **done**, the release builds both bundles against the gateway): set the
+     repository variable `NORTHWIND_GATEWAY_URL` and re-run the app release
      (`VITE_API_BASE_URL` becomes `<gateway>/northwind`); build the insurance SPAs with
      `VITE_API_BASE_URL=https://apim-northwind.azure-api.net/insurance`. The voice client
-     appends `/voice/realtime` to that base path.
-   - CI consumers: point the `STAGING_API_URI` secret at `<gateway>/northwind`.
+     appends `/voice/realtime` to that base path. A local `azd deploy` of an SPA builds from
+     `API_URI`, so keep `NORTHWIND_GATEWAY_URL` in the azd environment (the next provision then
+     publishes the gateway URL as `API_URI`) or export `VITE_API_BASE_URL` yourself; otherwise
+     the bundle calls the direct URL, which a locked-down app rejects.
+   - CI consumers: point the `STAGING_API_URI` secret at `<gateway>/northwind` (the public REST
+     API needs no key). No such secret exists today, so no workflow is affected by the lock-down.
 8. **Lock direct access** once consumers are verified through the gateway:
    ```powershell
    python scripts/configure-gateway-apps.py --stack insurance --guard enable `
@@ -268,6 +292,21 @@ previews by default and only changes things with `--apply`. Order matters.
    The script checks revision health, probes the health endpoint, and confirms the guard
    really answers 401 (an image without the guard would silently ignore the variables).
    Each change writes a rollback record (non-secret values only) under `release/`.
+
+   **Done for the northwind stack on 2026-10-22**, one app at a time with `--app`, in this
+   order: `ca-api`, then the harness settings, then `ca-mcp-tech-lookup` and `ca-mcp-work-order`.
+   Through the gateway `GET /company` returned 200, which also proves the container reaches
+   Microsoft's signing keys; direct it returned 401, and direct `/health` and `/healthz` stayed
+   200. The next `ca-api` release (workflow run 39844489003) kept all four guard variables on its
+   new revision. The evidence before locking the MCP apps: no Foundry agent references them (the
+   five hosted agents use the insurance MCP apps and the two prompt agents have no MCP tools),
+   the northwind harness is `unavailable` and was re-pointed at the gateway first, no workflow
+   or script hard-codes them, and the repository calls them legacy. Earlier direct calls in the
+   container logs came from many Azure addresses and the telemetry carries no client IP or user
+   agent, so their origin (manual or CI testing) could not be established. **Anything external
+   that still calls these apps directly now gets 401**; [Rollback](#rollback) is one command.
+   **Do not lock an app before everything that calls it has moved**, see
+   [Remaining steps](#remaining-steps).
 
 ### Known blocker: repository visibility
 
@@ -296,12 +335,27 @@ python $env:TEMP\apim-src\scripts\apim-release.py --compiled-template $env:TEMP\
   --source-sha <main sha> --approved-plan plan.json --output result.json --apply
 ```
 
-Later plans from the pipeline will show these objects as existing.
+Later plans from the pipeline see these objects as existing, but expect noise. Every API, policy
+and the logger is listed as **Modify** and the product links as **Create** even when nothing
+changed: the service normalises defaults (for example `isAgent`, key header names, policy
+`format`) and what-if cannot resolve the template's expressions. The second plan (after #61)
+showed 25 such entries, 17 Modify and 8 Create, while all product links already existed. The
+real change signal is the diff of `infra/live/apim/specs/northwind-api.openapi.json`; every
+entry still has to fall inside the allow-list, which `apim-release.py` enforces.
 
 ### Rollback
 
-- Fastest: `python scripts/configure-gateway-apps.py --stack insurance --guard disable --apply`.
+- Fastest: `python scripts/configure-gateway-apps.py --stack northwind --guard disable --apply`
+  unlocks the three northwind apps; `--app <name>` unlocks one (for example `--app ca-mcp-work-order`);
+  `--stack insurance` covers the insurance stack.
 - Exact: `python scripts/configure-gateway-apps.py --revert-from release/gateway-rollback-<app>-<revision>.json --apply`.
+  The 2026-10-22 records were written outside the repository; the values they hold are the
+  ones before the change: every guard variable unset, and on `ca-api` the harness URLs below
+  without `MCP_GATEWAY_SUBSCRIPTION_KEY`.
+- Harness (northwind): unlock the MCP apps first, then set `MCP_TECH_LOOKUP_URL` and
+  `MCP_WORK_ORDER_URL` on `ca-api` back to
+  `https://ca-mcp-tech-lookup.<aca-suffix>/mcp/` and `https://ca-mcp-work-order.<aca-suffix>/mcp/`
+  and remove `MCP_GATEWAY_SUBSCRIPTION_KEY` (and its secret `mcp-gateway-key`).
 - Consumers: unset `NORTHWIND_GATEWAY_URL` (azd and the repository variable) and redeploy;
   the direct Container App URLs are the default again.
 - The API Management objects are inert without consumers and can stay in place.
@@ -315,19 +369,33 @@ Later plans from the pipeline will show these objects as existing.
   `northwind-appinsights`, W3C correlation, no bodies logged) into `appi-zurlo-northwind`.
 - **Limits:** defaults are `webRateLimitPerMinute=600` per IP and
   `agentsRateLimitPerMinute=300` per subscription; both are template parameters.
+- **Re-provisioning:** reuse mode (this environment) never touches the Container Apps. A
+  full-Bicep provision of a new environment re-declares each app's environment and drops the
+  guard variables; re-run step 8 afterwards. `apim-smoke.py --expect-lockdown` shows the gap
+  immediately, so run it after any provision or manual change to an app.
+
+## Remaining steps
+
+Deliberately not done. The gateway works without them, and each one is independent and
+reversible.
+
+| Step | Why it is not done | How to finish |
+| --- | --- | --- |
+| Pipeline identities and the first pipeline apply | The repository is public and `configure-github-oidc.py` refuses to run, see [Known blocker](#known-blocker-repository-visibility). Until `NORTHWIND_APIM_ENABLED` exists, `deploy-apim.yml` is skipped. | Decide the visibility question, then runbook step 2. |
+| Lock the insurance stack (`ca-insurance-*`) | It is the active stack. Its images were built by hand before the guard existed (the script refuses to confirm), its SPAs and five hosted agents still call it directly, and the AI Gateway registers `ca-insurance-lookup` and `ca-insurance-review` as direct tool servers with no credential, so locking would break all of them. | Release the apps from `main`, rebuild the SPAs with `VITE_API_BASE_URL=<gateway>/insurance`, redeploy the hosted agents (`MCP_GATEWAY_CONNECTION`, runbook steps 6 and 7), decide the AI Gateway registrations ([ai-gateway.md](./ai-gateway.md#findings-to-act-on), finding 8), then step 8 with `--stack insurance`. |
+| Run the northwind harness | It is `unavailable` there (it needs the verified insurance agent configuration), so its gateway settings could not be exercised. | Enable the insurance agent runtime on `ca-api`, then run a harness request and check it reaches the MCP apps through the gateway. |
 
 ## Not verified live yet
 
 Verified live on 2026-10-22: see Status. Still not exercised:
 
-- the guard enabled on a live Container App under real gateway traffic (the token and the
-  guard code are verified together; flipping the switch on a running app is the remaining
-  step, and the Container Apps must be able to reach `login.microsoftonline.com` for the
-  signing keys);
 - a browser session through the gateway (the SPA calls are covered by CORS, header, body and
-  WebSocket checks, not by driving the UI);
-- the hosted agents and the harness actually redeployed or re-pointed at the gateway URLs (the
-  authentication mechanism is verified, the redeploy is not);
+  WebSocket checks and both bundles were confirmed to contain the gateway URL, but the UI
+  itself was not driven);
+- a harness run through the gateway (the harness is `unavailable` on the northwind stack; the
+  gateway MCP path itself is covered by the keyed smoke checks);
+- the hosted agents redeployed at the gateway URLs (the authentication mechanism is verified,
+  the redeploy is not);
 - the first real apply under the scoped pipeline role.
 
 The `ca-insurance-*` apps run images built manually before the guard existed; release them from

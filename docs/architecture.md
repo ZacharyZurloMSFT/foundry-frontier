@@ -237,8 +237,10 @@ CORS and rate limits, agents reach MCP with a subscription key, and APIM reaches
 Apps with a managed-identity token (`X-Northwind-Gateway-Token`) that an in-app guard
 (`apps/api/app/gateway_guard.py`) validates once direct access is locked down. The definition
 lives in `infra/live/apim-apis.bicep` and is applied only by the guarded `Scoped API Management`
-workflow. It is off until an operator runs the rollout in [api-management.md](./api-management.md),
-which also holds the API inventory, the security model and the rollback steps.
+workflow. It is off in a fresh deployment until an operator runs the rollout in
+[api-management.md](./api-management.md) (in the live environment the northwind stack is
+published and locked down; its Status section says what is done), which also holds the API
+inventory, the security model and the rollback steps.
 
 ## Networking
 
