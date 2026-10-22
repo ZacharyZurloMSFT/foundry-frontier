@@ -34,6 +34,7 @@ def test_only_canonical_assets_enter_the_selected_service_build_context(service,
     }
     if service != "api":
         expected[app / "insurance_domain.py"] = (ROOT / "apps" / "api" / "app" / "insurance_domain.py").read_bytes()
+        expected[app / "gateway_guard.py"] = (ROOT / "apps" / "api" / "app" / "gateway_guard.py").read_bytes()
     else:
         manifest = ROOT / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
         expected[app / "_northwind" / "departments" / "claims-warranty" / manifest.name] = manifest.read_bytes()
@@ -52,7 +53,7 @@ def test_unknown_or_retired_services_cannot_be_packaged(service, staged_files):
     assert not staged_files
 
 
-@pytest.mark.parametrize("source", ["insurance-fixtures.json", "insurance_domain.py"])
+@pytest.mark.parametrize("source", ["insurance-fixtures.json", "insurance_domain.py", "gateway_guard.py"])
 def test_missing_canonical_input_fails_before_copying_any_files(source, monkeypatch, staged_files):
     original = Path.read_text
 
@@ -95,16 +96,23 @@ def test_incomplete_fixture_fails_before_staging(collection, monkeypatch, staged
     assert not staged_files
 
 
-def test_invalid_shared_code_fails_before_staging(monkeypatch, staged_files):
+@pytest.mark.parametrize("shared", ["insurance_domain.py", "gateway_guard.py"])
+def test_invalid_shared_code_fails_before_staging(shared, monkeypatch, staged_files):
     original = Path.read_text
     monkeypatch.setattr(
         Path, "read_text",
-        lambda path, *args, **kwargs: "def invalid(" if path.name == "insurance_domain.py"
+        lambda path, *args, **kwargs: "def invalid(" if path.name == shared
         else original(path, *args, **kwargs),
     )
     with pytest.raises(SyntaxError):
         module.bundle("mcp-work-order")
     assert not staged_files
+
+
+@pytest.mark.parametrize("service", [name for name in module.SERVICES if name != "api"])
+def test_checked_in_gateway_guard_copies_match_the_canonical_module(service):
+    canonical = (ROOT / "apps" / "api" / "app" / "gateway_guard.py").read_bytes()
+    assert (ROOT / "apps" / service / "app" / "gateway_guard.py").read_bytes() == canonical
 
 
 def test_missing_cu_source_fails_before_any_api_asset_is_staged(monkeypatch, staged_files):

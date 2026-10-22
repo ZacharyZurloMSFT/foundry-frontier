@@ -40,6 +40,7 @@ from .company import (
     serialize_company,
 )
 from .content_understanding import router as claims_router
+from .gateway_guard import GatewayGuardMiddleware  # noqa: E402
 from .harness.routes import router as harness_router
 from .harness.runtime import runtime as harness_runtime
 from .insurance import router as insurance_router, insurance_runtime_ready, require_insurance_runtime
@@ -107,6 +108,11 @@ async def stamp_department_middleware(request, call_next):
     except Exception:  # noqa: BLE001 — never fail the request on stamping
         pass
     return await call_next(request)
+
+
+# Registered last so it is the outermost middleware. A no-op unless the
+# environment sets NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py).
+app.add_middleware(GatewayGuardMiddleware, exempt_paths=frozenset({"/health"}))
 
 
 class ChatRequest(BaseModel):

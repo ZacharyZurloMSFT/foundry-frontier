@@ -15,7 +15,9 @@ Those identifiers are wired through Bicep + azd env and renaming them
 would risk breaking `azd up`. Semantically this service is the Order
 Lookup MCP; keep the legacy infra name.
 
-No auth — this is a demo server behind a public Container Apps ingress.
+No auth by default — this is a demo server behind a public Container Apps ingress.
+Setting NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py) makes it accept
+only calls relayed by the API gateway.
 """
 from __future__ import annotations
 
@@ -36,6 +38,15 @@ else:
         if exc.name != f"{__package__}.insurance_domain":
             raise
         from apps.api.app.insurance_domain import lookup_claim_record, lookup_policy_record, require_insurance_domain
+if not __package__:
+    from apps.api.app.gateway_guard import GatewayGuardMiddleware
+else:
+    try:
+        from .gateway_guard import GatewayGuardMiddleware
+    except ModuleNotFoundError as exc:
+        if exc.name != f"{__package__}.gateway_guard":
+            raise
+        from apps.api.app.gateway_guard import GatewayGuardMiddleware
 
 # Optional App Insights wiring — mirrors apps/api. Configured only when the
 # usual OTEL env vars are present so local `uvicorn` runs stay quiet.
@@ -187,3 +198,7 @@ def healthz() -> dict[str, str]:
 # above). Mounting at /mcp gives us the endpoint URL Foundry expects:
 # https://<fqdn>/mcp.
 app.mount("/mcp", mcp.streamable_http_app())
+
+# Registered last so it is the outermost middleware (it also covers the mounted MCP
+# transport). A no-op unless NORTHWIND_GATEWAY_AUTH_REQUIRED=true; see gateway_guard.py.
+app.add_middleware(GatewayGuardMiddleware, exempt_paths=frozenset({"/healthz"}))
