@@ -212,6 +212,18 @@ tools. `FOUNDRY_PROJECT_ENDPOINT`, agent name, and version are platform
 injections: do not redeclare reserved `FOUNDRY_*` variables in deployment
 environment maps.
 
+## API gateway (opt-in)
+
+An existing Azure API Management instance, `apim-northwind` (Standard v2), can front every HTTP
+API in the apps resource group: the REST API of both Container App stacks (`/northwind`,
+`/insurance`), the Voice Live WebSocket and the four MCP servers. Browsers reach REST through
+CORS and rate limits, agents reach MCP with a subscription key, and APIM reaches the Container
+Apps with a managed-identity token (`X-Northwind-Gateway-Token`) that an in-app guard
+(`apps/api/app/gateway_guard.py`) validates once direct access is locked down. The definition
+lives in `infra/live/apim-apis.bicep` and is applied only by the guarded `Scoped API Management`
+workflow. It is off until an operator runs the rollout in [api-management.md](./api-management.md),
+which also holds the API inventory, the security model and the rollback steps.
+
 ## Networking
 
 - Single VNet `10.60.0.0/16` in the **compute region** (Canada Central by default)

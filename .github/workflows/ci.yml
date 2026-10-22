@@ -36,6 +36,7 @@ jobs:
           az bicep install --version v0.46.1
           az bicep build --file infra/main.bicep --outfile infra/main.json
           az bicep build --file infra/live/storage-networking.bicep --outfile /tmp/storage-networking.json
+          az bicep build --file infra/live/apim-apis.bicep --outfile /tmp/apim-apis.json
       - name: API and release contracts (no cloud or model calls)
         env:
           APPLICATIONINSIGHTS_CONNECTION_STRING: ""
@@ -46,7 +47,15 @@ jobs:
             scripts/tests/test_bundle_harness_assets.py \
             scripts/tests/test_release_app.py \
             scripts/tests/test_actions_infra.py \
-            scripts/tests/test_insurance_identity_setup.py -q
+            scripts/tests/test_insurance_identity_setup.py \
+            scripts/tests/test_apim_release.py \
+            scripts/tests/test_apim_definition.py \
+            scripts/tests/test_export_openapi.py \
+            scripts/tests/test_gateway_apps.py \
+            scripts/tests/test_gateway_outputs.py \
+            scripts/tests/test_apim_smoke.py \
+            scripts/tests/test_gateway_identity.py \
+            scripts/tests/test_oidc_apim.py -q
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
