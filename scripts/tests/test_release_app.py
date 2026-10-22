@@ -437,6 +437,7 @@ def test_existing_rollback_is_never_overwritten(record):
     (["apps/web-voice/src/App.tsx"], ["web-voice"]),
     (["apps/api/app/main.py"], ["api"]),
     (["apps/api/app/insurance_domain.py"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
+    (["apps/api/app/gateway_guard.py"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
     (["data/northwind/insurance-fixtures.json"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
     (["data/seed/generated/nw-fnol-demo-2001.pdf"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
     (["apps/mcp-work-order/app/main.py"], ["mcp-work-order"]),

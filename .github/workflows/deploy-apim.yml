@@ -1,0 +1,172 @@
+name: Scoped API Management
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options: [plan, apply]
+        default: plan
+      expected_sha:
+        description: Full current main SHA reviewed for this operation
+        required: true
+      plan_run_id:
+        description: Successful plan workflow run ID (required for apply)
+      confirm_apply:
+        description: For apply, repeat the reviewed full commit SHA
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: northwind-apim-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    if: >-
+      github.repository == 'ZacharyZurloMSFT/foundry-frontier' &&
+      vars.NORTHWIND_APIM_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.id == github.repository_id))
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      operation: ${{ steps.source.outputs.operation }}
+    steps:
+      - id: source
+        uses: actions/github-script@v9
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          OPERATION: ${{ inputs.operation }}
+          PLAN_RUN: ${{ inputs.plan_run_id }}
+          CONFIRM: ${{ inputs.confirm_apply }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const main = (await github.rest.repos.getBranch({owner, repo, branch:'main'})).data.commit.sha;
+            const automatic = context.eventName === 'workflow_run';
+            const sha = automatic ? context.payload.workflow_run.head_sha : process.env.EXPECTED_SHA;
+            if (context.ref !== 'refs/heads/main' || !/^[a-f0-9]{40}$/.test(sha || '') || sha !== main) throw new Error('Only current main can be planned/applied.');
+            const runs = (await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'ci.yml', head_sha:sha, status:'success', per_page:100})).data.workflow_runs;
+            if (!runs.some(run => run.head_repository?.full_name === `${owner}/${repo}` && run.head_branch === 'main' && ['push','workflow_dispatch'].includes(run.event))) throw new Error('Successful trusted CI is required.');
+            const operation = automatic ? 'plan' : process.env.OPERATION;
+            if (!['plan','apply'].includes(operation)) throw new Error('Invalid operation.');
+            if (operation === 'apply') {
+              if (process.env.CONFIRM !== sha || !/^\d+$/.test(process.env.PLAN_RUN || '')) throw new Error('Apply requires the exact reviewed SHA and plan run.');
+              const run = (await github.rest.actions.getWorkflowRun({owner, repo, run_id:Number(process.env.PLAN_RUN)})).data;
+              if (run.path !== '.github/workflows/deploy-apim.yml' || run.head_sha !== sha || run.head_branch !== 'main' || run.conclusion !== 'success' || !['workflow_run','workflow_dispatch'].includes(run.event)) throw new Error('Plan run is not a successful same-source trusted API Management run.');
+            }
+            core.setOutput('sha', sha);
+            core.setOutput('operation', operation);
+  plan:
+    needs: source
+    if: needs.source.outputs.operation == 'plan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: northwind-apim-plan
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_APIM_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Compile only the live API Management boundary
+        run: |
+          az bicep install --version v0.46.1
+          az bicep build --file infra/live/apim-apis.bicep --outfile /tmp/apim-apis.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Plan without changing live resources
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: python scripts/apim-release.py --compiled-template /tmp/apim-apis.json --source-sha "$SOURCE_SHA" --output release/apim-plan.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apim-plan-${{ needs.source.outputs.sha }}
+          path: release/apim-plan.json
+          retention-days: 14
+          if-no-files-found: error
+  apply:
+    needs: source
+    if: github.event_name == 'workflow_dispatch' && needs.source.outputs.operation == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: northwind-apim-apply
+    concurrency:
+      group: northwind-live-mutations
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: apim-plan-${{ needs.source.outputs.sha }}
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+          path: approved
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_APIM_APPLY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Recheck current main after approval
+        uses: actions/github-script@v9
+        env:
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        with:
+          script: |
+            const main = (await github.rest.repos.getBranch({...context.repo, branch:'main'})).data.commit.sha;
+            if (main !== process.env.SOURCE_SHA) throw new Error('Source changed while waiting. Review a new plan.');
+      - run: |
+          az bicep install --version v0.46.1
+          az bicep build --file infra/live/apim-apis.bicep --outfile /tmp/apim-apis.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Re-plan and apply only an unchanged reviewed boundary
+        env:
+          NORTHWIND_APIM_CONFIRM: ${{ inputs.confirm_apply }}
+          SOURCE_SHA: ${{ needs.source.outputs.sha }}
+        run: python scripts/apim-release.py --compiled-template /tmp/apim-apis.json --source-sha "$SOURCE_SHA" --approved-plan approved/apim-plan.json --output release/apim-result.json --apply
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: apim-result-${{ github.run_id }}
+          path: release/apim-result.json
+          retention-days: 14
+  smoke:
+    needs: [source, apply]
+    if: needs.apply.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet httpx
+      - name: Smoke test the public gateway without credentials
+        run: python scripts/apim-smoke.py --gateway-url https://apim-northwind.azure-api.net --public-checks

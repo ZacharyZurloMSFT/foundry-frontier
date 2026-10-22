@@ -25,7 +25,25 @@ IDENTITIES = {
     "apps": ("id-gh-northwind-apps", "northwind-apps", "AZURE_APPS_CLIENT_ID"),
     "infra-plan": ("id-gh-northwind-plan", "northwind-infra-plan", "AZURE_INFRA_PLAN_CLIENT_ID"),
     "infra-apply": ("id-gh-northwind-apply", "northwind-infra-apply", "AZURE_INFRA_APPLY_CLIENT_ID"),
+    "apim-plan": ("id-gh-northwind-apim-plan", "northwind-apim-plan", "AZURE_APIM_PLAN_CLIENT_ID"),
+    "apim-apply": ("id-gh-northwind-apim-apply", "northwind-apim-apply", "AZURE_APIM_APPLY_CLIENT_ID"),
 }
+APIM_KEYS = ("apim-plan", "apim-apply")
+ONLY = {"apim": APIM_KEYS}
+ONLY_FLAGS = {"apim": "NORTHWIND_APIM_ENABLED"}
+APIM_READS = [
+    "Microsoft.ApiManagement/service/read", "Microsoft.ApiManagement/service/*/read",
+    "Microsoft.App/containerApps/read", "Microsoft.Insights/components/read",
+    "Microsoft.Resources/subscriptions/resourceGroups/read",
+]
+# Deliberately no service-level policies/write, listSecrets, delete or wildcard writes. Adding a resource type
+# is a deliberate boundary change: update this list, RESOURCE_TYPES in apim-release.py and their tests together.
+APIM_WRITES = [
+    f"Microsoft.ApiManagement/service/{child}/write" for child in (
+        "apis", "apis/operations", "apis/operations/policies", "apis/policies", "apis/diagnostics",
+        "products", "products/apis", "subscriptions", "loggers",
+    )
+]
 ROLES = {
     "apps": {
         "name": "Northwind scoped app release",
@@ -67,6 +85,20 @@ ROLES = {
         ],
         "assignable": f"{BASE}/resourceGroups/rg-northwind-data",
     },
+    "apim-plan": {
+        "name": "Northwind apim plan",
+        "actions": [
+            *APIM_READS, "Microsoft.Resources/deployments/read",
+            "Microsoft.Resources/deployments/write", "Microsoft.Resources/deployments/whatIf/action",
+            "Microsoft.Resources/deployments/validate/action",
+        ],
+        "assignable": APPS,
+    },
+    "apim-apply": {
+        "name": "Northwind apim configuration",
+        "actions": [*APIM_READS, "Microsoft.Resources/deployments/*", *APIM_WRITES],
+        "assignable": APPS,
+    },
 }
 ACRPUSH = "8311e382-0749-4cb8-b61a-304f252e45ec"
 READER = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
@@ -98,7 +130,46 @@ def gh(path: str, method: str = "GET", body: dict | None = None) -> dict:
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
-def bindings() -> list[tuple[str, str, str]]:
+def identity_keys(only: str | None = None) -> list[str]:
+    return list(IDENTITIES) if only is None else list(ONLY[only])
+
+
+def role_keys(only: str | None = None) -> list[str]:
+    return list(ROLES) if only is None else list(ONLY[only])
+
+
+def static_variables(only: str | None = None) -> dict[str, str]:
+    if only is not None:
+        return {ONLY_FLAGS[only]: "true"}
+    return {
+        "AZURE_TENANT_ID": TENANT, "AZURE_SUBSCRIPTION_ID": SUBSCRIPTION,
+        "AZURE_APPS_RESOURCE_GROUP": "rg-northwind-apps", "ACR_NAME": "acrzurlonorthwind",
+        "NORTHWIND_DEPLOY_ENABLED": "true", "NORTHWIND_INFRA_ENABLED": "true", "NORTHWIND_APIM_ENABLED": "true",
+    }
+
+
+def restrict_environment(environment: str) -> None:
+    gh(f"repos/{REPOSITORY}/environments/{environment}", "PUT", {
+        "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+    })
+    policies = gh(f"repos/{REPOSITORY}/environments/{environment}/deployment-branch-policies").get("branch_policies", [])
+    if any(p.get("name") != "main" or p.get("type") != "branch" for p in policies):
+        raise ValueError("Environment has unexpected allowed branches; review before activation.")
+    if not policies:
+        gh(f"repos/{REPOSITORY}/environments/{environment}/deployment-branch-policies", "POST", {"name": "main", "type": "branch"})
+
+
+def check_preconditions(only: str | None = None) -> None:
+    if only is None:
+        if gh(f"repos/{REPOSITORY}/actions/permissions").get("enabled") is not False:
+            raise ValueError("Keep repository Actions disabled until setup is complete.")
+        return
+    # --only runs against a live repository, so pin the environments to main before any Azure trust exists.
+    for key in identity_keys(only):
+        restrict_environment(IDENTITIES[key][1])
+
+
+def bindings(only: str | None = None) -> list[tuple[str, str, str]]:
     result = [("apps", f"{APPS}/providers/Microsoft.App/containerApps/{name}", role_id("apps")) for name in APPS_NAMES]
     result += [
         ("apps", ACR, f"{BASE}/providers/Microsoft.Authorization/roleDefinitions/{ACRPUSH}"),
@@ -106,36 +177,39 @@ def bindings() -> list[tuple[str, str, str]]:
         ("infra-plan", STORAGE, f"{BASE}/providers/Microsoft.Authorization/roleDefinitions/{READER}"),
         ("infra-apply", NETWORK, role_id("infra-apply")),
         ("infra-apply", STORAGE, role_id("storage-approval")),
+        ("apim-plan", APPS, role_id("apim-plan")),
+        ("apim-apply", APPS, role_id("apim-apply")),
     ]
-    return result
+    return [binding for binding in result if binding[0] in identity_keys(only)]
 
 
-def preview() -> dict:
+def preview(only: str | None = None) -> dict:
     return {
         "repository": REPOSITORY, "subscription": SUBSCRIPTION, "tenant": TENANT,
+        "only": only,
         "identities": [
             {"name": name, "environment": environment,
              "federated_subject": f"{SUBJECT_PREFIX}:environment:{environment}"}
-            for name, environment, _ in IDENTITIES.values()
+            for name, environment, _ in (IDENTITIES[key] for key in identity_keys(only))
         ],
-        "role_definitions": ROLES,
-        "role_bindings": [{"identity": key, "scope": scope, "role_id": role} for key, scope, role in bindings()],
+        "role_definitions": {key: ROLES[key] for key in role_keys(only)},
+        "role_bindings": [{"identity": key, "scope": scope, "role_id": role} for key, scope, role in bindings(only)],
+        "variables": [*(IDENTITIES[key][2] for key in identity_keys(only)), *static_variables(only)],
         "environment_branch_allowlist": ["main"],
         "app_deployments": "after successful current-main CI, selected services only",
         "infrastructure": "plan by default; apply requires reviewed same-source plan and full SHA confirmation",
+        "api_management": "plan by default; apply requires reviewed same-source plan and full SHA confirmation",
         "credentials": "OIDC only; no client secret",
         "actions_enabled_by_this_script": False,
     }
 
 
-def configure() -> dict:
+def configure(only: str | None = None) -> dict:
     repo = gh(f"repos/{REPOSITORY}")
     if not repo.get("private") or repo.get("default_branch") != "main":
         raise ValueError("Expected the private approved main-branch repository.")
     validate_oidc_policy(repo, gh(f"repos/{REPOSITORY}/actions/oidc/customization/sub"))
-    permission = gh(f"repos/{REPOSITORY}/actions/permissions")
-    if permission.get("enabled") is not False:
-        raise ValueError("Keep repository Actions disabled until setup is complete.")
+    check_preconditions(only)
     credential = AzureCliCredential(tenant_id=TENANT, process_timeout=120)
     clients = {}
     try:
@@ -152,7 +226,8 @@ def configure() -> dict:
                     raise RuntimeError(f"Azure setup failed (HTTP {response.status_code}) for {path}; reconcile partial setup.")
                 return response.json()
 
-            for key, role in ROLES.items():
+            for key in role_keys(only):
+                role = ROLES[key]
                 body = {"properties": {
                     "roleName": role["name"], "description": f"Scoped GitHub Actions access for {REPOSITORY}",
                     "type": "CustomRole", "assignableScopes": [role["assignable"]],
@@ -160,7 +235,8 @@ def configure() -> dict:
                 }}
                 arm("PUT", role_id(key), "2022-04-01", body)
             principals = {}
-            for key, (name, environment, variable) in IDENTITIES.items():
+            for key in identity_keys(only):
+                name, environment, variable = IDENTITIES[key]
                 identity_id = f"{APPS}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{name}"
                 existing = arm("GET", identity_id, "2023-01-31", absent_ok=True)
                 if existing and existing.get("tags", {}).get("repository") != REPOSITORY:
@@ -177,15 +253,9 @@ def configure() -> dict:
                         "audiences": ["api://AzureADTokenExchange"],
                     },
                 })
-                gh(f"repos/{REPOSITORY}/environments/{environment}", "PUT", {
-                    "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
-                })
-                policies = gh(f"repos/{REPOSITORY}/environments/{environment}/deployment-branch-policies").get("branch_policies", [])
-                if any(p.get("name") != "main" or p.get("type") != "branch" for p in policies):
-                    raise ValueError("Environment has unexpected allowed branches; review before activation.")
-                if not policies:
-                    gh(f"repos/{REPOSITORY}/environments/{environment}/deployment-branch-policies", "POST", {"name": "main", "type": "branch"})
-            for key, scope, role in bindings():
+                if only is None:
+                    restrict_environment(environment)
+            for key, scope, role in bindings(only):
                 assignment = stable_id(f"assignment:{key}:{scope}:{role}")
                 path = f"{scope}/providers/Microsoft.Authorization/roleAssignments/{assignment}"
                 arm("PUT", path, "2022-04-01", {"properties": {
@@ -193,20 +263,19 @@ def configure() -> dict:
                 }})
     finally:
         credential.close()
-    variables = {
-        **clients, "AZURE_TENANT_ID": TENANT, "AZURE_SUBSCRIPTION_ID": SUBSCRIPTION,
-        "AZURE_APPS_RESOURCE_GROUP": "rg-northwind-apps", "ACR_NAME": "acrzurlonorthwind",
-        "NORTHWIND_DEPLOY_ENABLED": "true", "NORTHWIND_INFRA_ENABLED": "true",
-    }
+    variables = {**clients, **static_variables(only)}
     current = {v["name"] for v in gh(f"repos/{REPOSITORY}/actions/variables?per_page=100").get("variables", [])}
     for name, value in variables.items():
         path = f"repos/{REPOSITORY}/actions/variables" + (f"/{name}" if name in current else "")
         gh(path, "PATCH" if name in current else "POST", {"name": name, "value": value})
-    return {"configured": True, "repository": REPOSITORY, "variables": list(variables), "actions_still_disabled": True}
+    return {"configured": True, "repository": REPOSITORY, "variables": list(variables),
+            **({"actions_still_disabled": True} if only is None else {"only": only})}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--only", choices=sorted(ONLY),
+                        help="Touch just this subsystem's identities, roles, bindings and variables")
     args = parser.parse_args()
-    print(json.dumps(configure() if args.apply else preview(), indent=2))
+    print(json.dumps(configure(args.only) if args.apply else preview(args.only), indent=2))

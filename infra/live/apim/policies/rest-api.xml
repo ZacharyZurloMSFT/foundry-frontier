@@ -1,0 +1,55 @@
+<!--
+  Northwind REST API (one per stack). infra/live/apim-apis.bicep fills in the marked placeholders: the CORS origins of the
+  stack's web apps plus local development, the per-IP rate limit, the optional delegated-token pre-validation for
+  /api/v1, and the managed-identity gateway-token fragment (or removal of that header).
+  Streaming (NDJSON) responses require buffer-response="false"; never add validate-content or body logging here.
+-->
+<policies>
+  <inbound>
+    <base />
+    <cors allow-credentials="false">
+      <allowed-origins>__ALLOWED_ORIGINS__</allowed-origins>
+      <allowed-methods preflight-result-max-age="600">
+        <method>GET</method>
+        <method>POST</method>
+        <method>PUT</method>
+        <method>PATCH</method>
+        <method>DELETE</method>
+        <method>OPTIONS</method>
+      </allowed-methods>
+      <allowed-headers>
+        <header>Authorization</header>
+        <header>Content-Type</header>
+        <header>Accept</header>
+        <header>X-Department</header>
+        <header>X-Demo-Run</header>
+        <header>Idempotency-Key</header>
+        <header>X-Synthetic-Data</header>
+        <header>If-Match</header>
+        <header>If-None-Match</header>
+        <header>X-Correlation-ID</header>
+        <header>Traceparent</header>
+        <header>Tracestate</header>
+      </allowed-headers>
+      <expose-headers>
+        <header>X-Correlation-ID</header>
+        <header>ETag</header>
+        <header>Location</header>
+        <header>Retry-After</header>
+        <header>WWW-Authenticate</header>
+      </expose-headers>
+    </cors>
+    <rate-limit-by-key calls="__RATE_LIMIT__" renewal-period="60" counter-key="@(context.Request.IpAddress)" />
+    __JWT_VALIDATION__
+    __GATEWAY_TOKEN__
+  </inbound>
+  <backend>
+    <forward-request timeout="300" buffer-response="false" />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

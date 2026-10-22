@@ -28,6 +28,8 @@ param insuranceAuthTenantId = readEnvironmentVariable('INSURANCE_AUTH_TENANT_ID'
 param insuranceAuthAudience = readEnvironmentVariable('INSURANCE_AUTH_AUDIENCE', '')
 param insuranceAuthRequiredScope = readEnvironmentVariable('INSURANCE_AUTH_REQUIRED_SCOPE', 'access_as_user')
 param insuranceAuthClientIds = readEnvironmentVariable('INSURANCE_AUTH_CLIENT_IDS', '')
+param gatewayUrl = readEnvironmentVariable('NORTHWIND_GATEWAY_URL', '')
+param gatewayStack = readEnvironmentVariable('NORTHWIND_GATEWAY_STACK', 'northwind')
 param existingSettings = {
   FOUNDRY_ENDPOINT: readEnvironmentVariable('FOUNDRY_ENDPOINT', '')
   FOUNDRY_PROJECT_ENDPOINT: readEnvironmentVariable('FOUNDRY_PROJECT_ENDPOINT', '')

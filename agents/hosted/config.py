@@ -44,6 +44,7 @@ ENV_KEYS = (
     "ORDER_AGENT_ROLE", "FOUNDRY_PROJECT_ENDPOINT", "MODEL_DEPLOYMENT_NAME", "ORDERS_MODEL_DEPLOYMENT",
     "AZURE_AI_MODEL_DEPLOYMENT_NAME", "TRIAGE_MODEL_DEPLOYMENT", "AZURE_CLIENT_ID",
     "MCP_TECH_LOOKUP_URL", "MCP_WORK_ORDER_URL", "AZURE_SEARCH_ENDPOINT",
+    "MCP_GATEWAY_CONNECTION",
     "AZURE_SEARCH_INDEX",
     "AZURE_SEARCH_KNOWLEDGE_BASE", "ORDERS_KB_CONNECTION", "ORDERS_KB_CONNECTION_NAME",
     "ORDERS_OPENAI_ENDPOINT",
@@ -53,6 +54,9 @@ ENV_KEYS = (
     *(entry[1] for entry in INSURANCE_SPECIALISTS.values()),
     "NORTHWIND_BUSINESS_DOMAIN", "NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED",
 )
+# Roles whose MCP server may sit behind the API gateway, and a Foundry connection name's shape.
+MCP_GATEWAY_ROLES = ("orderlookup", "resolutiondraft")
+CONNECTION_NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
 
 
 def https_url(value: str, name: str) -> str:
@@ -108,6 +112,9 @@ class Settings:
                                  "a triage override cannot silently reuse a baseline gateway alias")
         elif gateway_model or gateway_deployment or env.get("ORDERS_MODEL_GATEWAY_SCOPE"):
             raise ValueError("ORDERS_MODEL_GATEWAY_ENDPOINT is required for gateway configuration")
+        mcp_connection = env.get("MCP_GATEWAY_CONNECTION", "").strip()
+        if mcp_connection and role in MCP_GATEWAY_ROLES and not re.fullmatch(CONNECTION_NAME, mcp_connection):
+            raise ValueError("MCP_GATEWAY_CONNECTION must be a Foundry project connection name")
         raw = (AGENTS_DIR / (INSURANCE_PROMPTS if domain == "insurance" else PROMPTS)[role]).read_bytes()
         prompt = yaml.safe_load(raw)
         if not isinstance(prompt, dict) or not prompt.get("name") or not prompt.get("instructions"):
@@ -169,6 +176,12 @@ class Settings:
     @property
     def business_domain(self) -> str:
         return self.env.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
+
+    @property
+    def mcp_gateway_connection(self) -> str:
+        """Project connection holding the API gateway key; empty unless this role calls a gated MCP server."""
+        name = self.env.get("MCP_GATEWAY_CONNECTION", "").strip()
+        return name if self.role in MCP_GATEWAY_ROLES else ""
 
     @property
     def uses_model_gateway(self) -> bool:

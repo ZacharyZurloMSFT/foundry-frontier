@@ -1,0 +1,2 @@
+    <!-- Gateway token not configured yet: never forward a client-supplied gateway token. -->
+    <set-header name="X-Northwind-Gateway-Token" exists-action="delete" />

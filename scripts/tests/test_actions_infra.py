@@ -147,7 +147,7 @@ def test_oidc_plan_has_no_credentials_and_no_subscription_wide_assignments():
     assert preview["credentials"] == "OIDC only; no client secret"
     assert not preview["actions_enabled_by_this_script"]
     assert preview["environment_branch_allowlist"] == ["main"]
-    assert len(preview["identities"]) == 3
+    assert len(preview["identities"]) == 5
     for identity in preview["identities"]:
         assert identity["federated_subject"] == f"{setup.SUBJECT_PREFIX}:environment:{identity['environment']}"
     assert all(binding["scope"] != setup.BASE for binding in preview["role_bindings"])

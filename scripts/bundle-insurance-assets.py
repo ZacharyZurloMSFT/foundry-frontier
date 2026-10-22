@@ -21,6 +21,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
         raise ValueError("Insurance assets can only be staged for the API and MCP services.")
     fixture = root / "data" / "northwind" / "insurance-fixtures.json"
     domain = root / "apps" / "api" / "app" / "insurance_domain.py"
+    guard = root / "apps" / "api" / "app" / "gateway_guard.py"
     records = json.loads(fixture.read_text(encoding="utf-8"))
     if (
         not isinstance(records, dict)
@@ -32,6 +33,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
         if not isinstance(records.get(collection), list) or not records[collection]:
             raise ValueError("Canonical insurance fixtures require nonempty " + collection + ".")
     ast.parse(domain.read_text(encoding="utf-8"), filename=str(domain))
+    ast.parse(guard.read_text(encoding="utf-8"), filename=str(guard))
     sources = []
     if service == "api":
         manifest = root / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
@@ -57,6 +59,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
     shutil.copyfile(fixture, fixture_destination / fixture.name)
     if service != "api":
         shutil.copyfile(domain, destination / domain.name)
+        shutil.copyfile(guard, destination / guard.name)
     else:
         document_destination = destination / "_northwind" / "claims-documents"
         document_destination.mkdir(parents=True, exist_ok=True)

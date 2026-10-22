@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import httpx
 from agent_framework import AgentResponseUpdate, Content, tool
@@ -11,7 +11,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config import INSURANCE_SPECIALISTS, SPECIALISTS, Settings
+from .config import INSURANCE_SPECIALISTS, SPECIALISTS, Settings, https_url
 from .scope import RequestScope, current_scope
 from ..insurance.domain import ClaimActionDraft, action_payload
 
@@ -53,10 +53,15 @@ def pending_approval(value: Any, workflow_id: str) -> dict:
 
 
 async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
-                            tool_name: str = "propose_resolution") -> dict:
+                            tool_name: str = "propose_resolution",
+                            gateway_headers: Mapping[str, str] | None = None) -> dict:
     headers = {"x-orders-workflow": workflow_id}
     if workflow_id.startswith("wf-harness-"):
         headers["x-harness-workflow"] = workflow_id
+    if gateway_headers:
+        # Credentials only travel over HTTPS, and can never override the workflow binding.
+        https_url(url, "MCP endpoint")
+        headers = {**gateway_headers, **headers}
     async with httpx.AsyncClient(headers=headers, timeout=60, follow_redirects=False) as http:
         async with streamable_http_client(url, http_client=http) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -75,8 +80,10 @@ async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
                 return pending_approval(data, workflow_id)
 
 
-def proposal_tool(settings: Settings):
+def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None = None):
     spec = settings.mcp_spec()
+    # Only forwarded when configured, leaving the call unchanged for ungated MCP servers.
+    gateway = {"gateway_headers": gateway_headers} if gateway_headers else {}
 
     if settings.business_domain == "insurance":
         @tool(name="draft_claim_action", approval_mode="never_require",
@@ -89,7 +96,7 @@ def proposal_tool(settings: Settings):
                 if scope.approval["draft"] != proposed:
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
-            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action")
+            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **gateway)
             if (result.get("draft") != proposed or result.get("kind") != "insurance_claim_action"
                     or result.get("execution_status") != "not_executed" or result.get("synthetic") is not True):
                 raise RuntimeError("Insurance MCP did not confirm a non-executed synthetic draft")
@@ -109,7 +116,7 @@ def proposal_tool(settings: Settings):
                 if scope.approval["draft"] != proposed:
                     raise RuntimeError("Only one distinct pending draft is permitted per response")
                 return json.dumps(scope.approval)
-            result = await call_proposal_mcp(spec["server_url"], workflow, proposed)
+            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, **gateway)
             if result.get("draft") != proposed:
                 raise RuntimeError("Resolution MCP persisted a different draft")
             scope.approval = pending_approval(result, workflow)

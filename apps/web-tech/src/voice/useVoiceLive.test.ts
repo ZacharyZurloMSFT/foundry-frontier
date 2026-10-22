@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { completedTranscript, PcmEncoder, VoiceLiveConnection } from "../../../web-voice/src/voiceLive";
-import { API_BASE, confirmedHandoff, getVoiceReadiness, mintVoiceSession, streamHandoff, voiceProxyUrl } from "../../../web-voice/src/api";
+import { API_BASE, confirmedHandoff, getVoiceReadiness, mintVoiceSession, streamHandoff, voiceProxyUrl, voiceProxyUrlFor } from "../../../web-voice/src/api";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const records = {
@@ -45,6 +45,16 @@ describe("insurance voice wire contract", () => {
     expect(init.headers["X-Department"]).toBe("contact-center");
     expect(JSON.parse(init.body)).toEqual({ channel: "customer" });
     expect(JSON.stringify(init)).not.toMatch(/Authorization|api-key|client_secret/);
+  });
+  it("keeps a gateway path prefix when deriving the WSS proxy URL", () => {
+    for (const [base, expected] of [
+      ["https://apim-northwind.azure-api.net/northwind", "wss://apim-northwind.azure-api.net/northwind/voice/realtime"],
+      ["https://apim-northwind.azure-api.net/insurance/", "wss://apim-northwind.azure-api.net/insurance/voice/realtime"],
+      ["https://apim-northwind.azure-api.net/insurance/?x=1#frag", "wss://apim-northwind.azure-api.net/insurance/voice/realtime"],
+      ["https://ca-api.example.test", "wss://ca-api.example.test/voice/realtime"],
+      ["http://localhost:8000", "ws://localhost:8000/voice/realtime"],
+    ]) expect(voiceProxyUrlFor(base)).toBe(expected);
+    expect(() => voiceProxyUrlFor("http://apim-northwind.azure-api.net/northwind")).toThrow("HTTPS");
   });
   it("rejects invented ephemeral tokens/direct cloud URLs and surfaces disabled readiness", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(records))
