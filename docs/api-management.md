@@ -8,17 +8,25 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 [Rollout runbook](#rollout-runbook).
 
 > **Status (2026-10-22).**
-> - Done: merged in #59; the five repo-managed apps were released on the new images (guard
+> - **Applied:** `apim-northwind` now publishes all 8 APIs (both stacks), 4 products, the 2
+>   agents subscriptions, the logger and per-API diagnostics (51 objects). The first apply ran
+>   through the guarded `scripts/apim-release.py` from a clean LF checkout of `main` (same
+>   allow-list, plan-hash equality and SHA confirmation as the pipeline) because the pipeline's
+>   OIDC setup is blocked, see [Known blocker](#known-blocker-repository-visibility).
+> - Also done: merged in #59 and #60; the five repo-managed apps run the new images (guard
 >   deployed, **off**); the gateway identity exists (APIM system-assigned managed identity and
->   the secretless `northwind-gateway` Entra application, whose client ID is now the template
+>   the secretless `northwind-gateway` Entra application, whose client ID is the template
 >   default for `gatewayAudience`).
-> - Verified live on a scratch API (since deleted): the real policy fragment obtains the
->   managed-identity token and preserves the caller's `Authorization` header, and the real
->   guard code accepts that token (checked against Microsoft's live signing keys) while
->   rejecting a wrong principal or audience.
-> - Blocked: runbook step 2 (pipeline OIDC identities), see
->   [Known blocker](#known-blocker-repository-visibility). `apim-northwind` is therefore
->   still empty; nothing has been applied to it.
+> - **Verified live:** every public smoke check and the keyed MCP checks (`initialize` and
+>   `tools/list` on all four MCP APIs); 36/36 read-only calls identical direct vs through the
+>   gateway; matching error responses; bodies up to 30 MiB; NDJSON streaming is not buffered
+>   (`/chat`: first line at 0.6 s, last at 13 s through APIM); the real policy fragment obtains
+>   the managed-identity token and the real guard accepts it (live Microsoft signing keys) while
+>   rejecting a wrong principal or audience; Foundry authenticates to the gateway, both as a
+>   prompt-agent MCP tool through a project connection and through the hosted-agent code path.
+> - **Not done (consumers still call the apps directly, so nothing is locked down):** SPA, harness
+>   and Foundry agent cut-over, and the guard. See the runbook and
+>   [what is not verified](#not-verified-live-yet).
 
 ## What exists in `rg-northwind-apps`
 
@@ -219,16 +227,29 @@ previews by default and only changes things with `--apply`. Order matters.
      --url "https://management.azure.com/subscriptions/137c905b-7734-479e-acc5-ab8222462936/resourceGroups/rg-northwind-apps/providers/Microsoft.ApiManagement/service/apim-northwind/subscriptions/insurance-agents/listSecrets?api-version=2024-05-01"
    python scripts/apim-smoke.py --gateway-url https://apim-northwind.azure-api.net --stack insurance
    ```
-   Create a Foundry project connection (type RemoteTool, custom keys, header
-   `Ocp-Apim-Subscription-Key`, target the stack's gateway base URL) and let the hosted
-   agents' identity read its credentials.
+   Create the Foundry project connections (category `RemoteTool`, auth `CustomKeys`, key
+   `Ocp-Apim-Subscription-Key`, the stack's agents key) through ARM, the same way
+   `scripts/connect-knowledge-base.py` does. **Foundry sends a tool's calls to the *target* of
+   the connection it references**, so:
+   - **prompt agents** need one connection per MCP endpoint, each with the exact MCP URL as its
+     target (for example `https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup`).
+     A connection that targets the gateway base URL makes Foundry call the base URL and get a
+     404 (reproduced live);
+   - **hosted agents** read the credentials themselves and send the header to their own MCP
+     URL, so a single connection whose target is the gateway base URL or an exact MCP URL is
+     enough. Foundry returns custom key names lower-cased; the code matches case-insensitively.
+   Delete any scratch agents and connections after testing; connection names are account-wide.
 7. **Cut over the consumers** (each is independently reversible):
    - Foundry agents: `azd env set NORTHWIND_GATEWAY_URL https://apim-northwind.azure-api.net`,
-     `NORTHWIND_GATEWAY_STACK` (`northwind` or `insurance`) and `MCP_GATEWAY_CONNECTION`;
-     the next reuse-mode provision publishes gateway URLs as `API_URI` / `MCP_*_URL`
-     without changing resources, and `scripts/create-prompt-agents.py` re-creates MCP
-     tools against the gateway through the project connection. Redeploy the hosted
-     `orderlookup` / `resolutiondraft` agents (they read the connection at start-up).
+     `NORTHWIND_GATEWAY_STACK` (`northwind` or `insurance`), `MCP_GATEWAY_CONNECTION` (hosted
+     agents) and `MCP_GATEWAY_CONNECTION_TECH_LOOKUP` / `MCP_GATEWAY_CONNECTION_WORK_ORDER`
+     (prompt agents, one exact-target connection per endpoint); the next reuse-mode provision
+     publishes gateway URLs as `API_URI` / `MCP_*_URL` without changing resources, and
+     `scripts/create-prompt-agents.py` re-creates MCP tools against the gateway through those
+     connections (it warns when a gateway tool has none). The live insurance agents are five
+     *hosted* agents whose `MCP_*_URL` environment points at the insurance MCP apps, so moving
+     them means redeploying those agent versions
+     (`scripts/deploy-orders-hosted.py --business-domain insurance`).
    - `ca-api` harness:
      `python scripts/configure-gateway-apps.py --app ca-insurance-api --mcp-gateway-base https://apim-northwind.azure-api.net/insurance`
      (reads the key from `NORTHWIND_MCP_KEY`; add `--apply` after reviewing the preview).
@@ -261,6 +282,22 @@ control and was not bypassed, and the repository's visibility was not changed. D
   the environments are pinned to `main`, and fork pull requests cannot obtain these tokens.
   What changes is that workflow logs, plan artifacts and step summaries become world-readable.
 
+Interim path used on 2026-10-22 (no Azure trust is created, so the check's intent is not
+affected): compile and apply the same boundary locally with the same guarded script, from a
+clean LF checkout of the merged commit so the template matches what CI would compile:
+
+```powershell
+git -c core.autocrlf=false worktree add --detach $env:TEMP\apim-src <main sha>
+bicep build $env:TEMP\apim-src\infra\live\apim-apis.bicep --outfile $env:TEMP\apim-src\apim-apis.json   # v0.46.1
+python $env:TEMP\apim-src\scripts\apim-release.py --compiled-template $env:TEMP\apim-src\apim-apis.json `
+  --source-sha <main sha> --output plan.json                                   # review, then:
+$env:NORTHWIND_APIM_CONFIRM = '<main sha>'
+python $env:TEMP\apim-src\scripts\apim-release.py --compiled-template $env:TEMP\apim-src\apim-apis.json `
+  --source-sha <main sha> --approved-plan plan.json --output result.json --apply
+```
+
+Later plans from the pipeline will show these objects as existing.
+
 ### Rollback
 
 - Fastest: `python scripts/configure-gateway-apps.py --stack insurance --guard disable --apply`.
@@ -281,10 +318,18 @@ control and was not bypassed, and the repository's visibility was not changed. D
 
 ## Not verified live yet
 
-These need the remaining operator steps and are intentionally not simulated:
-Foundry project-connection authentication against the gateway, unbuffered NDJSON streaming
-through APIM (`apim-smoke.py --stream-check` is opt-in because it costs a model call), and
-the guard enabled on a live Container App under real gateway traffic. Already verified live:
-the managed-identity token and its acceptance by the real guard (see Status). The guard,
-the policies, the allow-list and the release pipeline are also covered by unit tests, and the
-policies and plan were validated against the live service.
+Verified live on 2026-10-22: see Status. Still not exercised:
+
+- the guard enabled on a live Container App under real gateway traffic (the token and the
+  guard code are verified together; flipping the switch on a running app is the remaining
+  step, and the Container Apps must be able to reach `login.microsoftonline.com` for the
+  signing keys);
+- a browser session through the gateway (the SPA calls are covered by CORS, header, body and
+  WebSocket checks, not by driving the UI);
+- the hosted agents and the harness actually redeployed or re-pointed at the gateway URLs (the
+  authentication mechanism is verified, the redeploy is not);
+- the first real apply under the scoped pipeline role.
+
+The `ca-insurance-*` apps run images built manually before the guard existed; release them from
+`main` before enabling the guard on the insurance stack (the script refuses to confirm
+otherwise). Everything else is covered by unit tests and by the live checks above.
