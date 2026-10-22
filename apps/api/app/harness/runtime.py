@@ -104,7 +104,7 @@ class HarnessRuntime:
                 mcp = urlsplit(settings.harness_resolution_mcp)
                 valid_mcp = (mcp.scheme == "https" and mcp.hostname and not mcp.username
                              and not mcp.password and not mcp.query and not mcp.fragment
-                             and mcp.path.rstrip("/").endswith("/mcp"))
+                             and mcp.path.rstrip("/").endswith(("/mcp", "/mcp/work-order")))
             except ValueError:
                 valid_mcp = False
             if not valid_mcp:

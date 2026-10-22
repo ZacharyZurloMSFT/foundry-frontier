@@ -21,6 +21,8 @@ environment_variables:
     value: ${MODEL_DEPLOYMENT_NAME}
   - name: MCP_TECH_LOOKUP_URL
     value: ${MCP_TECH_LOOKUP_URL}
+  - name: MCP_GATEWAY_CONNECTION
+    value: ${MCP_GATEWAY_CONNECTION}
 resources:
   cpu: "1.0"
   memory: 2Gi

@@ -6,6 +6,7 @@ import os
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from ..observability import get_tracer
 from ..orchestrator_client import _extract_output_text, invoke_prompt_agent_once
@@ -29,6 +30,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 NAMES: tuple[Specialist, ...] = ("triage", "order_lookup", "policy_lookup", "resolution_draft")
+GATEWAY_KEY_HEADER = "Ocp-Apim-Subscription-Key"
+
+
+def gateway_headers(settings: Settings) -> dict[str, str]:
+    """API gateway key for MCP calls; empty (today's behavior) unless MCP_GATEWAY_SUBSCRIPTION_KEY is set."""
+    key = settings.harness_gateway_key.get_secret_value().strip()
+    if not key:
+        return {}
+    try:
+        secure = urlsplit(settings.harness_resolution_mcp).scheme == "https"
+    except ValueError:
+        secure = False
+    if not secure:
+        raise HarnessError("mcp_unconfigured", "MCP_WORK_ORDER_URL must be HTTPS when MCP_GATEWAY_SUBSCRIPTION_KEY is set.")
+    return {GATEWAY_KEY_HEADER: key}
 
 
 def mcp_payload(raw: str) -> dict:
@@ -98,7 +114,7 @@ class SpecialistTools:
                         "type": "mcp", "server_label": "northwind-resolution-draft",
                         "server_url": self.settings.harness_resolution_mcp,
                         "require_approval": "never", "allowed_tools": ["propose_resolution"],
-                        "headers": {"x-harness-workflow": self.wid},
+                        "headers": {"x-harness-workflow": self.wid, **gateway_headers(self.settings)},
                     }
                 self.emit(ToolEvent(kind="tool_start", tool=name, call_id=call_id,
                                     text=redact(params.prompt)))

@@ -29,6 +29,13 @@ deployment, because prompt-agent function tools don't yet work on
 gpt-5.x). Falls back to `FOUNDRY_WORKER_DEPLOYMENT` for older
 environments that predate the split.
 
+API gateway: when `MCP_GATEWAY_CONNECTION` names a project connection (a
+RemoteTool/CustomKeys connection holding the `Ocp-Apim-Subscription-Key`),
+every yaml `type: mcp` tool whose `server_url` points at the gateway (a
+`*.azure-api.net` host, or the host of `NORTHWIND_GATEWAY_URL`) authenticates
+through it via `project_connection_id`, unless the yaml sets its own. Gateway
+URLs are never rewritten; direct Container App URLs behave exactly as before.
+
 Fails loudly (non-zero exit) on any per-agent error so post-provision
 surfaces the failure instead of silently leaving Foundry empty.
 """
@@ -41,6 +48,7 @@ import sys
 import traceback
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -95,6 +103,18 @@ def _expand_env(v: Any) -> Any:
     for name, val in os.environ.items():
         out = out.replace(f"${{{name}}}", val)
     return out
+
+
+def _is_gateway_url(url: str) -> bool:
+    """True when an MCP server URL targets the API gateway: any *.azure-api.net host, or the host of
+    NORTHWIND_GATEWAY_URL (a custom gateway domain)."""
+    configured = os.environ.get("NORTHWIND_GATEWAY_URL", "").strip()
+    try:
+        host = urlsplit(url).hostname or ""
+        custom = urlsplit(configured if "//" in configured else f"//{configured}").hostname if configured else None
+    except ValueError:
+        return False
+    return host.endswith(".azure-api.net") or (custom is not None and host == custom)
 
 
 def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = None) -> list[dict[str, Any]]:
@@ -220,7 +240,9 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None) -> li
             # `/mcp` (no trailing slash) URL here so old azd envs that were
             # provisioned before the Bicep fix keep working after a
             # re-run of this script.
-            if server_url.rstrip("?").endswith("/mcp"):
+            # Gateway URLs are left untouched: the gateway rewrites them to the backend's `/mcp/` itself.
+            gateway = _is_gateway_url(server_url)
+            if not gateway and server_url.rstrip("?").endswith("/mcp"):
                 server_url = server_url.rstrip("/") + "/"
             mcp_entry: dict[str, Any] = {
                 "type": "mcp",
@@ -235,6 +257,11 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None) -> li
                 mcp_entry["headers"] = {k: _expand_env(v) for k, v in headers.items()}
             if t.get("project_connection_id"):
                 mcp_entry["project_connection_id"] = _expand_env(t["project_connection_id"])
+            elif gateway and os.environ.get("MCP_GATEWAY_CONNECTION", "").strip():
+                # Foundry attaches the connection's CustomKeys (the gateway subscription key) to every call.
+                mcp_entry["project_connection_id"] = os.environ["MCP_GATEWAY_CONNECTION"].strip()
+                print(f"  ~ {cfg['name']}: MCP server is behind the API gateway; "
+                      f"using project connection '{mcp_entry['project_connection_id']}'.")
             resolved.append(mcp_entry)
         elif kind == "knowledge":
             # Handled in _knowledge_tools_for_agent (below).
