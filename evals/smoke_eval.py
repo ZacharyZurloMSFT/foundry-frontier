@@ -31,8 +31,7 @@ GH_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions"
 DEFAULT_MODEL = os.environ.get("GH_MODELS_MODEL", "openai/gpt-4o-mini")
 
 # 5 hand-picked micro-cases. Kept intentionally tiny — the goal is a signal
-# in <60s, not a real quality measurement. That's what the Tier-2 golden
-# set (run_evals.py) is for.
+# in <60s, not a real quality measurement.
 CASES: list[dict] = [
     {
         "workflow": "triage",

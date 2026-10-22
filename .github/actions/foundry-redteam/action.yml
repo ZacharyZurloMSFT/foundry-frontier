@@ -24,9 +24,6 @@ inputs:
     required: true
   foundry_project_endpoint:
     required: true
-  api_uri:
-    description: "API base URL for the copilot-sdk HTTP target"
-    required: false
 
 outputs:
   pass_rate:
@@ -54,7 +51,6 @@ runs:
       shell: bash
       env:
         FOUNDRY_PROJECT_ENDPOINT: ${{ inputs.foundry_project_endpoint }}
-        API_URI: ${{ inputs.api_uri }}
       run: |
         python pipelines/red-team/run_redteam.py \
           --agent      "${{ inputs.target_agent }}" \

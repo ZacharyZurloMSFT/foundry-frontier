@@ -393,58 +393,6 @@ def test_import_redacted_native_examples_requires_unreviewed_and_extraction_scop
         curation.import_examples(workspace, path)
 
 
-def run_golden(workspace, monkeypatch, configured_judge, reference):
-    import asyncio
-    from evals import run_evals
-
-    dataset = workspace / "golden.jsonl"
-    dataset.write_bytes(curation.jsonl([{"id": "one", "workflow": "order_lookup", "input": "unit test"}]))
-    baseline = workspace / "baseline.json"
-    baseline.write_text(json.dumps({"aggregates": {"order-concierge": {"orchestrator": reference}}}), encoding="utf-8")
-    output = workspace / "golden-result.json"
-
-    async def workflow(_row):
-        return "unit-test response"
-
-    monkeypatch.setattr(run_evals, "run_workflow", workflow)
-    monkeypatch.setattr(run_evals, "_HAVE_EVALS", configured_judge)
-    monkeypatch.setattr(run_evals, "DefaultAzureCredential", lambda: None)
-    monkeypatch.setattr(run_evals, "judge_model_config_from_env",
-                        lambda: {"azure_deployment": "unit-test"} if configured_judge else None)
-    monkeypatch.setenv("FOUNDRY_PROJECT_ENDPOINT", "https://unit-test.invalid")
-    for evaluator in ("CoherenceEvaluator", "TaskAdherenceEvaluator", "HateUnfairnessEvaluator", "ViolenceEvaluator"):
-        monkeypatch.setattr(run_evals, evaluator, lambda **_kw: lambda **_args: {"score": 1})
-    monkeypatch.setattr(run_evals, "load_agent_rubric", lambda *_args: lambda **_kw: {"pass": True})
-    monkeypatch.setattr(sys, "argv", ["run_evals.py", "--dataset", str(dataset), "--output", str(output),
-                                    "--baseline", str(baseline)])
-    return asyncio.run(run_evals.main()), curation.read_json(output)
-
-
-@pytest.mark.parametrize("configured_judge", [False, True])
-def test_existing_golden_runner_empty_baseline_cannot_pass(workspace, monkeypatch, configured_judge):
-    code, result = run_golden(workspace, monkeypatch, configured_judge, {})
-    assert code == 2
-    assert result["regression_status"] == "unavailable"
-    assert "empty" in result["baseline_error"]
-
-
-@pytest.mark.parametrize("reference", [
-    {"coherence.score": "perfect"}, {"coherence.score": None}, {"coherence.score": float("nan")},
-    {"coherence.score": float("inf")}, {"coherence.score": True}, {"invented_metric": 1}, [],
-])
-def test_golden_malformed_baseline_never_passes(workspace, monkeypatch, reference):
-    code, result = run_golden(workspace, monkeypatch, True, reference)
-    assert code == 2
-    assert result["regression_status"] == "invalid"
-    assert result["baseline_error"]
-
-
-def test_golden_valid_measured_baseline_can_pass(workspace, monkeypatch):
-    code, result = run_golden(workspace, monkeypatch, True, {"coherence.score": 1.0})
-    assert code == 0
-    assert result["regression_status"] == "evaluated"
-
-
 def test_submit_requires_explicit_training_project_even_with_approved_budget(release):
     path = approved_budget(release)
     with pytest.raises(ValueError, match="explicit --training-project"):
