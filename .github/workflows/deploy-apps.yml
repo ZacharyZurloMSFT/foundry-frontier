@@ -205,6 +205,15 @@ jobs:
                 ;;
             esac
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+          # The insurance-branded apps ship from the same api/web-tech sources.
+          for pair in api:insurance-api web-tech:insurance-portal; do
+            if jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null; then
+              az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-${pair##*:}" \
+                --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
+                -o json > ".release-state/before-${pair##*:}.json"
+              jq -e '.revision and .image' ".release-state/before-${pair##*:}.json" > /dev/null
+            fi
+          done
       - name: Build and push immutable images on the runner (never ACR admin credentials)
         shell: bash
         run: |
@@ -224,6 +233,32 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s' "$ACR_NAME.azurecr.io/$service@$digest" > ".release-state/image-$service"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+          if jq -e 'index("web-tech")' <<< "$SERVICES_JSON" > /dev/null; then
+            # Insurance portal: same source, built against the insurance API with its Entra sign-in settings.
+            insurance_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
+              --name ca-insurance-api --query properties.configuration.ingress.fqdn -o tsv)"
+            [[ "$insurance_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+            (cd apps/web-tech \
+              && VITE_API_BASE_URL="https://$insurance_fqdn" \
+                 VITE_INSURANCE_BUSINESS_ENABLED=true \
+                 VITE_INSURANCE_AUTH_TENANT_ID="${VITE_INSURANCE_AUTH_TENANT_ID:-$AZURE_TENANT_ID}" \
+                 VITE_INSURANCE_AUTH_CLIENT_ID="${VITE_INSURANCE_AUTH_CLIENT_ID:-0d7bda00-80e1-4004-a78d-9072bc8f836d}" \
+                 VITE_INSURANCE_AUTH_SCOPE="${VITE_INSURANCE_AUTH_SCOPE:-api://02f5b350-4ab2-4297-af8d-672034fa81b0/access_as_user}" \
+                 VITE_INSURANCE_RUN_ID="${VITE_INSURANCE_RUN_ID:-northwind-demo}" \
+                 npm run build)
+            tag="$ACR_NAME.azurecr.io/web-tech:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-insurance"
+            docker buildx build --platform linux/amd64 --push --tag "$tag" \
+              --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.created=$deployed_at" \
+              --metadata-file ".release-state/build-insurance-portal.json" apps/web-tech
+            digest="$(jq -er '."containerimage.digest"' ".release-state/build-insurance-portal.json")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s' "$ACR_NAME.azurecr.io/web-tech@$digest" > ".release-state/image-insurance-portal"
+          fi
+          if jq -e 'index("api")' <<< "$SERVICES_JSON" > /dev/null; then
+            cp ".release-state/image-api" ".release-state/image-insurance-api"
+          fi
       - name: Release digest-pinned images, preserving all configuration and opt-in flags
         shell: bash
         run: |
@@ -241,6 +276,20 @@ jobs:
             fi
             python scripts/release-app.py "${args[@]}"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
+          for pair in api:insurance-api web-tech:insurance-portal; do
+            target="${pair##*:}"
+            jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null || continue
+            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
+            args=(release --subscription "$AZURE_SUBSCRIPTION_ID" --tenant "$AZURE_TENANT_ID"
+              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "ca-$target"
+              --image "$(cat ".release-state/image-$target")" --revision "$revision"
+              --expected-revision "$(jq -er .revision ".release-state/before-$target.json")"
+              --rollback-file ".release-state/rollback-$target.json" --apply)
+            if [[ "$target" == insurance-api ]]; then
+              args+=(--git-sha "$SOURCE_SHA" --deployed-at "$DEPLOYED_AT" --github-repository "$GITHUB_REPOSITORY")
+            fi
+            python scripts/release-app.py "${args[@]}"
+          done
       - name: Preserve secret-free rollback records even when readiness is unknown
         if: always()
         uses: actions/upload-artifact@v7

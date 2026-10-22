@@ -576,3 +576,12 @@ def test_actual_workflow_trust_gate_against_untrusted_and_unverified_sources(cas
     assert (result.returncode == 0) is allowed, result.stdout + result.stderr
     if allowed:
         assert json.loads(result.stdout)["sha"] == SOURCE_SHA
+
+
+@pytest.mark.parametrize("app", ["ca-insurance-api", "ca-insurance-portal"])
+def test_insurance_apps_release_from_shared_images(app):
+    image = f"{release_app.REGISTRY}/{release_app.RELEASE_APPS[app]}@sha256:{DIGEST}"
+    args = arguments(app, image=image)
+    if app == "ca-insurance-api":
+        args.git_sha, args.deployed_at, args.github_repository = SOURCE_SHA, "2026-10-15T21:00:00Z", release_app.REPOSITORY
+    release_app.validate_release(args)
