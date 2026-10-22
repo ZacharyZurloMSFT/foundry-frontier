@@ -186,7 +186,6 @@ def test_preview_is_fully_offline_and_does_not_write_or_disclose_people(configur
     assert output["redirect_uri"] == REDIRECT
     assert output["participant_mapping_counts"] == {"total": 1, "by_role": {"policyholder": 1}}
     assert not output["ready_for_participants"]
-    assert output["configuration_to_review_not_applied"]["frontend"]["VITE_INSURANCE_BUSINESS_ENABLED"] == "false"
     assert output["configuration_to_review_not_applied"]["api"]["NORTHWIND_BUSINESS_API_ENABLED"] == "false"
     permissions = output["operator_permissions_to_review"]
     assert permissions["credential"] == "AzureCliCredential"

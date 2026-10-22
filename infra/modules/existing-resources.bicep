@@ -154,17 +154,12 @@ resource webTech 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
   name: 'ca-web-tech'
 }
-resource webVoice 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
-  scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-web-voice'
-}
 // Report each app's actual attachment, even when a replacement environment is selected.
 output containerAppResources array = [
   { service: 'api', name: api.name, id: api.id, environmentId: api.properties.managedEnvironmentId }
   { service: 'mcp-tech-lookup', name: mcpTechLookup.name, id: mcpTechLookup.id, environmentId: mcpTechLookup.properties.managedEnvironmentId }
   { service: 'mcp-work-order', name: mcpWorkOrder.name, id: mcpWorkOrder.id, environmentId: mcpWorkOrder.properties.managedEnvironmentId }
   { service: 'web-tech', name: webTech.name, id: webTech.id, environmentId: webTech.properties.managedEnvironmentId }
-  { service: 'web-voice', name: webVoice.name, id: webVoice.id, environmentId: webVoice.properties.managedEnvironmentId }
 ]
 
 output settings object = union(preservedSettings, {
@@ -185,7 +180,6 @@ output settings object = union(preservedSettings, {
   MCP_TECH_LOOKUP_URL: 'https://${mcpTechLookup.properties.configuration.ingress.fqdn}/mcp/'
   MCP_WORK_ORDER_URL: 'https://${mcpWorkOrder.properties.configuration.ingress.fqdn}/mcp/'
   WEB_TECH_URI: 'https://${webTech.properties.configuration.ingress.fqdn}'
-  WEB_VOICE_URI: 'https://${webVoice.properties.configuration.ingress.fqdn}'
   AZURE_LOG_ANALYTICS_RESOURCE_ID: logAnalytics.id
 })
 

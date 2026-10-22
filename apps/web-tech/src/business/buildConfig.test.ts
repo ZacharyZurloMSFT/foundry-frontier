@@ -4,11 +4,11 @@ import localDockerfile from "../../Dockerfile.local?raw";
 
 const files: Record<string, string> = { Dockerfile: dockerfile, "Dockerfile.local": localDockerfile };
 describe("insurance Docker build-time configuration", () => {
-  it.each(["Dockerfile", "Dockerfile.local"])("%s declares disabled/blank business arguments and passes them into Vite before building", file => {
-    const content = files[file].replace(/\r\n/g, "\n");
+  it("Dockerfile.local declares blank identity arguments and passes them into Vite before building", () => {
+    const content = localDockerfile.replace(/\r\n/g, "\n");
     const defaults = {
-      VITE_INSURANCE_BUSINESS_ENABLED: "false", VITE_INSURANCE_AUTH_TENANT_ID: "",
-      VITE_INSURANCE_AUTH_CLIENT_ID: "", VITE_INSURANCE_AUTH_SCOPE: "", VITE_INSURANCE_RUN_ID: "",
+      VITE_INSURANCE_AUTH_TENANT_ID: "", VITE_INSURANCE_AUTH_CLIENT_ID: "",
+      VITE_INSURANCE_AUTH_SCOPE: "", VITE_INSURANCE_RUN_ID: "",
     };
     for (const [key, value] of Object.entries(defaults)) {
       expect(content).toContain(`ARG ${key}=${value}\n`);
@@ -18,10 +18,12 @@ describe("insurance Docker build-time configuration", () => {
     expect(content).toContain("ARG VITE_API_BASE_URL=http://localhost:8000");
     expect(content).toContain("COPY --from=build /src/dist /usr/share/nginx/html");
   });
-  it("keeps production's prepackaged default and only rebuilds for an explicit opt-in", () => {
-    const content = dockerfile;
-    expect(content).toContain('if [ "$VITE_INSURANCE_BUSINESS_ENABLED" = "true" ]; then');
-    expect(content).toContain("COPY . .");
-    expect(content).toContain("npm ci --no-audit --no-fund && npm run build");
+  it("keeps production on the prebuilt dist and never rebuilds the SPA in the image", () => {
+    const content = dockerfile.replace(/\r\n/g, "\n");
+    expect(content).toContain("COPY dist /usr/share/nginx/html");
+    expect(content).not.toMatch(/^RUN /m);
+  });
+  it.each(["Dockerfile", "Dockerfile.local"])("%s has no business/legacy shell switch", file => {
+    expect(files[file]).not.toContain("VITE_INSURANCE_BUSINESS_ENABLED");
   });
 });

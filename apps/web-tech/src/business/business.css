@@ -50,6 +50,7 @@ html[data-theme="dark"][data-insurance-business="true"] {
   --cp-sheen: rgba(255, 255, 255, 0.04);
   --cp-highlight: rgba(253, 142, 161, 0.12);
 }
+:root[data-insurance-business="true"] body { margin: 0; background: var(--cp-bg); }
 .insurance-business {
   min-height: 100vh; background: var(--cp-bg); color: var(--cp-text);
   font: 16px/1.6 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; overflow-wrap: anywhere;

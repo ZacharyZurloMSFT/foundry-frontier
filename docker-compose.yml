@@ -1,4 +1,4 @@
-# Local dev compose: runs the FastAPI backend + both React SPAs against the
+# Local dev compose: runs the FastAPI backend + the React SPA against the
 # already-provisioned dev Azure services (Foundry, Search, Cosmos, Storage).
 # Requires a .env file at the repo root (generate via `scripts/fetch-keys.ps1`).
 #
@@ -6,7 +6,6 @@
 #   docker compose up --build
 #     api        → http://localhost:8000
 #     web-tech   → http://localhost:5173
-#     web-voice  → http://localhost:5174
 
 services:
   api:
@@ -44,17 +43,4 @@ services:
       - api
     ports:
       - "5173:80"
-    restart: unless-stopped
-
-  web-voice:
-    build:
-      context: ./apps/web-voice
-      dockerfile: Dockerfile.local
-      args:
-        VITE_API_BASE_URL: http://localhost:8000
-    image: northwind-copilot/web-voice:local
-    depends_on:
-      - api
-    ports:
-      - "5174:80"
     restart: unless-stopped

@@ -434,7 +434,6 @@ def test_existing_rollback_is_never_overwritten(record):
 @pytest.mark.parametrize("paths,expected", [
     (["README.md", "infra/main.bicep"], []),
     (["apps/web-tech/package-lock.json"], ["web-tech"]),
-    (["apps/web-voice/src/App.tsx"], ["web-voice"]),
     (["apps/api/app/main.py"], ["api"]),
     (["apps/api/app/insurance_domain.py"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
     (["data/northwind/insurance-fixtures.json"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
@@ -478,12 +477,9 @@ def test_manual_service_allowlist_and_no_unchecked_sha():
             release_app.plan(sha, None, service)
 
 
-def test_business_frontend_defaults_disabled_but_enabled_configuration_must_be_complete():
+def test_business_frontend_identity_must_be_complete_once_any_setting_is_present():
     release_app.validate_frontend_environment({})
-    release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "false"})
-    release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "true"})
     valid = {
-        "VITE_INSURANCE_BUSINESS_ENABLED": "true",
         "VITE_INSURANCE_AUTH_TENANT_ID": release_app.TENANT,
         "VITE_INSURANCE_AUTH_CLIENT_ID": release_app.TENANT,
         "VITE_INSURANCE_AUTH_SCOPE": "api://explicit-api/business",

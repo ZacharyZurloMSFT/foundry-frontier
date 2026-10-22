@@ -154,7 +154,7 @@ def test_oidc_plan_has_no_credentials_and_no_subscription_wide_assignments():
     assert not any("roleAssignments/write" in action for role in setup.ROLES.values() for action in role["actions"])
     assert all(not role.get("dataActions") for role in setup.ROLES.values())
     app_scopes = [scope for key, scope, role in setup.bindings() if key == "apps" and role == setup.role_id("apps")]
-    assert len(app_scopes) == 5 and all("/Microsoft.App/containerApps/ca-" in scope for scope in app_scopes)
+    assert len(app_scopes) == 4 and all("/Microsoft.App/containerApps/ca-" in scope for scope in app_scopes)
 
 
 def test_oidc_preview_has_no_cloud_calls(monkeypatch):

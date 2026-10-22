@@ -302,27 +302,6 @@ services:
                     run: |
                         if [ -z "$VITE_API_BASE_URL" ] && [ -n "$API_URI" ]; then export VITE_API_BASE_URL="$API_URI"; fi
                         npm install --no-audit --no-fund && npm run build
-    web-voice:
-        project: ./apps/web-voice
-        host: containerapp
-        resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-web-voice
-        language: js
-        docker:
-            path: Dockerfile
-            remoteBuild: true
-        hooks:
-            prepackage:
-                windows:
-                    shell: pwsh
-                    run: |
-                        if (-not $env:VITE_API_BASE_URL -and $env:API_URI) { $env:VITE_API_BASE_URL = $env:API_URI }
-                        npm install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm run build
-                posix:
-                    shell: sh
-                    run: |
-                        if [ -z "$VITE_API_BASE_URL" ] && [ -n "$API_URI" ]; then export VITE_API_BASE_URL="$API_URI"; fi
-                        npm install --no-audit --no-fund && npm run build
 hooks:
     predeploy:
         windows:

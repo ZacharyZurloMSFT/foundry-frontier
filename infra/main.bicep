@@ -457,7 +457,6 @@ output AZURE_CONTAINER_REGISTRY_NAME string = reuseExisting ? reuse!.outputs.set
 
 output API_URI string = reuseExisting ? reuse!.outputs.settings.API_URI : containerapps!.outputs.apiUri
 output WEB_TECH_URI string = reuseExisting ? reuse!.outputs.settings.WEB_TECH_URI : containerapps!.outputs.webTechUri
-output WEB_VOICE_URI string = reuseExisting ? reuse!.outputs.settings.WEB_VOICE_URI : containerapps!.outputs.webVoiceUri
 
 // MCP server URLs consumed by scripts/create-prompt-agents.py to render
 // the type: mcp tool blocks in agents/tech_lookup.yaml + work_order_draft.yaml.

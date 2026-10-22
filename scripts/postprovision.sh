@@ -58,5 +58,4 @@ if [ -x "$ROOT/.venv/bin/python" ]; then PY="$ROOT/.venv/bin/python"; else PY="p
 "$PY" "$ROOT/scripts/connect-knowledge-base.py"
 "$PY" "$ROOT/scripts/create-prompt-agents.py"
 echo "Web-Tech:  ${WEB_TECH_URI}"
-echo "Web-Voice: ${WEB_VOICE_URI}"
 echo "API:       ${API_URI}"

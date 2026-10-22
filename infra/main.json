@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13235562850488182570"
+      "templateHash": "8250591669852218361"
     }
   },
   "parameters": {
@@ -2207,7 +2207,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14488735807841633820"
+              "templateHash": "9765530348483287619"
             }
           },
           "parameters": {
@@ -2475,56 +2475,6 @@
                   "containers": [
                     {
                       "name": "web-tech",
-                      "image": "[variables('placeholder')]",
-                      "env": [
-                        {
-                          "name": "VITE_API_BASE_URL",
-                          "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
-                        }
-                      ],
-                      "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1Gi"
-                      }
-                    }
-                  ],
-                  "scale": {
-                    "minReplicas": 1,
-                    "maxReplicas": 3
-                  }
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'ca-api')]",
-                "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.App/containerApps",
-              "apiVersion": "2024-10-02-preview",
-              "name": "ca-web-voice",
-              "location": "[parameters('location')]",
-              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'web-voice'))]",
-              "identity": {
-                "type": "UserAssigned",
-                "userAssignedIdentities": {
-                  "[format('{0}', parameters('identityId'))]": {}
-                }
-              },
-              "properties": {
-                "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]",
-                "configuration": {
-                  "ingress": {
-                    "external": true,
-                    "targetPort": 80,
-                    "transport": "auto"
-                  },
-                  "registries": "[variables('acrRegistry')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "web-voice",
                       "image": "[variables('placeholder')]",
                       "env": [
                         {
@@ -2851,10 +2801,6 @@
               "type": "string",
               "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-web-tech'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             },
-            "webVoiceUri": {
-              "type": "string",
-              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-web-voice'), '2024-10-02-preview').configuration.ingress.fqdn)]"
-            },
             "mcpTechLookupUrl": {
               "type": "string",
               "value": "[format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-tech-lookup'), '2024-10-02-preview').configuration.ingress.fqdn)]"
@@ -2941,7 +2887,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "6194024420623504578"
+              "templateHash": "11091557976545366039"
             }
           },
           "definitions": {
@@ -3247,13 +3193,6 @@
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
               "name": "ca-web-tech"
-            },
-            "webVoice": {
-              "existing": true,
-              "type": "Microsoft.App/containerApps",
-              "apiVersion": "2024-10-02-preview",
-              "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-web-voice"
             }
           },
           "outputs": {
@@ -3283,18 +3222,12 @@
                   "name": "ca-web-tech",
                   "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-web-tech')]",
                   "environmentId": "[reference('webTech').managedEnvironmentId]"
-                },
-                {
-                  "service": "web-voice",
-                  "name": "ca-web-voice",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-web-voice')]",
-                  "environmentId": "[reference('webVoice').managedEnvironmentId]"
                 }
               ]
             },
             "settings": {
               "type": "object",
-              "value": "[union(parameters('preservedSettings'), createObject('AZURE_CLIENT_ID', reference('identity').clientId, 'AZURE_MANAGED_IDENTITY_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}app-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), 'AZURE_MANAGED_IDENTITY_PRINCIPAL_ID', reference('identity').principalId, 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference('appInsights').ConnectionString, 'AZURE_AI_PROJECT_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('orderProjectName')), 'FOUNDRY_PROJECT_PRINCIPAL_ID', reference('orderProject', '2025-06-01', 'full').identity.principalId, 'ORDER_DEFAULT_PROJECT', reference('foundry').defaultProject, 'AZURE_SEARCH_ENDPOINT', format('https://{0}.search.windows.net', format('{0}{1}', variables('abbrs').searchSearchServices, parameters('resourceToken'))), 'COSMOS_ENDPOINT', reference('cosmos').documentEndpoint, 'STORAGE_ACCOUNT', format('{0}{1}', variables('abbrs').storageStorageAccounts, parameters('compactToken')), 'AZURE_CONTAINER_REGISTRY_ENDPOINT', reference('acr').loginServer, 'AZURE_CONTAINER_REGISTRY_NAME', format('{0}{1}', variables('abbrs').containerRegistries, parameters('compactToken')), 'API_URI', format('https://{0}', reference('api').configuration.ingress.fqdn), 'MCP_TECH_LOOKUP_URL', format('https://{0}/mcp/', reference('mcpTechLookup').configuration.ingress.fqdn), 'MCP_WORK_ORDER_URL', format('https://{0}/mcp/', reference('mcpWorkOrder').configuration.ingress.fqdn), 'WEB_TECH_URI', format('https://{0}', reference('webTech').configuration.ingress.fqdn), 'WEB_VOICE_URI', format('https://{0}', reference('webVoice').configuration.ingress.fqdn), 'AZURE_LOG_ANALYTICS_RESOURCE_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('logAnalyticsResourceGroupName')), 'Microsoft.OperationalInsights/workspaces', format('{0}{1}', variables('abbrs').operationalInsightsWorkspaces, parameters('resourceToken')))))]"
+              "value": "[union(parameters('preservedSettings'), createObject('AZURE_CLIENT_ID', reference('identity').clientId, 'AZURE_MANAGED_IDENTITY_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}app-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), 'AZURE_MANAGED_IDENTITY_PRINCIPAL_ID', reference('identity').principalId, 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference('appInsights').ConnectionString, 'AZURE_AI_PROJECT_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('orderProjectName')), 'FOUNDRY_PROJECT_PRINCIPAL_ID', reference('orderProject', '2025-06-01', 'full').identity.principalId, 'ORDER_DEFAULT_PROJECT', reference('foundry').defaultProject, 'AZURE_SEARCH_ENDPOINT', format('https://{0}.search.windows.net', format('{0}{1}', variables('abbrs').searchSearchServices, parameters('resourceToken'))), 'COSMOS_ENDPOINT', reference('cosmos').documentEndpoint, 'STORAGE_ACCOUNT', format('{0}{1}', variables('abbrs').storageStorageAccounts, parameters('compactToken')), 'AZURE_CONTAINER_REGISTRY_ENDPOINT', reference('acr').loginServer, 'AZURE_CONTAINER_REGISTRY_NAME', format('{0}{1}', variables('abbrs').containerRegistries, parameters('compactToken')), 'API_URI', format('https://{0}', reference('api').configuration.ingress.fqdn), 'MCP_TECH_LOOKUP_URL', format('https://{0}/mcp/', reference('mcpTechLookup').configuration.ingress.fqdn), 'MCP_WORK_ORDER_URL', format('https://{0}/mcp/', reference('mcpWorkOrder').configuration.ingress.fqdn), 'WEB_TECH_URI', format('https://{0}', reference('webTech').configuration.ingress.fqdn), 'AZURE_LOG_ANALYTICS_RESOURCE_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('logAnalyticsResourceGroupName')), 'Microsoft.OperationalInsights/workspaces', format('{0}{1}', variables('abbrs').operationalInsightsWorkspaces, parameters('resourceToken')))))]"
             },
             "resourceIds": {
               "type": "object",
@@ -3544,10 +3477,6 @@
     "WEB_TECH_URI": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_TECH_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webTechUri.value)]"
-    },
-    "WEB_VOICE_URI": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_VOICE_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webVoiceUri.value)]"
     },
     "MCP_TECH_LOOKUP_URL": {
       "type": "string",

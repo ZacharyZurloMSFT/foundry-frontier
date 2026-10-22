@@ -10,7 +10,7 @@ on:
       service:
         description: Existing app to release
         type: choice
-        options: [all, api, mcp-tech-lookup, mcp-work-order, web-tech, web-voice]
+        options: [all, api, mcp-tech-lookup, mcp-work-order, web-tech]
         default: all
         required: true
       expected_sha:
@@ -132,7 +132,6 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_APPS_RESOURCE_GROUP: ${{ vars.AZURE_APPS_RESOURCE_GROUP }}
       ACR_NAME: ${{ vars.ACR_NAME }}
-      VITE_INSURANCE_BUSINESS_ENABLED: ${{ vars.VITE_INSURANCE_BUSINESS_ENABLED || 'true' }}
       VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID }}
       VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
       VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE }}
@@ -178,7 +177,7 @@ jobs:
           [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
           export VITE_API_BASE_URL="https://$api_fqdn"
           while IFS= read -r service; do
-            case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech|web-voice) ;; *) exit 1 ;; esac
+            case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech) ;; *) exit 1 ;; esac
             az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-$service" \
               --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
               -o json > ".release-state/before-$service.json"

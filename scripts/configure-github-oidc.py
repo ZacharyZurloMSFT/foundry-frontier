@@ -20,7 +20,7 @@ APPS = f"{BASE}/resourceGroups/rg-northwind-apps"
 NETWORK = f"{BASE}/resourceGroups/rg-northwind-networking"
 STORAGE = f"{BASE}/resourceGroups/rg-northwind-data/providers/Microsoft.Storage/storageAccounts/stzurlonorthwind"
 ACR = f"{APPS}/providers/Microsoft.ContainerRegistry/registries/acrzurlonorthwind"
-APPS_NAMES = ["ca-api", "ca-web-tech", "ca-web-voice", "ca-mcp-tech-lookup", "ca-mcp-work-order"]
+APPS_NAMES = ["ca-api", "ca-web-tech", "ca-mcp-tech-lookup", "ca-mcp-work-order"]
 IDENTITIES = {
     "apps": ("id-gh-northwind-apps", "northwind-apps", "AZURE_APPS_CLIENT_ID"),
     "infra-plan": ("id-gh-northwind-plan", "northwind-infra-plan", "AZURE_INFRA_PLAN_CLIENT_ID"),

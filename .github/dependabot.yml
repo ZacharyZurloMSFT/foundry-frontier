@@ -33,9 +33,6 @@ updates:
     groups:
       react:
         patterns: ["react", "react-dom", "@types/react*"]
-  - package-ecosystem: "npm"
-    directory: "/apps/web-voice"
-    schedule: { interval: "weekly" }
   - package-ecosystem: "docker"
     directory: "/apps/api"
     schedule: { interval: "weekly" }

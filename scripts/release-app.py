@@ -19,7 +19,7 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 RESOURCE_GROUP = "rg-northwind-apps"
 REGISTRY = "acrzurlonorthwind.azurecr.io"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
-SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech", "web-voice")
+SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech")
 APPS = {f"ca-{service}": service for service in SERVICES}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
@@ -75,21 +75,17 @@ def plan(source_sha: str, base_sha: str | None, service: str | None = None) -> l
 
 
 def validate_frontend_environment(env: dict[str, str]) -> None:
-    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") not in ("true", "false"):
-        raise ValueError("Business frontend flag must be true or false")
-    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") != "true":
-        return
     names = ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID", "VITE_INSURANCE_AUTH_SCOPE", "VITE_INSURANCE_RUN_ID")
     if not any(env.get(name) for name in names):
         return  # Public branded pages only; sign-in stays unavailable until identity is configured.
     uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
     for name in ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID"):
         if not re.fullmatch(uuid, env.get(name, "")):
-            raise ValueError("Enabled business frontend requires explicit tenant/client UUIDs")
+            raise ValueError("Business frontend requires explicit tenant/client UUIDs")
     if not re.fullmatch(r"(?:api|https)://[^\s]+/[^\s/]+", env.get("VITE_INSURANCE_AUTH_SCOPE", "")):
-        raise ValueError("Enabled business frontend requires a full delegated API scope URI")
+        raise ValueError("Business frontend requires a full delegated API scope URI")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", env.get("VITE_INSURANCE_RUN_ID", "")):
-        raise ValueError("Enabled business frontend requires an explicit valid run ID")
+        raise ValueError("Business frontend requires an explicit valid run ID")
 
 
 def _valid_metadata(name: str, value: str) -> bool:

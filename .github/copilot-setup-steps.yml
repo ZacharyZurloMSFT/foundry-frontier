@@ -24,6 +24,5 @@ jobs:
       - name: Install web build tools (used by the api's static preview)
         run: |
           (cd apps/web-tech && npm install --no-audit --no-fund)
-          (cd apps/web-voice && npm install --no-audit --no-fund)
       - name: Prime GitHub Models smoke eval (no Azure creds required)
         run: python evals/smoke_eval.py --self-check

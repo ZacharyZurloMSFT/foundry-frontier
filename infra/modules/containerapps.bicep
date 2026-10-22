@@ -174,34 +174,6 @@ resource webTech 'Microsoft.App/containerApps@2024-10-02-preview' = {
   }
 }
 
-// ── Web-Voice ──────────────────────────────────────────────────────────────
-resource webVoice 'Microsoft.App/containerApps@2024-10-02-preview' = {
-  name: 'ca-web-voice'
-  location: location
-  tags: union(tags, { 'azd-service-name': 'web-voice' })
-  identity: { type: 'UserAssigned', userAssignedIdentities: { '${identityId}': {} } }
-  properties: {
-    managedEnvironmentId: env.id
-    configuration: {
-      ingress: { external: true, targetPort: 80, transport: 'auto' }
-      registries: acrRegistry
-    }
-    template: {
-      containers: [
-        {
-          name: 'web-voice'
-          image: placeholder
-          env: [
-            { name: 'VITE_API_BASE_URL', value: 'https://${api.properties.configuration.ingress.fqdn}' }
-          ]
-          resources: { cpu: json('0.5'), memory: '1Gi' }
-        }
-      ]
-      scale: { minReplicas: 1, maxReplicas: 3 }
-    }
-  }
-}
-
 // ── Content Understanding ingestion worker ─────────────────────────────────
 resource cuIngest 'Microsoft.App/containerApps@2024-10-02-preview' = if (enableCuIngest) {
   name: 'ca-cu-ingest'
@@ -309,7 +281,6 @@ resource mcpWorkOrder 'Microsoft.App/containerApps@2024-10-02-preview' = {
 
 output apiUri string = 'https://${api.properties.configuration.ingress.fqdn}'
 output webTechUri string = 'https://${webTech.properties.configuration.ingress.fqdn}'
-output webVoiceUri string = 'https://${webVoice.properties.configuration.ingress.fqdn}'
 // Full MCP endpoint URLs consumed by the prompt-agent yamls via
 // ${MCP_TECH_LOOKUP_URL} / ${MCP_WORK_ORDER_URL} at agent-creation time.
 // Note the TRAILING SLASH: FastMCP mounts at `/mcp/` and issues a 307

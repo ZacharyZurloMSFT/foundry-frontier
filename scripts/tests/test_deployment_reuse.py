@@ -17,7 +17,7 @@ SPEC = importlib.util.spec_from_file_location(
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
 SERVICES = {
-    "api", "mcp-tech-lookup", "mcp-work-order", "web-tech", "web-voice"
+    "api", "mcp-tech-lookup", "mcp-work-order", "web-tech"
 }
 GREENFIELD_MODULES = {
     "observability", "uami", "acr", "vnet", "storage", "search", "cosmos",
@@ -505,7 +505,6 @@ def test_live_app_attachments_and_urls_use_named_resources_not_positions(templat
         ("MCP_TECH_LOOKUP_URL", "mcpTechLookup"),
         ("MCP_WORK_ORDER_URL", "mcpWorkOrder"),
         ("WEB_TECH_URI", "webTech"),
-        ("WEB_VOICE_URI", "webVoice"),
     ):
         assert f"'{output}', format(" in settings
         assert f"reference('{resource}').configuration.ingress.fqdn" in settings

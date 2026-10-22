@@ -8,19 +8,15 @@ import ReportLoss from "./ReportLoss";
 import { ErrorNotice, Pager } from "./shared";
 import { BusinessApi, BusinessError } from "./api";
 import { claimExample, configExample, identityExample, policyExample } from "./testData";
-import App, { insuranceBusinessEnabled } from "../App";
 
 const api = new BusinessApi(configExample, async () => "test");
 const noop = () => {};
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("business portal presentation and boundaries", () => {
-  it("preserves the disabled legacy providers and never fetches or initializes MSAL while server-rendering", () => {
+  it("never fetches or initializes MSAL while server-rendering", () => {
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("window", { location: { href: "http://localhost:5173/" } });
-    vi.stubEnv("VITE_INSURANCE_BUSINESS_ENABLED", "false");
-    expect(renderToStaticMarkup(createElement(App))).toContain("Loading Northwind Insurance");
-    expect(insuranceBusinessEnabled(undefined)).toBe(true); expect(insuranceBusinessEnabled("false")).toBe(false);
-    expect(insuranceBusinessEnabled(false)).toBe(false); expect(insuranceBusinessEnabled("true")).toBe(true);
+    expect(renderToStaticMarkup(createElement(BusinessPortal))).toContain("Northwind");
     expect(fetch).not.toHaveBeenCalled();
   });
   it("renders a public insurance home with no fixture, agent, fake quote or purchase links", () => {
