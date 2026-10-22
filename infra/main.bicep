@@ -10,7 +10,7 @@ param environmentName string
 param location string = 'canadacentral'
 
 @minLength(1)
-@description('AI region — Foundry AI Services (Voice Live, Agent Service, models) and Azure AI Search. Private endpoints for these still land in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
+@description('AI region — Foundry AI Services (Agent Service, models) and the Cosmos DB account. Cosmos is reached through a private endpoint in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
 param aiLocation string = 'eastus2'
 
 @description('Order Concierge project within the existing shared Foundry account.')
@@ -104,7 +104,7 @@ param additionalProjects array = [
     slug: 'contact-center'
     projectName: 'nw-contact-center'
     displayName: 'Northwind Customer Contact Center'
-    description: 'Voice Live front door project. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the Order Concierge orchestrator.'
+    description: 'Customer contact center project. Owns the nw-contact-center Search index and the northwind-intent-classifier prompt agent. Its Voice Live front door and handoff to the Order Concierge orchestrator were removed from this repository.'
   }
 ]
 

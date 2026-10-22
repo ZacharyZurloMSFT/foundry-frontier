@@ -148,7 +148,7 @@ resource extraProjects 'Microsoft.CognitiveServices/accounts/projects@2025-04-01
 }]
 
 // ── RBAC ───────────────────────────────────────────────────────────────────
-// Azure AI User (data-plane calls: agents, Voice Live, inference)
+// Azure AI User (data-plane calls: agents, inference)
 var aiUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 // Cognitive Services OpenAI User
 var openAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'

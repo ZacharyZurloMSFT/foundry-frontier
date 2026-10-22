@@ -133,7 +133,7 @@ def evaluate(manifest_path: Path, predictions_path: Path, output: Path,
         "metrics": metrics, "denominators": denominators, "gates": gates, "rows": results,
         "regression_status": regression_status, "regressions": regressions,
         "passed": all(gates.values()) and regression_status == "compared",
-        "promotion_note": "Not an approval. All four existing eval tiers and a human deployment approval remain required.",
+        "promotion_note": "Not an approval. The repository's remaining eval gates and a human deployment approval remain required.",
     }
     write_json(output, report)
     return report
