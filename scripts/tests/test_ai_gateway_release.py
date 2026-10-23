@@ -27,6 +27,9 @@ def fixed_now():
 
 NOW = fixed_now
 SECRET = "s3cr3t-search-query-key-0123456789"
+APIM_KEY = "s3cr3t-apim-subscription-key-9876543210"
+ENVIRON = {"SEARCH_QUERY_KEY": SECRET, "INSURANCE_AGENTS_KEY": APIM_KEY}
+KEY_HEADER = {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": ["${INSURANCE_AGENTS_KEY}"]}}
 LOOKUP = "northwind-insurance-lookup"
 KNOWLEDGE = "northwind-insurance-knowledge"
 REVIEW = "northwind-insurance-review"
@@ -183,20 +186,18 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
     lookup, knowledge = manifest["toolServers"][LOOKUP], manifest["toolServers"][KNOWLEDGE]
     assert lookup["endpoints"][0]["namespace"] == "lookup" and knowledge["endpoints"][0]["namespace"] == "knowledge"
     assert lookup["endpoints"][0]["mcp"] == {
-        "transport": "streamableHttp",
-        "url": "https://ca-insurance-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"}
+        "transport": "streamableHttp", "url": "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup"}
     assert knowledge["endpoints"][0]["mcp"]["url"] == (
         "https://srch-zurlo-northwind.search.windows.net/knowledgebases/northwind-insurance-kb/mcp"
         "?api-version=2026-05-01-preview")
-    assert lookup["endpoints"][0]["credentials"] == {"type": "none"}
+    assert lookup["endpoints"][0]["credentials"] == KEY_HEADER
     assert knowledge["endpoints"][0]["credentials"] == {
         "type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
     assert lookup["expectedTools"] == ["lookup_lookup_policy", "lookup_lookup_claim"]
     assert knowledge["expectedTools"] == ["knowledge_knowledge_base_retrieve"]
     review = manifest["toolServers"][REVIEW]
-    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == {"type": "none"}
-    assert review["endpoints"][0]["mcp"]["url"] == (
-        "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/")
+    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == KEY_HEADER
+    assert review["endpoints"][0]["mcp"]["url"] == "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
     assert review["expectedTools"] == ["review_draft_claim_action"]
     assert set(manifest["observed"]) == {
         "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge",
@@ -208,7 +209,7 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
 def test_review_server_is_registered_but_documents_that_the_gateway_cannot_forward_its_headers(manifest):
     description = manifest["toolServers"][REVIEW]["description"]
     assert "x-orders-workflow" in description and "does not forward client headers" in description
-    assert "rejected by design" in description
+    assert "rejected by design" in description and "apim-northwind" in description
     concern = manifest["observed"]["northwind-api"]["concern"].lower()
     assert "decide" in concern and "delete" in concern and "never agent tools" in concern
     assert all(entry["retiredHostFragment"] == "bluecliff" for entry in manifest["stale"].values())
@@ -235,8 +236,21 @@ def test_manifest_urls_are_https_and_placeholders_only_hold_secrets(manifest):
     urls = [endpoint["mcp"]["url"] for entry in manifest["toolServers"].values() for endpoint in entry["endpoints"]]
     assert urls and all(urlsplit(url).scheme == "https" for url in urls)
     text = release.DEFAULT_MANIFEST.read_text(encoding="utf-8")
-    assert re.findall(r"\$\{[A-Z0-9_]+\}", text) == ["${SEARCH_QUERY_KEY}"]
+    assert sorted(re.findall(r"\$\{[A-Z0-9_]+\}", text)) == [
+        "${INSURANCE_AGENTS_KEY}", "${INSURANCE_AGENTS_KEY}", "${SEARCH_QUERY_KEY}"]
     assert manifest["gateway"]["url"] == common.GATEWAY_URL
+
+
+def test_the_locked_insurance_apps_are_registered_only_through_api_management(manifest):
+    # ca-insurance-lookup and ca-insurance-review accept only API Management's gateway token (a direct call is
+    # a 401), so a registration on a Container Apps host could never work.
+    for name in (LOOKUP, REVIEW):
+        (endpoint,) = manifest["toolServers"][name]["endpoints"]
+        assert urlsplit(endpoint["mcp"]["url"]).hostname == "apim-northwind.azure-api.net"
+        assert endpoint["credentials"] == KEY_HEADER
+    hosts = {urlsplit(endpoint["mcp"]["url"]).hostname for entry in manifest["toolServers"].values()
+             for endpoint in entry["endpoints"]}
+    assert not [host for host in hosts if host.endswith(".azurecontainerapps.io")]
 
 
 def test_expected_tools_are_namespace_prefixed(manifest):
@@ -250,6 +264,11 @@ def test_expected_tools_are_namespace_prefixed(manifest):
 
 def _literal_secret(manifest):
     manifest["toolServers"][KNOWLEDGE]["endpoints"][0]["credentials"]["headers"]["api-key"] = ["literal-key-value"]
+
+
+def _literal_subscription_key(manifest):
+    headers = manifest["toolServers"][LOOKUP]["endpoints"][0]["credentials"]["headers"]
+    headers["Ocp-Apim-Subscription-Key"] = ["literal-apim-key-value"]
 
 
 def _placeholder_in_url(manifest):
@@ -319,6 +338,7 @@ def _bad_name(manifest):
 
 @pytest.mark.parametrize(("mutation", "fragment"), [
     (_literal_secret, "environment placeholder"),
+    (_literal_subscription_key, "environment placeholder"),
     (_placeholder_in_url, "only allowed in credential header values"),
     (_placeholder_in_description, "only allowed in credential header values"),
     (_plain_http, "https URL"),
@@ -349,10 +369,15 @@ def test_manifest_errors_never_echo_secret_looking_values(manifest):
     with pytest.raises(release.ManifestError) as literal:
         release.validate_manifest(candidate)
     candidate = copy.deepcopy(manifest)
+    _literal_subscription_key(candidate)
+    with pytest.raises(release.ManifestError) as subscription:
+        release.validate_manifest(candidate)
+    candidate = copy.deepcopy(manifest)
     _url_with_credentials(candidate)
     with pytest.raises(release.ManifestError) as url:
         release.validate_manifest(candidate)
     assert "literal-key-value" not in str(literal.value)
+    assert "literal-apim-key-value" not in str(subscription.value)
     assert "user:pass" not in str(url.value)
 
 
@@ -366,9 +391,11 @@ def test_plan_creates_missing_managed_servers_without_secrets(manifest):
     assert {name: action["action"] for name, action in actions.items()} == {
         LOOKUP: "create", KNOWLEDGE: "create", REVIEW: "create"}
     assert actions[KNOWLEDGE]["requiredEnvironment"] == ["SEARCH_QUERY_KEY"]
-    assert actions[LOOKUP]["requiredEnvironment"] == [] and actions[REVIEW]["requiredEnvironment"] == []
+    assert actions[LOOKUP]["requiredEnvironment"] == ["INSURANCE_AGENTS_KEY"]
+    assert actions[REVIEW]["requiredEnvironment"] == ["INSURANCE_AGENTS_KEY"]
     desired = actions[KNOWLEDGE]["desired"]["endpoints"][0]["credentials"]
     assert desired == {"type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
+    assert actions[LOOKUP]["desired"]["endpoints"][0]["credentials"] == KEY_HEADER
     assert re.fullmatch(r"[0-9a-f]{64}", plan["planSha256"])
     assert plan["summary"]["create"] == 3
     assert [(call["method"], urlsplit(call["url"]).path.rsplit("/", 1)[-1]) for call in gateway.calls] == [
@@ -423,7 +450,7 @@ def _change_transport(properties):
 
 
 def _change_credential_type(properties):
-    properties["endpoints"][0]["credentials"] = {"type": "header", "headers": {"x-key": ["***"]}}
+    properties["endpoints"][0]["credentials"] = {"type": "none"}
 
 
 def _change_required(properties):
@@ -469,6 +496,20 @@ def test_plan_updates_when_header_names_change_but_not_when_values_do(manifest):
     plan, _ = release.build_plan(gateway, manifest)
     action = actions_by_name(plan)[KNOWLEDGE]
     assert action["action"] == "update" and "endpoints[knowledge].headerNames" in action["differences"]
+
+
+def test_the_subscription_key_header_is_compared_by_name_only_and_without_regard_to_case(manifest):
+    gateway = FakeGateway(manifest)
+    for name in (LOOKUP, KNOWLEDGE, REVIEW):
+        gateway.add(name)
+    gateway.servers[LOOKUP]["properties"]["endpoints"][0]["credentials"]["headers"] = {
+        "OCP-APIM-SUBSCRIPTION-KEY": ["a-rotated-key"]}
+    gateway.servers[REVIEW]["properties"]["endpoints"][0]["credentials"]["headers"] = {"Authorization": ["***"]}
+    plan, _ = release.build_plan(gateway, manifest)
+    actions = actions_by_name(plan)
+    assert actions[LOOKUP]["action"] == "noop" and "a-rotated-key" not in json.dumps(plan)
+    assert actions[REVIEW]["action"] == "update"
+    assert "endpoints[review].headerNames" in actions[REVIEW]["differences"]
 
 
 def test_extra_live_endpoints_are_a_conflict_and_apply_refuses_them(manifest, tmp_path):
@@ -566,9 +607,12 @@ def test_refresh_secrets_forces_an_update_only_when_requested(manifest, tmp_path
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
     assert [call["url"].rsplit("/", 1)[-1] for call in gateway.puts()] == [KNOWLEDGE]
     assert gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]["credentials"]["headers"] == {"api-key": [SECRET]}
-    for name in (LOOKUP, "not-managed"):
+    assert release.validate_refresh(manifest, [LOOKUP, KNOWLEDGE, REVIEW]) == [KNOWLEDGE, LOOKUP, REVIEW]
+    keyless = copy.deepcopy(manifest)
+    keyless["toolServers"][LOOKUP]["endpoints"][0]["credentials"] = {"type": "none"}
+    for name, source in ((LOOKUP, keyless), ("not-managed", manifest)):
         with pytest.raises(release.ManifestError, match="not a managed tool server with header credentials"):
-            release.validate_refresh(manifest, [name])
+            release.validate_refresh(source, [name])
 
 
 # --- apply ----------------------------------------------------------------------------------------
@@ -588,7 +632,7 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     capsys.readouterr()
     receipt_path = tmp_path / "receipt.json"
     code = run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_QUERY_KEY": SECRET})
+               environ=ENVIRON)
     assert code == 0
     puts = gateway.puts()
     assert [call["url"].rsplit("/", 1)[-1] for call in puts] == [KNOWLEDGE, LOOKUP, REVIEW]
@@ -600,15 +644,16 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
         "type": "mcp", "displayName": "Northwind insurance lookup",
         "description": manifest["toolServers"][LOOKUP]["description"], "failureMode": "failClosed",
         "endpoints": [{"kind": "mcp", "namespace": "lookup", "required": True,
-                       "mcp": {"transport": "streamableHttp", "url": "https://ca-insurance-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"},
-                       "credentials": {"type": "none"}}]}}
+                       "mcp": {"transport": "streamableHttp", "url": "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup"},
+                       "credentials": {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": [APIM_KEY]}}}]}}
     knowledge = gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]
     assert knowledge["credentials"] == {"type": "header", "headers": {"api-key": [SECRET]}}
     assert knowledge["mcp"]["url"].endswith("/knowledgebases/northwind-insurance-kb/mcp?api-version=2026-05-01-preview")
     review = gateway.bodies[REVIEW]["properties"]
     assert review["failureMode"] == "failClosed" and review["description"] == manifest["toolServers"][REVIEW]["description"]
-    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == {"type": "none"}
-    assert review["endpoints"][0]["mcp"]["url"].endswith("ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/")
+    assert review["endpoints"][0]["namespace"] == "review"
+    assert review["endpoints"][0]["credentials"] == {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": [APIM_KEY]}}
+    assert review["endpoints"][0]["mcp"]["url"] == "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["complete"] is True and receipt["kind"] == "ai-gateway-release-receipt"
     assert receipt["planSha256"] == json.loads(plan_path.read_text(encoding="utf-8"))["planSha256"]
@@ -624,7 +669,7 @@ def test_apply_updates_with_the_etag_and_preserves_live_policies(manifest, tmp_p
     gateway.add(REVIEW)
     gateway.servers[LOOKUP]["properties"]["policies"] = [{"kind": "rate-limit"}]
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={}) == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"INSURANCE_AGENTS_KEY": APIM_KEY}) == 0
     (put,) = gateway.puts()
     assert put["headers"] == {"If-Match": "etag-live"}
     assert gateway.bodies[LOOKUP]["properties"]["policies"] == [{"kind": "rate-limit"}]
@@ -637,7 +682,7 @@ def test_apply_update_without_an_etag_requires_the_resource_to_exist(manifest, t
     gateway.add(KNOWLEDGE)
     del gateway.servers[LOOKUP]["etag"]
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes") == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"INSURANCE_AGENTS_KEY": APIM_KEY}) == 0
     assert gateway.puts()[0]["headers"] == {"If-Match": "*"}
 
 
@@ -646,7 +691,7 @@ def test_apply_refuses_when_the_live_gateway_changed_after_the_plan(manifest, tm
     plan_path = make_plan(gateway, tmp_path)
     gateway.add(LOOKUP)
     capsys.readouterr()
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 1
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=ENVIRON) == 1
     assert "no longer matches the reviewed plan" in capsys.readouterr().err
     assert not gateway.puts()
 
@@ -673,7 +718,7 @@ def test_apply_refuses_a_modified_plan_file(manifest, tmp_path, tamper):
     else:
         plan["kind"] = "something-else"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 1
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=ENVIRON) == 1
     assert not gateway.puts()
 
 
@@ -681,9 +726,15 @@ def test_apply_with_a_missing_secret_fails_clearly_before_any_write(manifest, tm
     gateway = FakeGateway(manifest)
     plan_path = make_plan(gateway, tmp_path)
     capsys.readouterr()
-    for environ in ({}, {"SEARCH_QUERY_KEY": ""}):
+    cases = [
+        ({}, "SEARCH_QUERY_KEY"),
+        ({"SEARCH_QUERY_KEY": ""}, "SEARCH_QUERY_KEY"),
+        ({"SEARCH_QUERY_KEY": SECRET}, "INSURANCE_AGENTS_KEY"),
+        ({"SEARCH_QUERY_KEY": SECRET, "INSURANCE_AGENTS_KEY": ""}, "INSURANCE_AGENTS_KEY"),
+    ]
+    for environ, name in cases:
         assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=environ) == 1
-        assert "SEARCH_QUERY_KEY" in capsys.readouterr().err
+        assert name in capsys.readouterr().err
     assert not gateway.puts()
 
 
@@ -706,7 +757,7 @@ def test_apply_never_overwrites_an_existing_receipt_and_checks_before_writing(ma
     receipt_path.write_text("keep", encoding="utf-8")
     gateway.calls.clear()
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_QUERY_KEY": SECRET}) == 1
+               environ=ENVIRON) == 1
     assert receipt_path.read_text(encoding="utf-8") == "keep"
     assert not gateway.calls
 
@@ -721,7 +772,7 @@ def test_apply_leaves_observed_stale_and_unlisted_servers_and_models_untouched(m
     before = copy.deepcopy({name: gateway.servers[name] for name in gateway.servers})
     models_before = copy.deepcopy(gateway.models)
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=ENVIRON) == 0
     assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE, REVIEW}
     for name, item in before.items():
         assert gateway.servers[name] == item
@@ -734,7 +785,7 @@ def test_a_changed_service_that_ignores_a_field_is_reported_as_not_converged(man
     gateway.drop_fields = ("description",)
     plan_path = make_plan(gateway, tmp_path)
     receipt = release.apply_plan(gateway, manifest, json.loads(plan_path.read_text(encoding="utf-8")),
-                                 {"SEARCH_QUERY_KEY": SECRET}, now=NOW)
+                                 ENVIRON, now=NOW)
     assert receipt["complete"] is True
     assert all(row["converged"] is False and row["remainingDifferences"] == ["description"]
                for row in receipt["results"])
@@ -745,7 +796,7 @@ def test_a_service_that_does_not_echo_failure_mode_still_converges(manifest, tmp
     gateway.drop_fields = ("failureMode",)
     plan_path = make_plan(gateway, tmp_path)
     receipt = release.apply_plan(gateway, manifest, json.loads(plan_path.read_text(encoding="utf-8")),
-                                 {"SEARCH_QUERY_KEY": SECRET}, now=NOW)
+                                 ENVIRON, now=NOW)
     assert receipt["complete"] is True
     assert all(row["converged"] is True and row["remainingDifferences"] == [] for row in receipt["results"])
     assert all(body["properties"]["failureMode"] == "failClosed" for body in gateway.bodies.values())
@@ -758,7 +809,7 @@ def test_a_failed_write_stops_with_a_partial_receipt_and_scrubs_secrets(manifest
     capsys.readouterr()
     receipt_path = tmp_path / "receipt.json"
     code = run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_QUERY_KEY": SECRET})
+               environ=ENVIRON)
     captured = capsys.readouterr()
     assert code == 1
     assert SECRET not in captured.out + captured.err + receipt_path.read_text(encoding="utf-8")
@@ -770,19 +821,39 @@ def test_a_failed_write_stops_with_a_partial_receipt_and_scrubs_secrets(manifest
     assert "Nothing was retried or rolled back" in captured.err
 
 
+def test_a_failed_subscription_key_write_scrubs_the_key_and_keeps_the_earlier_receipt_rows(manifest, tmp_path, capsys):
+    gateway = FakeGateway(manifest)
+    gateway.put_errors[LOOKUP] = common.RunnerError(f"Azure request failed with {APIM_KEY}", status=400)
+    plan_path = make_plan(gateway, tmp_path)
+    capsys.readouterr()
+    receipt_path = tmp_path / "receipt.json"
+    code = run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path), environ=ENVIRON)
+    captured = capsys.readouterr()
+    assert code == 1
+    assert APIM_KEY not in captured.out + captured.err + receipt_path.read_text(encoding="utf-8")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert [(row["name"], row["outcome"]) for row in receipt["results"]] == [
+        (KNOWLEDGE, "applied"), (LOOKUP, "failed")]
+    assert "***" in receipt["results"][1]["error"]
+    assert [call["url"].rsplit("/", 1)[-1] for call in gateway.puts()] == [KNOWLEDGE, LOOKUP]
+
+
 def test_secrets_never_reach_outputs_receipts_plans_or_argv(manifest, tmp_path, capsys):
     gateway = FakeGateway(manifest)
-    plan_path = make_plan(gateway, tmp_path, "--refresh-secrets", KNOWLEDGE)
+    plan_path = make_plan(gateway, tmp_path, "--refresh-secrets", KNOWLEDGE, LOOKUP)
     receipt_path = tmp_path / "receipt.json"
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path),
-               environ={"SEARCH_QUERY_KEY": SECRET}) == 0
+               environ=ENVIRON) == 0
     captured = capsys.readouterr()
-    for text in (captured.out, captured.err, plan_path.read_text(encoding="utf-8"),
-                 receipt_path.read_text(encoding="utf-8")):
-        assert SECRET not in text
+    for secret in (SECRET, APIM_KEY):
+        for text in (captured.out, captured.err, plan_path.read_text(encoding="utf-8"),
+                     receipt_path.read_text(encoding="utf-8")):
+            assert secret not in text
+        assert secret in json.dumps(gateway.bodies)
+        assert secret not in json.dumps([{key: value for key, value in call.items() if key != "body"}
+                                         for call in gateway.calls])
+    assert APIM_KEY in json.dumps(gateway.bodies[LOOKUP]) and APIM_KEY in json.dumps(gateway.bodies[REVIEW])
     assert SECRET in json.dumps(gateway.bodies[KNOWLEDGE])
-    assert SECRET not in json.dumps([{key: value for key, value in call.items() if key != "body"}
-                                     for call in gateway.calls])
 
 
 def test_release_script_uses_only_the_injected_runner_and_takes_no_secret_arguments():
@@ -810,7 +881,7 @@ def test_release_script_has_no_delete_or_patch_operation(manifest, tmp_path):
     assert not re.search(r"""["'](DELETE|PATCH)["']""", source)
     gateway = FakeGateway(manifest)
     plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
+    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=ENVIRON) == 0
     assert run(gateway, "verify") == 0
     assert gateway.methods() == {"GET", "PUT", "POST"}
 

@@ -69,7 +69,7 @@ Sign in with `az login` first. The Azure CLI acquires every token; this script n
 
 typical flow:
   python scripts/ai-gateway-release.py plan --out plan.json
-  (set SEARCH_QUERY_KEY in the environment of the next command only)
+  (set SEARCH_QUERY_KEY and INSURANCE_AGENTS_KEY in the environment of the next command only)
   python scripts/ai-gateway-release.py apply --plan plan.json --yes
   python scripts/ai-gateway-release.py verify
 """
