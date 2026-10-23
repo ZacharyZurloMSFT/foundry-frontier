@@ -31,9 +31,12 @@ work order dispatched. One `azd up` deploys everything.
 - `bicep build infra/main.bicep --stdout > /dev/null`  (if infra touched)
 - `(cd apps/web-tech && npm run build)`                  (if web touched)
 
-## Docs to read first for context
-- `README.md`
-- `docs/architecture.md`
-- `docs/differentiators.md`   ← the sales pitch this demo defends
-- `docs/genaiops.md`          ← how CI/CD/eval/observability fit together
-- `docs/demo-script.md`       ← the 10-minute story arc
+## Second brain (read on demand)
+- Start at `docs/brain/README.md`; it maps each kind of task to the few pages worth reading (README,
+  architecture, differentiators, genaiops and demo-script are routed from there). Do not read everything.
+- Code wins: if a brain page or doc disagrees with the code, trust the code and fix the page in the same PR.
+- Names changed over time (Field Services → Order Concierge → Northwind Insurance); check
+  `docs/brain/glossary.md` before assuming what a name means.
+- Learned something non-obvious (a trap, a "why")? Add it to `docs/brain/gotchas.md` or a
+  `docs/brain/decisions/` record. Do not create new top-level notes.
+- Never put secrets, customer data, or internal-only data in the brain; this repo is public.

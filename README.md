@@ -714,6 +714,7 @@ evals/                Foundry evaluators config + custom evaluator
 scripts/              azd hooks (postprovision indexing, per-project agents, etc.)
 .github/workflows/    CI, PR evals, continuous evals
 docs/                 Architecture, demo script
+  brain/              Second brain: glossary, gotchas and decision records for contributors and coding agents
 ```
 
 ## Documentation
@@ -726,6 +727,7 @@ docs/                 Architecture, demo script
 - [**GenAIOps through GitHub**](./docs/genaiops.md)
 - [**AI Gateway routing (models + MCP) and rollout runbook**](./docs/ai-gateway.md)
 - [Evaluation strategy](./evals/README.md)
+- [**Second brain — glossary, gotchas and decision records**](./docs/brain/README.md)
 
 ## What makes this demo hard to beat
 
