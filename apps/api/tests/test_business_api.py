@@ -38,7 +38,7 @@ REPORT = {
 @pytest.fixture
 def identity(monkeypatch):
     settings = Settings(
-        _env_file=None, NORTHWIND_BUSINESS_DOMAIN="insurance", NORTHWIND_BUSINESS_API_ENABLED=True,
+        _env_file=None, NORTHWIND_BUSINESS_API_ENABLED=True,
         INSURANCE_AUTH_TENANT_ID=TENANT, INSURANCE_AUTH_AUDIENCE=AUDIENCE,
         INSURANCE_AUTH_CLIENT_IDS=CLIENT, COSMOS_ENDPOINT="https://storage.invalid",
     )

@@ -1,4 +1,4 @@
-"""Release existing Northwind apps without changing their configuration or capabilities."""
+"""Release the live Northwind Insurance apps without changing their configuration or capabilities."""
 from __future__ import annotations
 
 import argparse
@@ -19,10 +19,16 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 RESOURCE_GROUP = "rg-northwind-apps"
 REGISTRY = "acrzurlonorthwind.azurecr.io"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
-SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech", "web-voice")
-APPS = {f"ca-{service}": service for service in SERVICES}
-# Insurance-branded deployments reuse the api/web images (or a rebuild of the web sources) with their own configuration.
-RELEASE_APPS = {**APPS, "ca-insurance-api": "api", "ca-insurance-portal": "web-tech", "ca-insurance-voice": "web-voice"}
+# azd service name -> live Container App. The service name is also the app's image repository in the registry.
+SERVICE_APPS = {
+    "api": "ca-insurance-api",
+    "mcp-policy-lookup": "ca-insurance-lookup",
+    "mcp-claim-review": "ca-insurance-review",
+    "web-portal": "ca-insurance-portal",
+    "web-voice": "ca-insurance-voice",
+}
+SERVICES = tuple(SERVICE_APPS)
+APPS = {app: service for service, app in SERVICE_APPS.items()}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -41,9 +47,9 @@ def changed_services(paths: list[str]) -> list[str]:
         if path in ("azure.yaml", ".dockerignore"):
             return list(SERVICES)
         if path.startswith(("data/northwind/", "data/seed/generated/")):
-            selected.update(("api", "mcp-tech-lookup", "mcp-work-order"))
+            selected.update(("api", "mcp-policy-lookup", "mcp-claim-review"))
         if path in ("apps/api/app/insurance_domain.py", "apps/api/app/gateway_guard.py"):
-            selected.update(("mcp-tech-lookup", "mcp-work-order"))
+            selected.update(("mcp-policy-lookup", "mcp-claim-review"))
         for service in SERVICES:
             if path.startswith(f"apps/{service}/"):
                 selected.add(service)
@@ -112,9 +118,9 @@ def _valid_metadata(name: str, value: str) -> bool:
 def validate_release(args: argparse.Namespace) -> dict[str, str]:
     if (args.subscription, args.tenant, args.resource_group) != (SUBSCRIPTION, TENANT, RESOURCE_GROUP):
         raise ValueError("Release scope is restricted to the existing Northwind apps resource group")
-    if args.app not in RELEASE_APPS:
+    if args.app not in APPS:
         raise ValueError("Unknown Container App")
-    image_pattern = rf"{re.escape(REGISTRY)}/{RELEASE_APPS[args.app]}@sha256:[0-9a-f]{{64}}"
+    image_pattern = rf"{re.escape(REGISTRY)}/{APPS[args.app]}@sha256:[0-9a-f]{{64}}"
     if not re.fullmatch(image_pattern, args.image):
         raise ValueError("Image must be the app's approved ACR repository pinned by SHA-256 digest")
     if not re.fullmatch(r"gha-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{12}", args.revision):
@@ -126,7 +132,7 @@ def validate_release(args: argparse.Namespace) -> dict[str, str]:
     if args.expected_revision == f"{args.app}--{args.revision}":
         raise ValueError("Refusing to reuse the currently deployed revision suffix")
     metadata = (args.git_sha, args.deployed_at, args.github_repository)
-    if RELEASE_APPS[args.app] != "api":
+    if APPS[args.app] != "api":
         if any(value is not None for value in metadata):
             raise ValueError("Only the API may receive build metadata environment changes")
         return {}
@@ -263,7 +269,8 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
                 and revision.get("healthState") == "Healthy"
                 and revision.get("provisioningState") == "Provisioned"
                 and revision.get("runningState") == "Running"):
-            path = "/health" if RELEASE_APPS[args.app] == "api" else "/healthz" if "mcp-" in args.app else "/"
+            service = APPS[args.app]
+            path = "/health" if service == "api" else "/healthz" if service.startswith("mcp-") else "/"
             try:
                 smoke = http.get(f"https://{_fqdn(current)}{path}", follow_redirects=False)
             except httpx.RequestError:
@@ -283,11 +290,13 @@ def parser() -> argparse.ArgumentParser:
     planner.add_argument("--base-sha")
     planner.add_argument("--service", choices=(*SERVICES, "all"))
     commands.add_parser("check-frontend", help="Reject invalid enabled business frontend build configuration")
+    namer = commands.add_parser("app-name", help="Print the Container App that hosts a service")
+    namer.add_argument("--service", choices=SERVICES, required=True)
     deploy = commands.add_parser("release", help="Dry-run by default; no automatic rollback or mutation retries")
     deploy.add_argument("--subscription", required=True)
     deploy.add_argument("--tenant", required=True)
     deploy.add_argument("--resource-group", required=True)
-    deploy.add_argument("--app", choices=RELEASE_APPS, required=True)
+    deploy.add_argument("--app", choices=APPS, required=True)
     deploy.add_argument("--image", required=True)
     deploy.add_argument("--revision", required=True)
     deploy.add_argument("--expected-revision", required=True)
@@ -319,6 +328,8 @@ def main() -> int:
             print(json.dumps(plan(args.source_sha, args.base_sha, args.service)))
         elif args.command == "check-frontend":
             validate_frontend_environment(dict(os.environ))
+        elif args.command == "app-name":
+            print(SERVICE_APPS[args.service])
         else:
             validate_release(args)
             if not 10 <= args.timeout <= 1800:

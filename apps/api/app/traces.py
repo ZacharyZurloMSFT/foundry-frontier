@@ -1,5 +1,5 @@
 """In-app trace inspector — powers the trace panel + cost HUD + agent-handoff
-mermaid diagram in web-tech. Queries the App Insights workspace directly (via
+mermaid diagram in web-portal. Queries the App Insights workspace directly (via
 the same UAMI the container app runs under) so the demo never has to leave
 the browser to look at spans.
 
@@ -20,7 +20,6 @@ from azure.monitor.query import LogsQueryClient, LogsQueryStatus
 
 from .azure_clients import get_credential
 from .observability import build_info
-from .settings import get_settings
 
 logger = logging.getLogger(__name__)
 SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{1,128}$"
@@ -165,44 +164,13 @@ def _mermaid(spans: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-# ── Stub path so the panel always lights up during a demo ──────────────────
-_STUB_SPANS = [
-    {"name": "chat.request",       "agent": "",                        "tool": "",              "duration_ms": 4200, "model": "",        "prompt_tokens": 0,   "completion_tokens": 0,   "cost_usd": 0.0},
-    {"name": "orchestrator.turn",  "agent": "northwind-orchestrator",  "tool": "",              "duration_ms": 3900, "model": "gpt-5.4", "prompt_tokens": 480, "completion_tokens": 90,  "cost_usd": 0.0021},
-    {"name": "triage.extract",     "agent": "northwind-triage",        "tool": "",              "duration_ms": 620,  "model": "gpt-4o",  "prompt_tokens": 220, "completion_tokens": 60,  "cost_usd": 0.00025},
-    {"name": "order_lookup.call",  "agent": "northwind-order-lookup",   "tool": "lookup_order", "duration_ms": 410, "model": "gpt-4o", "prompt_tokens": 190, "completion_tokens": 40, "cost_usd": 0.00019},
-    {"name": "policy_lookup",      "agent": "northwind-policy-lookup",  "tool": "knowledge_base_retrieve", "duration_ms": 890, "model": "gpt-4o", "prompt_tokens": 350, "completion_tokens": 120, "cost_usd": 0.00062},
-    {"name": "resolution_draft",   "agent": "northwind-resolution-draft", "tool": "propose_resolution", "duration_ms": 780, "model": "gpt-4o", "prompt_tokens": 410, "completion_tokens": 180, "cost_usd": 0.00081},
-]
-
-
-def _stub(session_id: str) -> dict[str, Any]:
-    spans = []
-    for s in _STUB_SPANS:
-        spans.append({
-            "ts": "", "kind": "dependency", "trace_id": session_id or "stub",
-            "parent_span_id": "", "span_id": "",
-            "git_sha": build_info().get("git_sha", "local"), "prompt_sha": {},
-            "gateway": "", "gateway_model": "",
-            **s,
-        })
-    out = _finalize(session_id, spans)
-    out.update(status="stub", source="synthetic_stub")
-    out["note"] = ("Stub trace shown — APPINSIGHTS_WORKSPACE_ID not set or the "
-                   "azure-monitor-query package isn't installed. The real trace "
-                   "renders exactly the same shape.")
-    return out
-
-
 def get_trace(session_id: str, minutes: int = 15) -> dict[str, Any]:
     if not re.fullmatch(SESSION_ID_PATTERN, session_id):
         raise ValueError("Trace session IDs must contain only letters, digits, underscores or hyphens.")
     result = _try_query(session_id, minutes)
     if result is not None:
         return result
-    if get_settings().business_domain == "insurance":
-        return _empty(
-            "Live insurance telemetry is unavailable: configure the workspace, "
-            "query SDK and read access. No synthetic trace or cost estimate was substituted."
-        )
-    return _stub(session_id)
+    return _empty(
+        "Live insurance telemetry is unavailable: configure the workspace, "
+        "query SDK and read access. No synthetic trace or cost estimate was substituted."
+    )

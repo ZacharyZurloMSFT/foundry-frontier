@@ -1,4 +1,4 @@
-"""Read-only, extractive Search + identity-authenticated model RAG. No native HR fallback."""
+"""Read-only, extractive Search + identity-authenticated model RAG over adjuster claims-handling procedures."""
 from __future__ import annotations
 
 import asyncio
@@ -27,10 +27,14 @@ from .settings import get_settings
 INDEX = "nw-insurance-adjuster-support"
 OWNER = "northwind-adjuster-support-v1"
 SEARCH_API = "2024-07-01"
-MODELS = {"hr-gpt-5-4": "gpt-5.4", "hr-gpt-5-4-mini": "gpt-5.4-mini", "hr-kimi": "Kimi-K2.6"}
-UNKNOWN = ("I don't have sufficient evidence in the current fictional employee and adjuster-support "
-           "corpus. Ask the appropriate HR/IT contact or claims supervisor. I cannot determine coverage "
-           "or claim outcomes, or execute communications, assignments or payments.")
+MODELS = {"gpt-5-4": "gpt-5.4", "gpt-5-4-mini": "gpt-5.4-mini", "kimi": "Kimi-K2.6"}
+# Deprecated model slugs still sent by already-deployed clients; canonical slugs win.
+LEGACY_MODEL_SLUGS = {"hr-gpt-5-4": "gpt-5-4", "hr-gpt-5-4-mini": "gpt-5-4-mini", "hr-kimi": "kimi"}
+# Documents already published to the live index carry the older URN prefix.
+SOURCE_URN_PREFIXES = ("urn:northwind:synthetic:adjuster-support:", "urn:northwind:synthetic:employee-support:")
+UNKNOWN = ("I don't have sufficient evidence in the current fictional adjuster-support corpus. "
+           "Ask a claims supervisor. I cannot determine coverage or claim outcomes, or execute "
+           "communications, assignments or payments.")
 router = APIRouter(prefix="/adjuster-support", tags=["adjuster-support"])
 _active = 0
 logger = logging.getLogger(__name__)
@@ -45,9 +49,19 @@ class SupportRetrievalError(RuntimeError):
         self.status_code = status_code
 
 
+def canonical_model_slug(slug: str) -> str:
+    return LEGACY_MODEL_SLUGS.get(slug, slug)
+
+
+def session_prefixes(slug: str) -> tuple[str, ...]:
+    """Session-id prefixes accepted for a model slug: canonical plus its deprecated alias."""
+    legacy = next((old for old, new in LEGACY_MODEL_SLUGS.items() if new == slug), None)
+    return tuple(f"adjuster-{name}-" for name in (slug, legacy) if name)
+
+
 def support_error_event():
     return {"kind": "error", "message": "Grounded support is unavailable or evidence failed validation. "
-            "No fallback answer was generated; contact HR/IT or the claims supervisor."}
+            "No fallback answer was generated; contact the claims supervisor."}
 
 
 class SupportRequest(BaseModel):
@@ -78,7 +92,7 @@ def _query_key():
 
 
 def prompt() -> str:
-    relative = Path("data") / "northwind" / "departments" / "employee-help-desk" / "prompts" / "northwind-adjuster-support.yaml"
+    relative = Path("data") / "northwind" / "departments" / "adjuster-support" / "prompts" / "northwind-adjuster-support.yaml"
     canonical = next((p / relative for p in Path(__file__).resolve().parents if (p / relative).is_file()), None)
     path = canonical or Path(__file__).resolve().parent / "_agent_prompts" / "northwind-adjuster-support.yaml"
     definition = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -90,8 +104,6 @@ def prompt() -> str:
 def availability() -> dict:
     settings = get_settings()
     reasons = []
-    if settings.business_domain != "insurance":
-        reasons.append("Adjuster support requires insurance mode.")
     if _setting("adjuster_support_index", INDEX) != INDEX:
         reasons.append("The isolated adjuster-support index must be configured.")
     endpoint = urlsplit(_setting("adjuster_support_search_endpoint", "") or settings.search_endpoint)
@@ -113,7 +125,7 @@ def availability() -> dict:
         reasons.append("The canonical adjuster-support prompt was not packaged.")
     enabled = _setting("adjuster_support_enabled", False)
     return {"enabled": enabled, "state": "disabled" if not enabled else "unavailable" if reasons else "configured",
-            "message": "; ".join(reasons) or "Read-only Search + model retrieval; no native retail HR agents.",
+            "message": "; ".join(reasons) or "Read-only Search + model retrieval of adjuster procedures.",
             "index": INDEX, "models": MODELS, "business_domain": "insurance", "review_scope": "read_only",
             "model_route": model_gateway.route_for(settings)}
 
@@ -144,7 +156,8 @@ async def retrieve(question: str) -> list[dict]:
             headers=headers, json={
                 "search": question, "queryType": "simple", "searchMode": "any", "top": 5,
                 "select": "id,title,content,source_uri,version,category,effective_from",
-                "filter": f"publisher eq '{OWNER}' and business_domain eq 'insurance' and synthetic eq true",
+                "filter": f"publisher eq '{OWNER}' and business_domain eq 'insurance' and synthetic eq true "
+                          "and category eq 'adjuster'",
             },
         )
     if response.status_code != 200:
@@ -160,8 +173,8 @@ async def retrieve(question: str) -> list[dict]:
             continue
         if (any(not isinstance(row.get(key), str) or not row[key].strip()
                 for key in ("id", "title", "content", "source_uri", "version", "category", "effective_from"))
-                or not row["source_uri"].startswith("urn:northwind:synthetic:employee-support:")
-                or row["category"] not in ("hr", "it", "adjuster")
+                or not row["source_uri"].startswith(SOURCE_URN_PREFIXES)
+                or row["category"] != "adjuster"
                 or len(row["content"]) > 20000):
             raise RuntimeError("Support evidence has invalid source metadata.")
         evidence.append({key: row[key] for key in
@@ -187,7 +200,7 @@ async def _respond(client, model: str, question: str, evidence: list[dict], hist
 
 
 async def select_evidence(question: str, evidence: list[dict], history: list[dict], model: str) -> EvidenceAnswer:
-    # No key kwargs, hosted agent_name, native HR agent_reference or execution tools.
+    # No key kwargs, hosted agent_name, native agent_reference or execution tools.
     # With the AI Gateway configured the same request goes to the gateway, using the
     # deployment's gateway alias as the model; callers keep passing deployment names.
     stage = "model_client"
@@ -249,17 +262,18 @@ def render_answer(answer: EvidenceAnswer, evidence: list[dict]) -> tuple[str, li
         excerpts.append(f'"{selection.quote}"\n[{source["title"]}, version {source["version"]}, '
                         f'effective {source["effective_from"]}] ({source["source_uri"]})')
     return ("Retrieved fictional guidance:\n\n" + "\n\n".join(excerpts)
-            + "\n\nRead-only employee/adjuster support, not policy adjudication or execution."), citations
+            + "\n\nRead-only adjuster support, not policy adjudication or execution."), citations
 
 
-async def run_support_turn(session_id: str, message: str, slug: str = "hr-gpt-5-4") -> AsyncIterator[dict]:
+async def run_support_turn(session_id: str, message: str, slug: str = "gpt-5-4") -> AsyncIterator[dict]:
     """Evidence-only turn; HTTP integrations must use support_chat for capacity/cancellation controls."""
+    slug = canonical_model_slug(slug)
     state = availability()
     if state["state"] not in ("configured", "ready"):
         raise HTTPException(503, "Grounded support is not configured and enabled.")
     if slug not in MODELS:
         raise HTTPException(404, "Unknown support model.")
-    if not session_id.startswith(f"adjuster-{slug}-"):
+    if not session_id.startswith(session_prefixes(slug)):
         raise HTTPException(422, "Support sessions are isolated per model.")
     yield {"kind": "session", "session_id": session_id, "business_domain": "insurance"}
     stage = "history_load"
@@ -297,15 +311,16 @@ async def run_support_turn(session_id: str, message: str, slug: str = "hr-gpt-5-
         yield {"kind": "done"}
 
 
-async def support_chat(req: SupportRequest, slug: str = "hr-gpt-5-4", request: Request | None = None):
+async def support_chat(req: SupportRequest, slug: str = "gpt-5-4", request: Request | None = None):
     global _active
+    slug = canonical_model_slug(slug)
     state = availability()
     if state["state"] not in ("configured", "ready"):
         raise HTTPException(503, state["message"] if state["enabled"] else "Adjuster support is operator-disabled.")
     if slug not in MODELS:
         raise HTTPException(404, "Unknown support model.")
     sid = req.session_id or f"adjuster-{slug}-{uuid.uuid4()}"
-    if not sid.startswith(f"adjuster-{slug}-"):
+    if not sid.startswith(session_prefixes(slug)):
         raise HTTPException(422, "Support sessions are isolated per model.")
     if _active >= _setting("adjuster_support_concurrency", 4):
         raise HTTPException(429, "Support capacity reached; try again after the active request finishes.")

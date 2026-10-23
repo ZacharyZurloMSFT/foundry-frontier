@@ -1,10 +1,13 @@
 name: Smoke Eval (Tier 1)
-# 60-second sanity check on every PR. Uses the free GitHub Models endpoint
-# (models.inference.ai.azure.com) with the built-in ${{ secrets.GITHUB_TOKEN }}
-# so it needs zero Azure credentials and never burns Foundry quota.
+# Quick sanity check on every PR. Uses the free GitHub Models endpoint
+# (models.github.ai) with the built-in ${{ secrets.GITHUB_TOKEN }} so it
+# needs zero Azure credentials and never burns Foundry quota.
 #
-# Fails fast if a prompt change is obviously broken (blank output, malformed
-# JSON from triage, missing required fields from work_order_draft, etc).
+# Fails fast if an insurance prompt change is obviously broken: blank output,
+# malformed JSON from triage or the claim-action drafter, identifiers inferred
+# from a name, a missing citation, or an agent that no longer refuses to decide
+# coverage, approve a claim or execute a payment. Prompts come from
+# agents/insurance/*.yaml; inputs are synthetic (data/northwind/insurance-fixtures.json).
 on:
   pull_request:
     paths:
@@ -12,7 +15,7 @@ on:
       - "apps/api/**"
       - "evals/**"
       - "data/golden/**"
-      - "apps/mcp-work-order/**"
+      - "apps/mcp-claim-review/**"
 
 permissions:
   contents: read
@@ -42,10 +45,10 @@ jobs:
             try {
               const r = JSON.parse(fs.readFileSync('smoke-results.json', 'utf8'));
               const rows = r.cases.map(c =>
-                `| ${c.workflow} | ${c.pass ? '✅' : '❌'} | ${c.reason || ''} |`
+                `| ${c.id} | ${c.workflow} | ${c.pass ? '✅' : '❌'} | ${c.reason || ''} |`
               ).join('\n');
               body += `Model: \`${r.model}\`  ·  passed **${r.passed}/${r.total}** in ${r.elapsed_ms}ms\n\n`;
-              body += `| Workflow | Result | Reason |\n|---|---|---|\n${rows}\n`;
+              body += `| Case | Agent prompt | Result | Reason |\n|---|---|---|---|\n${rows}\n`;
               if (r.passed < r.total) body = "### 🔴 Tier-1 smoke eval\n\n" + body.slice(body.indexOf('\n'));
             } catch (e) {
               body += `⚠️ smoke eval crashed — see workflow logs.`;

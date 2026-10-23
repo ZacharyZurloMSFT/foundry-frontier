@@ -4,6 +4,7 @@
 
 Short records of decisions whose "why" is hard to infer from code. One numbered file per decision. Do
 not rewrite an accepted record: add a new one that supersedes it and update the status of the old one.
+Correcting a stale path, name or link in place is fine.
 
 | # | Decision | Status |
 |---|---|---|

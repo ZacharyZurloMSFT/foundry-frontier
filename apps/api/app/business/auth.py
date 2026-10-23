@@ -41,7 +41,7 @@ def subject_id(tenant_id: str, object_id: str) -> str:
 
 def configuration() -> AuthConfiguration:
     settings = get_settings()
-    if not settings.business_api_enabled or settings.business_domain != "insurance":
+    if not settings.business_api_enabled:
         raise BusinessError("business_api_disabled", "The connected insurance journey is not enabled.", 503)
     try:
         tenant = str(uuid.UUID(settings.business_auth_tenant_id))

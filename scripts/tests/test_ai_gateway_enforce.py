@@ -38,7 +38,7 @@ GATEWAY_MI = common.GATEWAY_IDENTITY_PRINCIPAL_ID
 NAME_A = "00000000-0000-4000-8000-00000000a001"
 NAME_B = "00000000-0000-4000-8000-00000000b001"
 COGNITIVE_SERVICES_USER = "a97b65f3-24c7-4388-baec-2e87135dc908"
-MCP_APPS = ("ca-insurance-lookup", "ca-insurance-review", "ca-mcp-tech-lookup", "ca-mcp-work-order")
+MCP_APPS = ("ca-insurance-lookup", "ca-insurance-review")
 
 
 def fixed_now():
@@ -75,7 +75,7 @@ class FakeAzure:
             "privateEndpointConnections": []}}
         self.projects = [{"name": f"aisvc-zurlo-northwind/{name}", "id": f"{ACCOUNT}/projects/{name}"}
                          for name in PROJECT_NAMES]
-        self.apps = {name: app_item(name) for name in (*MCP_APPS, "ca-api")}
+        self.apps = {name: app_item(name) for name in (*MCP_APPS, "ca-insurance-api")}
         self.auth = {}
         self.diagnostics = {}
 
@@ -211,14 +211,14 @@ def test_audit_reports_account_identities_apps_detection_and_limits(tmp_path, ca
     assert others[(GATEWAY_MI, "Foundry User (Azure AI User)")]["isGatewayIdentity"] is True
     assert (OTHER, "Cognitive Services User") in others and (AGENT_B, "Cognitive Services OpenAI User") in others
     assert (USER, "Cognitive Services OpenAI User") in others
-    assert len(report["mcpApps"]) == 4
+    assert len(report["mcpApps"]) == 2, "only the MCP apps are audited, not the API"
     assert all(row["found"] and row["exposure"] == "public-unauthenticated" and row["externalIngress"]
                and row["ipRestrictions"] == 0 for row in report["mcpApps"])
     assert {row["name"]: row["kind"] for row in report["mcpApps"]} == {
-        "ca-insurance-lookup": "lookup", "ca-insurance-review": "work-order",
-        "ca-mcp-tech-lookup": "lookup", "ca-mcp-work-order": "work-order"}
+        "ca-insurance-lookup": "lookup", "ca-insurance-review": "claim-review"}
     assert any("gated manual decision" in line for line in report["mcpRecommendations"])
-    assert any("work-order" in line and "stay direct" in line for line in report["mcpRecommendations"])
+    assert any("claim-review" in line and "stays direct" in line and "x-workflow-id" in line
+               for line in report["mcpRecommendations"])
     assert "Foundry User" in report["limits"][0] and "never removed" in report["limits"][0]
     assert any("not implemented" in line and "gated manual decision" in line for line in report["limits"])
     assert report["detection"]["bypassDetectionReady"] is False
@@ -262,20 +262,23 @@ def test_audit_reads_authentication_restrictions_and_missing_apps(capsys):
                                          "globalValidation": {"unauthenticatedClientAction": "Return401"}}
     azure.auth["ca-insurance-review"] = {"platform": {"enabled": True},
                                          "globalValidation": {"unauthenticatedClientAction": "AllowAnonymous"}}
-    azure.apps["ca-mcp-tech-lookup"] = app_item("ca-mcp-tech-lookup", ipSecurityRestrictions=[{"name": "gw"}])
-    azure.apps["ca-mcp-work-order"] = app_item("ca-mcp-work-order", external=False)
     assert run(azure, "audit") == 0
     rows = {row["name"]: row for row in output(capsys)["mcpApps"]}
     assert rows["ca-insurance-lookup"]["exposure"] == "public-authenticated"
     assert rows["ca-insurance-lookup"]["authentication"]["enforced"] is True
     assert rows["ca-insurance-review"]["exposure"] == "public-unauthenticated"
     assert rows["ca-insurance-review"]["authentication"]["unauthenticatedClientAction"] == "AllowAnonymous"
-    assert rows["ca-mcp-tech-lookup"]["exposure"] == "public-ip-restricted" and rows["ca-mcp-tech-lookup"]["ipRestrictions"] == 1
-    assert rows["ca-mcp-work-order"]["exposure"] == "internal-only"
-    del azure.apps["ca-mcp-tech-lookup"]
+    azure.auth.clear()
+    azure.apps["ca-insurance-lookup"] = app_item("ca-insurance-lookup", ipSecurityRestrictions=[{"name": "gw"}])
+    azure.apps["ca-insurance-review"] = app_item("ca-insurance-review", external=False)
     assert run(azure, "audit") == 0
-    assert {row["name"]: row for row in output(capsys)["mcpApps"]}["ca-mcp-tech-lookup"] == {
-        "name": "ca-mcp-tech-lookup", "found": False}
+    rows = {row["name"]: row for row in output(capsys)["mcpApps"]}
+    assert rows["ca-insurance-lookup"]["exposure"] == "public-ip-restricted" and rows["ca-insurance-lookup"]["ipRestrictions"] == 1
+    assert rows["ca-insurance-review"]["exposure"] == "internal-only"
+    del azure.apps["ca-insurance-lookup"]
+    assert run(azure, "audit") == 0
+    assert {row["name"]: row for row in output(capsys)["mcpApps"]}["ca-insurance-lookup"] == {
+        "name": "ca-insurance-lookup", "found": False}
 
 
 def test_audit_reports_key_auth_enabled_as_a_high_finding(capsys):

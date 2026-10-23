@@ -1,8 +1,8 @@
 name: "foundry-redteam"
-description: "Run the Foundry AI Red Team Agent (PyRIT-backed) against a hosted Foundry agent, publish results, and file an issue on failure."
+description: "Run the Foundry AI Red Team Agent (PyRIT-backed) against a hosted Foundry agent (default: the Northwind Insurance orchestrator) or the Copilot SDK harness, publish results, and file an issue on failure."
 inputs:
   target_agent:
-    description: "Hosted agent name to attack"
+    description: "Hosted agent name to attack, e.g. northwind-insurance-orchestrator, or copilot-sdk for the harness HTTP target"
     required: true
   strategies:
     description: "Comma-separated attack strategies (jailbreak,harm,pii-exfil,tool-abuse,indirect-injection)"

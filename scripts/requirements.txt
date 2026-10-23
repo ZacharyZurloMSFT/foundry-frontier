@@ -1,4 +1,5 @@
-# Runtime deps for postprovision scripts. Kept unpinned/loose so we don't
+# Runtime deps for the bootstrap scripts in this folder (create-*.py, connect-knowledge-base.py,
+# publish-prompts.py). Kept unpinned/loose so we don't
 # clobber the pre-installed `agent-framework-*` stack in .venv which needs
 # newer azure-ai-projects / httpx / openai.
 azure-ai-projects>=2.2,<3.0

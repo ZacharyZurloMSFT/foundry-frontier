@@ -10,8 +10,8 @@ short: read only the page that matches the work you are about to do.
 |---|---|---|
 | [Evals and prompts](evals-and-prompts.md) | changing evals, baselines, prompts or CI gates | Evals and prompts |
 | [Agents and approvals](agents-and-approvals.md) | working on agent tools, human approvals, the Copilot SDK harness or hosted agent versions | Approvals and agent tools; Hosted agent versions |
-| [Deployment and releases](deployment-and-releases.md) | changing `infra/`, `azure.yaml` or the `postprovision` hooks, merging a PR or releasing apps | `azd up` and deployment; Releases and merging |
-| [Retail vs insurance](retail-vs-insurance.md) | touching names, projects, agents or resources that differ between the two business domains | Retail vs insurance |
+| [Deployment and releases](deployment-and-releases.md) | changing `infra/`, `azure.yaml`, the azd hooks or the release lane, merging a PR or releasing apps | `azd up` and deployment; Releases and merging |
+| [Names and retired vocabulary](names-and-retired-vocabulary.md) | touching names, projects, agents or resources, or meeting an earlier demo name | Names and retired vocabulary |
 | [API and gateways](api-and-gateways.md) | changing the API surface, gateway routing, the lock-down, keys or Foundry connections | API and gateways |
 | [Local development](local-development.md) | running the stack locally or committing from Windows | Local development |
 

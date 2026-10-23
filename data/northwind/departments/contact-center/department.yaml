@@ -25,11 +25,11 @@ agents:
     greeting_path: prompts/greeting.md
 
 # Cross-project: on button press the console posts the running call summary
-# to POST /handoff on the API, which starts a northwind-orchestrator run
-# inside the Order Concierge project.
+# to POST /handoff on the API, which starts a northwind-insurance-orchestrator
+# run inside the Claims Concierge project.
 handoff_target:
-  department: order-concierge
-  agent: northwind-orchestrator
+  department: claims-concierge
+  agent: northwind-insurance-orchestrator
 
 corpus_theme: |
   Fictional insurer call scripts, first notice of loss, claim status,

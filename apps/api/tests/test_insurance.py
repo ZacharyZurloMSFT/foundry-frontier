@@ -12,6 +12,8 @@ from app.settings import Settings
 from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[3]
+POLICY_LOOKUP = "mcp-policy-lookup"
+CLAIM_REVIEW = "mcp-claim-review"
 DRAFT = {
     "claim_id": "CLM-2001", "policy_id": "POL-1001", "policyholder_id": "PH-1001",
     "action_type": "request_evidence", "summary": "Request the missing damage photos.",
@@ -21,9 +23,7 @@ DRAFT = {
 
 @pytest.fixture
 def insurance_config(monkeypatch):
-    monkeypatch.setenv("NORTHWIND_BUSINESS_DOMAIN", "insurance")
-    settings = Settings(_env_file=None, NORTHWIND_BUSINESS_DOMAIN="insurance",
-                        COSMOS_ENDPOINT="https://cosmos.invalid",
+    settings = Settings(_env_file=None, COSMOS_ENDPOINT="https://cosmos.invalid",
                         NORTHWIND_INSURANCE_AGENTS_READY=False)
     for module in (insurance, main, orchestrator_client, repositories):
         monkeypatch.setattr(module, "get_settings", lambda: settings)
@@ -78,50 +78,37 @@ def test_unsafe_or_unverified_drafts_rejected(changes):
 
 @pytest.mark.asyncio
 async def test_lookup_mcp_schema_and_validation(insurance_config):
-    module = load_mcp("mcp-tech-lookup")
+    module = load_mcp(POLICY_LOOKUP)
     tools = {t.name: t.inputSchema for t in await module.mcp.list_tools()}
-    assert {"lookup_order", "lookup_policy", "lookup_claim"} <= tools.keys()
+    assert set(tools) == {"lookup_policy", "lookup_claim"}
     assert tools["lookup_policy"]["required"] == ["policy_id"]
     assert {"policyholder_id", "loss_date", "state"} <= tools["lookup_policy"]["properties"].keys()
     assert tools["lookup_claim"]["required"] == ["claim_id"]
     assert json.loads(module.lookup_claim("CLM-2001"))["claim"]["status"] == "awaiting_evidence"
     with pytest.raises(ValueError, match="do not match"):
         module.lookup_claim("CLM-2001", "POL-1002")
-    assert json.loads(module.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
 
 
-@pytest.mark.parametrize("flag,only", [("true", True), (" TRUE ", True), ("", False), ("false", False), ("1", False)])
+@pytest.mark.parametrize("flag", ["true", " TRUE ", "", "false", "1"])
 @pytest.mark.asyncio
-async def test_insurance_only_mcp_apps_expose_no_retail_tools(insurance_config, monkeypatch, flag, only):
-    monkeypatch.setenv("NORTHWIND_MCP_INSURANCE_ONLY", flag)
-    lookup = load_mcp("mcp-tech-lookup")
-    draft = load_mcp("mcp-work-order")
-    lookup_tools = {t.name for t in await lookup.mcp.list_tools()}
-    draft_tools = {t.name for t in await draft.mcp.list_tools()}
-    if only:
-        assert lookup_tools == {"lookup_policy", "lookup_claim"}
-        assert draft_tools == {"draft_claim_action"}
-        assert lookup.mcp.name == "northwind-insurance-policy-claim-lookup"
-        assert draft.mcp.name == "northwind-insurance-claim-action-draft"
-        with pytest.raises(ValueError, match="unavailable in insurance"):
-            lookup.lookup_order("NW-40021")
-        with pytest.raises(ValueError, match="unavailable in insurance"):
-            await draft.propose_resolution("wf-retail", {}, None)
-    else:
-        # The northwind apps run in the insurance domain too and keep serving the retail tools.
-        assert lookup_tools == {"lookup_order", "lookup_policy", "lookup_claim"}
-        assert draft_tools == {"propose_resolution", "draft_claim_action"}
-        assert lookup.mcp.name == "northwind-order-lookup"
-        assert json.loads(lookup.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
+async def test_mcp_apps_serve_only_insurance_tools_whatever_the_deprecated_switch_says(insurance_config, monkeypatch, flag):
+    monkeypatch.setenv("NORTHWIND_MCP_INSURANCE_ONLY", flag)  # read by earlier images; now a no-op
+    lookup = load_mcp(POLICY_LOOKUP)
+    draft = load_mcp(CLAIM_REVIEW)
+    assert {t.name for t in await lookup.mcp.list_tools()} == {"lookup_policy", "lookup_claim"}
+    assert {t.name for t in await draft.mcp.list_tools()} == {"draft_claim_action"}
+    assert lookup.mcp.name == "northwind-insurance-policy-claim-lookup"
+    assert draft.mcp.name == "northwind-insurance-claim-action-draft"
+    assert not hasattr(lookup, "lookup_order") and not hasattr(draft, "propose_resolution")
 
 
 @pytest.mark.asyncio
 async def test_mcp_persistence_binding_and_approval_only(insurance_config, database, monkeypatch):
-    module = load_mcp("mcp-work-order")
+    module = load_mcp(CLAIM_REVIEW)
     queue = database["hitl_queue"]
     monkeypatch.setattr(module, "_cosmos_container", lambda: queue)
     schemas = {t.name: t.inputSchema for t in await module.mcp.list_tools()}
-    assert {"propose_resolution", "draft_claim_action"} <= schemas.keys()
+    assert set(schemas) == {"draft_claim_action"}
     schema = schemas["draft_claim_action"]
     assert "draft" in schema["required"] and "workflow_id" in schema["required"]
     encoded = json.dumps(schema)
@@ -129,7 +116,7 @@ async def test_mcp_persistence_binding_and_approval_only(insurance_config, datab
     assert "approve_claim" not in encoded and "payment" not in encoded
     workflow = "wf-insurance-test"
     ctx = SimpleNamespace(request_context=SimpleNamespace(request=SimpleNamespace(
-        headers={"x-orders-workflow": workflow})))
+        headers={"x-workflow-id": workflow})))
     draft = module.ClaimActionDraft.model_validate(DRAFT)
     first = json.loads(await module.draft_claim_action(workflow, draft, ctx))
     assert first == json.loads(await module.draft_claim_action(workflow, draft, ctx))
@@ -138,6 +125,19 @@ async def test_mcp_persistence_binding_and_approval_only(insurance_config, datab
     assert len(queue.items) == 1
     with pytest.raises(ValueError, match="application-bound"):
         await module.draft_claim_action("wf-other", draft, ctx)
+    deprecated = SimpleNamespace(request_context=SimpleNamespace(request=SimpleNamespace(
+        headers={"x-orders-workflow": workflow})))
+    assert json.loads(await module.draft_claim_action(workflow, draft, deprecated)) == first
+    both = SimpleNamespace(request_context=SimpleNamespace(request=SimpleNamespace(
+        headers={"x-workflow-id": workflow, "x-orders-workflow": workflow})))
+    assert json.loads(await module.draft_claim_action(workflow, draft, both)) == first
+    conflicting = SimpleNamespace(request_context=SimpleNamespace(request=SimpleNamespace(
+        headers={"x-workflow-id": workflow, "x-orders-workflow": "wf-other"})))
+    with pytest.raises(ValueError, match="application-bound"):
+        await module.draft_claim_action(workflow, draft, conflicting)
+    unbound = SimpleNamespace(request_context=SimpleNamespace(request=SimpleNamespace(headers={})))
+    with pytest.raises(ValueError, match="application-bound"):
+        await module.draft_claim_action(workflow, draft, unbound)
 
     async def container(_):
         return queue
@@ -176,12 +176,21 @@ async def test_api_fixture_validation_persistence_and_readiness(insurance_config
         saved = await database["hitl_queue"].read_item(result["hitl_id"], result["workflow_id"])
         assert saved["kind"] == "insurance_claim_action" and saved["status"] == "pending"
         assert (await client.post("/insurance/actions/draft", json={**DRAFT, "policy_id": "POL-1002"})).status_code == 422
-        for route in ("/insurance/chat", "/chat", "/qa", "/agent/manual/chat", "/agent/claims/chat",
-                      "/handoff", "/voice/session"):
+        for route in ("/insurance/chat", "/handoff", "/voice/session"):
             body = {"message": "Claim help", "question": "Policy help", "summary": "Claim help"}
             blocked = await client.post(route, json=body)
             assert blocked.status_code == 503, (route, blocked.text)
             assert "insurance" in blocked.text.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", [
+    "/chat", "/qa", "/agent/manual/chat", "/agent/claims/chat", "/bakeoff/stream", "/safety/check",
+])
+async def test_removed_non_insurance_routes_are_not_served(insurance_config, route):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://local.test") as client:
+        response = await client.post(route, json={"message": "Claim help", "question": "Policy help"})
+    assert response.status_code == 404, (route, response.text)
 
 
 @pytest.mark.asyncio
@@ -209,55 +218,58 @@ async def test_human_api_decision_never_claims_payment(insurance_config, databas
     assert result["session_id"] == "human"
 
 
-def test_ready_requires_separate_agent_config_and_never_retail(insurance_config):
+def test_ready_requires_separate_agent_config_and_a_known_insurance_project(insurance_config):
     assert not insurance.insurance_runtime_ready()
     insurance_config.insurance_agents_ready = True
-    insurance_config.order_agents_hosted = True
+    insurance_config.hosted_agents_enabled = True
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
-    insurance_config.insurance_orchestrator_agent_id = "northwind-orchestrator"
+    insurance_config.insurance_orchestrator_agent_id = "northwind-other-orchestrator"
     assert not insurance.insurance_runtime_ready()
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
+    assert insurance.insurance_runtime_ready()
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
+    assert not insurance.insurance_runtime_ready()
+    insurance_config.insurance_project_name = "nw-insurance-claims"
     assert insurance.insurance_runtime_ready()
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind"
     assert not insurance.insurance_runtime_ready()
-    insurance_config.order_project_name = "northwind"
+    insurance_config.insurance_project_name = "northwind"
     assert not insurance.insurance_runtime_ready()
 
 
-def test_ready_accepts_the_retained_insurance_project_only_with_a_matching_endpoint(insurance_config):
+def test_ready_requires_the_endpoint_to_name_the_configured_project_exactly(insurance_config):
     insurance_config.insurance_agents_ready = True
-    insurance_config.order_agents_hosted = True
+    insurance_config.hosted_agents_enabled = True
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
-    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.insurance_project_name = "nw-insurance-claims"
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     assert insurance.insurance_runtime_ready()
-    assert insurance.INSURANCE_PROJECTS == {"northwind-orders", "nw-insurance-claims"}
-    # The endpoint must name the configured project, and neither the legacy web project nor a look-alike is accepted.
+    assert set(insurance.INSURANCE_PROJECTS) == {"northwind-orders", "nw-insurance-claims"}
+    # The endpoint must name the configured project; neither the earlier web project nor a look-alike is accepted.
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
     assert not insurance.insurance_runtime_ready()
     for other in ("northwind", "nw-insurance-claims-old", "NW-INSURANCE-CLAIMS", ""):
-        insurance_config.order_project_name = other
+        insurance_config.insurance_project_name = other
         insurance_config.foundry_project_endpoint = f"https://existing.invalid/api/projects/{other}"
         assert not insurance.insurance_runtime_ready()
-    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.insurance_project_name = "nw-insurance-claims"
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
     insurance_config.insurance_agents_ready = False
     assert not insurance.insurance_runtime_ready(), "readiness still needs the explicit flag"
 
 
 @pytest.mark.asyncio
-async def test_configured_insurance_inference_cannot_call_retail_agents(insurance_config, monkeypatch):
+async def test_configured_insurance_inference_only_reaches_the_insurance_orchestrator(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
-    insurance_config.order_agents_hosted = True
+    insurance_config.hosted_agents_enabled = True
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
-    called = AsyncMock(side_effect=AssertionError("Must never resolve a retail endpoint"))
+    called = AsyncMock(side_effect=AssertionError("Must never resolve an endpoint for a non-insurance agent"))
     monkeypatch.setattr(orchestrator_client, "_project_client", called)
-    with pytest.raises(ValueError, match="Retail agents"):
-        async for _ in orchestrator_client.run_agent_turn("session", "Claim help", "northwind-orchestrator"):
+    with pytest.raises(ValueError, match="Only insurance agents"):
+        async for _ in orchestrator_client.run_agent_turn("session", "Claim help", "northwind-other-orchestrator"):
             pass
     called.assert_not_called()
-    monkeypatch.setattr(orchestrator_client, "_cached_agent_name", "northwind-orchestrator")
     assert await orchestrator_client.resolve_orchestrator_agent_id() == "northwind-insurance-orchestrator"
 
 
@@ -272,7 +284,7 @@ async def test_missing_approval_storage_never_returns_success(insurance_config):
 @pytest.mark.asyncio
 async def test_verified_chat_uses_insurance_stream_contract(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
-    insurance_config.order_agents_hosted = True
+    insurance_config.hosted_agents_enabled = True
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
     calls = []
@@ -291,7 +303,7 @@ async def test_verified_chat_uses_insurance_stream_contract(insurance_config, mo
 @pytest.mark.asyncio
 async def test_insurance_voice_handoff_validates_linked_ids(insurance_config, monkeypatch):
     insurance_config.insurance_agents_ready = True
-    insurance_config.order_agents_hosted = True
+    insurance_config.hosted_agents_enabled = True
     insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
     insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
     calls = []
@@ -322,14 +334,13 @@ async def test_live_cu_disabled_never_substitutes_authored_extraction(insurance_
 
 
 @pytest.mark.parametrize("agents_ready", [False, True])
-def test_insurance_harness_status_never_exposes_retail_tools(insurance_config, monkeypatch, agents_ready):
-    from app.harness import runtime
+def test_insurance_harness_status_exposes_only_the_insurance_tools(insurance_config, monkeypatch, agents_ready):
+    from app.harness import insurance_tools, runtime
     insurance_config.harness_enabled = True
     insurance_config.insurance_agents_ready = agents_ready
     monkeypatch.setattr(runtime, "get_settings", lambda: insurance_config)
     status = runtime.HarnessRuntime().status()
     assert status["enabled"] is True and status["state"] == "unavailable"
     assert status["business_domain"] == "insurance"
-    assert "policy_claim_lookup" in status["tools"] and "claim_action_draft" in status["tools"]
-    assert "order_lookup" not in status["tools"] and "resolution_draft" not in status["tools"]
+    assert status["tools"] == list(insurance_tools.NAMES)
     assert "Verified insurance agent configuration is required" in status["message"]

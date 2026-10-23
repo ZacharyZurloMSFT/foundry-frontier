@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order")
+SERVICES = ("api", "mcp-policy-lookup", "mcp-claim-review")
 CLAIMS_DOCUMENTS = {
     "nw-fnol-demo-2001.pdf", "nw-estimate-demo-2001.pdf",
     "nw-record-clm-2001.pdf", "nw-record-clm-2002.pdf",
@@ -36,7 +36,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
     ast.parse(guard.read_text(encoding="utf-8"), filename=str(guard))
     sources = []
     if service == "api":
-        manifest = root / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
+        manifest = root / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
         catalog = json.loads(manifest.read_text(encoding="utf-8"))["items"]
         names = [row["source_file"] for row in catalog]
         if len(names) != len(CLAIMS_DOCUMENTS) or set(names) != CLAIMS_DOCUMENTS:
@@ -63,7 +63,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
     else:
         document_destination = destination / "_northwind" / "claims-documents"
         document_destination.mkdir(parents=True, exist_ok=True)
-        catalog_destination = destination / "_northwind" / "departments" / "claims-warranty"
+        catalog_destination = destination / "_northwind" / "departments" / "claims-documents"
         catalog_destination.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(manifest, catalog_destination / manifest.name)
         for source in sources:

@@ -1,12 +1,10 @@
 """Validate reference-only provisioning inputs without Azure or filesystem writes."""
 
-import argparse
 import json
 import os
 import re
 import sys
 from collections.abc import Mapping
-from pathlib import Path
 from urllib.parse import urlparse
 
 
@@ -27,39 +25,63 @@ IDENTITY_KEYS = (
     "AZURE_RESOURCE_GROUP",
     "AZURE_SUBSCRIPTION_ID",
     "AZURE_AI_PROJECT_ID",
-    "ORDER_PROJECT_NAME",
-    "ORDER_AGENTS_HOSTED",
+    "INSURANCE_PROJECT_NAME",
+    "HOSTED_AGENTS_ENABLED",
 )
 FOUNDRY_ACCOUNT_NAME = "aisvc-zurlo-northwind"
-AGENT_SERVICES = {
-    "orchestrator": "northwind-orchestrator",
-    "triage": "northwind-triage",
-    "orderlookup": "northwind-order-lookup",
-    "policylookup": "northwind-policy-lookup",
-    "resolutiondraft": "northwind-resolution-draft",
+INSURANCE_PROJECT_NAME = "northwind-orders"  # live status of the project name is unverified; never invent another
+# Canonical setting -> deprecated alias that azd environments created before the insurance-only cleanup still carry.
+# The canonical name wins; the alias is only a fallback and is never written.
+DEPRECATED_ALIASES = {
+    "INSURANCE_PROJECT_NAME": "ORDER_PROJECT_NAME",
+    "HOSTED_AGENTS_ENABLED": "ORDER_AGENTS_HOSTED",
+    "AGENT_OPENAI_ENDPOINT": "ORDERS_OPENAI_ENDPOINT",
+    "AGENT_KB_CONNECTION_NAME": "ORDERS_KB_CONNECTION_NAME",
+    "AGENT_MODEL_GATEWAY_ENDPOINT": "ORDERS_MODEL_GATEWAY_ENDPOINT",
+    "AGENT_MODEL_GATEWAY_MODEL": "ORDERS_MODEL_GATEWAY_MODEL",
+    "AGENT_GATEWAY_MANAGER_MODEL": "ORDERS_GATEWAY_MANAGER_MODEL",
+    "AGENT_GATEWAY_SPECIALIST_MODEL": "ORDERS_GATEWAY_SPECIALIST_MODEL",
+    "AGENT_MCP_GATEWAY": "ORDERS_MCP_GATEWAY",
+}
+# Department slug -> deprecated slug that an existing FOUNDRY_PROJECT_ENDPOINTS value may still use.
+DEPARTMENTS = {
+    "claims-concierge": "order-concierge",
+    "adjuster-support": "employee-help-desk",
+    "claims-documents": "claims-warranty",
+    "contact-center": None,
 }
 PRESERVED_KEYS = (
     "FOUNDRY_ENDPOINT",
     "FOUNDRY_PROJECT_ENDPOINT",
     "AZURE_AI_PROJECT_ENDPOINT",
     "FOUNDRY_PROJECT_ENDPOINTS",
-    "ORDERS_OPENAI_ENDPOINT",
+    "AGENT_OPENAI_ENDPOINT",
     "AZURE_OPENAI_ENDPOINT",
-    "ORDERS_KB_CONNECTION_NAME",
+    "AGENT_KB_CONNECTION_NAME",
     "FOUNDRY_KB_CONNECTION_NAME",
     "FOUNDRY_PLANNER_DEPLOYMENT",
     "FOUNDRY_WORKER_DEPLOYMENT",
     "FOUNDRY_PROMPT_AGENT_DEPLOYMENT",
     "FOUNDRY_EMBEDDING_DEPLOYMENT",
     "AZURE_AI_MODEL_DEPLOYMENT_NAME",
-    "FOUNDRY_BAKEOFF_DEPLOYMENTS",
-    "AZURE_SEARCH_INDEX",
-    "AZURE_SEARCH_KNOWLEDGE_BASE",
-    "AZURE_SEARCH_KNOWLEDGE_SOURCE",
     "COSMOS_DATABASE",
     "STORAGE_CU_CONTAINER",
     "STORAGE_SEED_CONTAINER",
 )
+
+
+def setting(env: Mapping[str, str], name: str, default: str = "") -> str:
+    """Canonical name first, its deprecated alias second, `default` only when neither is set.
+
+    A blank canonical value falls back to a non-blank alias; when everything that is set is blank the blank value is
+    returned so that it is still reported instead of silently replaced by the default.
+    """
+    names = [name, *([DEPRECATED_ALIASES[name]] if name in DEPRECATED_ALIASES else [])]
+    present = [env[candidate] for candidate in names if candidate in env]
+    for value in present:
+        if value.strip():
+            return value
+    return present[0] if present else default
 
 
 def is_project_endpoint(value: str, project_name: str | None = None) -> bool:
@@ -83,60 +105,49 @@ def is_project_endpoint(value: str, project_name: str | None = None) -> bool:
     )
 
 
-def validate_reuse_environment(env: Mapping[str, str], agent_service: str | None = None) -> list[str]:
+def validate_reuse_environment(env: Mapping[str, str]) -> list[str]:
     mode = env.get("NORTHWIND_REUSE_EXISTING_RESOURCES", "false")
     if mode not in ("true", "false"):
         return ["NORTHWIND_REUSE_EXISTING_RESOURCES must be exactly true or false."]
-    ingestion = env.get("NORTHWIND_ENABLE_CU_INGEST", "false")
-    if ingestion not in ("true", "false"):
-        return ["NORTHWIND_ENABLE_CU_INGEST must be exactly true or false."]
-    domain = env.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
     ready = env.get("NORTHWIND_INSURANCE_AGENTS_READY", "false")
+    project_name = setting(env, "INSURANCE_PROJECT_NAME", INSURANCE_PROJECT_NAME)
     configuration_errors = []
-    if domain not in ("retail", "insurance"):
-        configuration_errors.append("NORTHWIND_BUSINESS_DOMAIN must be exactly retail or insurance.")
-    elif domain == "insurance" and env.get("ORDER_PROJECT_NAME", "northwind-orders") != "northwind-orders":
-        configuration_errors.append("Insurance deployment must retain ORDER_PROJECT_NAME=northwind-orders; do not target a legacy project.")
+    if mode == "true" and project_name != INSURANCE_PROJECT_NAME:
+        configuration_errors.append(
+            f"Reuse mode must retain INSURANCE_PROJECT_NAME={INSURANCE_PROJECT_NAME}; do not target a legacy project."
+        )
     if ready not in ("true", "false"):
         configuration_errors.append("NORTHWIND_INSURANCE_AGENTS_READY must be exactly true or false.")
-    elif ready == "true" and (
-        domain != "insurance" or env.get("ORDER_AGENTS_HOSTED", "true") != "true"
-    ):
-        configuration_errors.append("Insurance readiness requires the insurance domain and ORDER_AGENTS_HOSTED=true.")
+    elif ready == "true" and setting(env, "HOSTED_AGENTS_ENABLED", "true") != "true":
+        configuration_errors.append("Insurance readiness requires HOSTED_AGENTS_ENABLED=true.")
     if ready == "true":
         manager_id = env.get("FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID", "")
         if manager_id != manager_id.strip() or not manager_id.startswith("northwind-insurance-"):
             configuration_errors.append(
                 "Insurance readiness requires an explicit FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID "
-                "with the northwind-insurance- prefix; do not reuse the retail manager ID."
+                "with the northwind-insurance- prefix."
             )
         endpoint = env.get("FOUNDRY_PROJECT_ENDPOINT", "")
-        if not is_project_endpoint(endpoint, env.get("ORDER_PROJECT_NAME", "northwind-orders")):
-            configuration_errors.append("Insurance readiness requires the deployed Orders project endpoint.")
-    if agent_service is not None and domain == "insurance":
-        configuration_errors.append(
-            "Existing azd agent services retain retail agent.yaml names; insurance deployments "
-            "must not overwrite existing retail agents. Use scripts/deploy-orders-hosted.py "
-            "--business-domain insurance for the separate native insurance rollout."
-        )
+        if not is_project_endpoint(endpoint, project_name):
+            configuration_errors.append("Insurance readiness requires the deployed insurance project endpoint.")
     gateway = env.get("NORTHWIND_GATEWAY_URL", "")
     if gateway and not re.fullmatch(r"https://[a-z0-9-]+\.azure-api\.net", gateway):
         configuration_errors.append(
             "NORTHWIND_GATEWAY_URL must be a bare https://<name>.azure-api.net origin with no path, query, or trailing slash."
         )
-    if env.get("NORTHWIND_GATEWAY_STACK", "northwind") not in ("northwind", "insurance"):
-        configuration_errors.append("NORTHWIND_GATEWAY_STACK must be exactly northwind or insurance.")
+    if env.get("NORTHWIND_GATEWAY_STACK", "insurance") != "insurance":
+        configuration_errors.append(
+            "NORTHWIND_GATEWAY_STACK must be exactly insurance; the northwind stack is no longer managed by this repository."
+        )
     if configuration_errors or mode == "false":
         return configuration_errors
 
     required = GROUP_KEYS + PRESERVED_KEYS + IDENTITY_KEYS
-    missing = [key for key in required if not env.get(key, "").strip()]
+    missing = [key for key in required if not setting(env, key).strip()]
     if missing:
         return ["Reuse mode requires existing azd values for: " + ", ".join(missing)]
 
     errors = []
-    if ingestion == "true":
-        errors.append("NORTHWIND_ENABLE_CU_INGEST is greenfield-only; reuse never revives ca-cu-ingest.")
     for key in GROUP_KEYS + ("AZURE_RESOURCE_GROUP", "AZURE_LEGACY_RESOURCE_GROUP") + OPTIONAL_GROUP_KEYS:
         if key not in env:
             continue
@@ -159,52 +170,54 @@ def validate_reuse_environment(env: Mapping[str, str], agent_service: str | None
     expected_project_id = (
         f"/subscriptions/{subscription_id}/resourceGroups/{env['AZURE_FOUNDRY_RESOURCE_GROUP']}"
         f"/providers/Microsoft.CognitiveServices/accounts/{FOUNDRY_ACCOUNT_NAME}"
-        f"/projects/{env['ORDER_PROJECT_NAME']}"
+        f"/projects/{project_name}"
     )
     if env["AZURE_AI_PROJECT_ID"].casefold() != expected_project_id.casefold():
         errors.append(
             "AZURE_AI_PROJECT_ID must match AZURE_SUBSCRIPTION_ID, "
-            "AZURE_FOUNDRY_RESOURCE_GROUP, the existing Foundry account and ORDER_PROJECT_NAME."
+            "AZURE_FOUNDRY_RESOURCE_GROUP, the existing Foundry account and INSURANCE_PROJECT_NAME."
         )
     if "AZURE_COSMOS_PRIVATE_ENDPOINT_NAME" in env:
         name = env["AZURE_COSMOS_PRIVATE_ENDPOINT_NAME"]
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name):
             errors.append("AZURE_COSMOS_PRIVATE_ENDPOINT_NAME must be a nonblank resource name.")
-    if env["ORDER_AGENTS_HOSTED"] not in ("true", "false"):
-        errors.append("ORDER_AGENTS_HOSTED must be exactly true or false.")
+    if setting(env, "HOSTED_AGENTS_ENABLED") not in ("true", "false"):
+        errors.append("HOSTED_AGENTS_ENABLED must be exactly true or false.")
 
     project_endpoint = env["FOUNDRY_PROJECT_ENDPOINT"].rstrip("/")
     if env["AZURE_AI_PROJECT_ENDPOINT"].rstrip("/") != project_endpoint:
         errors.append("The two Foundry project endpoint outputs must agree.")
-    if not is_project_endpoint(project_endpoint, env["ORDER_PROJECT_NAME"]):
-        errors.append("Foundry project endpoints must resolve ORDER_PROJECT_NAME in the existing Foundry account.")
+    if not is_project_endpoint(project_endpoint, project_name):
+        errors.append("Foundry project endpoints must resolve INSURANCE_PROJECT_NAME in the existing Foundry account.")
     try:
         endpoints = json.loads(env["FOUNDRY_PROJECT_ENDPOINTS"])
-        departments = (
-            "order-concierge",
-            "employee-help-desk",
-            "claims-warranty",
-            "contact-center",
+        resolved = (
+            {slug: department_endpoint(endpoints, slug) for slug in DEPARTMENTS} if isinstance(endpoints, dict) else {}
         )
-        if not isinstance(endpoints, dict) or any(
-            not isinstance(endpoints.get(key), str) or not endpoints[key].strip()
-            for key in departments
-        ):
+        if not resolved or any(value is None for value in resolved.values()):
             errors.append("FOUNDRY_PROJECT_ENDPOINTS needs all four department endpoints.")
-        elif endpoints["order-concierge"].rstrip("/") != project_endpoint:
-            errors.append("The Order Concierge endpoint must resolve the Orders project.")
-        elif any(not is_project_endpoint(endpoints[key]) for key in departments):
+        elif resolved["claims-concierge"].rstrip("/") != project_endpoint:
+            errors.append("The claims-concierge endpoint must resolve the insurance project.")
+        elif any(not is_project_endpoint(value) for value in resolved.values()):
             errors.append("All department endpoints must resolve projects in the existing Foundry account.")
     except json.JSONDecodeError:
         errors.append("FOUNDRY_PROJECT_ENDPOINTS must be a JSON object.")
     return errors
 
 
-GATEWAY_ALIAS_KEYS = ("ORDERS_GATEWAY_MANAGER_MODEL", "ORDERS_GATEWAY_SPECIALIST_MODEL")
+def department_endpoint(endpoints: Mapping[str, object], slug: str) -> str | None:
+    """The endpoint of a department under its slug, or under the deprecated slug an older value still uses."""
+    for key in (slug, DEPARTMENTS[slug]):
+        value = endpoints.get(key) if key else None
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+GATEWAY_ALIAS_KEYS = ("AGENT_GATEWAY_MANAGER_MODEL", "AGENT_GATEWAY_SPECIALIST_MODEL")
 # A gateway model alias is <provider>/<registration>; the registration is a lowercase [a-z0-9-] name.
 GATEWAY_MODEL_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[a-z0-9][a-z0-9-]*")
 GATEWAY_TOOLSERVER_PATH = re.compile(r"(?:/[^/]+)*/default/toolservers/[A-Za-z0-9][A-Za-z0-9_-]*/mcp")
-MCP_GATEWAY_AGENT_SERVICES = ("orderlookup", "policylookup")
 
 
 def _gateway_flag(env: Mapping[str, str], name: str, errors: list[str]) -> bool:
@@ -230,95 +243,67 @@ def _plain_https_url(value: object):
     return parsed
 
 
-def _validate_mcp_gateway(raw: str, agent_service: str | None) -> list[str]:
+def _validate_mcp_gateway(raw: str) -> list[str]:
     try:
         routes = json.loads(raw)
     except json.JSONDecodeError:
         routes = None
     if not isinstance(routes, dict) or not routes:
-        return ["AI_GATEWAY_MCP_REQUIRED needs ORDERS_MCP_GATEWAY to be a JSON object keyed by agent role."]
+        return ["AI_GATEWAY_MCP_REQUIRED needs AGENT_MCP_GATEWAY to be a JSON object keyed by agent role."]
     errors = []
     for role, entry in routes.items():
         parsed = _plain_https_url(entry.get("url") if isinstance(entry, dict) else None)
         if parsed is None or not GATEWAY_TOOLSERVER_PATH.fullmatch(parsed.path):
             errors.append(
-                f"ORDERS_MCP_GATEWAY[{role}].url must be an HTTPS gateway tool server URL "
+                f"AGENT_MCP_GATEWAY[{role}].url must be an HTTPS gateway tool server URL "
                 "(.../default/toolservers/<server>/mcp) without credentials, query or fragment."
             )
-    if agent_service in MCP_GATEWAY_AGENT_SERVICES and agent_service not in routes:
-        errors.append(
-            f"AI_GATEWAY_MCP_REQUIRED is set but ORDERS_MCP_GATEWAY has no {agent_service} entry; "
-            "direct MCP traffic is not permitted."
-        )
     return errors
 
 
-def validate_gateway(env: Mapping[str, str], agent_service: str | None = None) -> list[str]:
+def validate_gateway(env: Mapping[str, str]) -> list[str]:
     """AI Gateway consistency of the azd environment.
 
     A no-op unless AI_GATEWAY_REQUIRED (models) or AI_GATEWAY_MCP_REQUIRED (hosted MCP) is enabled,
-    so a fresh `azd up` is unaffected.
+    so a fresh `azd up` is unaffected. The AGENT_* settings are read canonical name first, then the
+    deprecated ORDERS_* alias; role keys of AGENT_MCP_GATEWAY may use either spelling.
     """
     errors: list[str] = []
     models_required = _gateway_flag(env, "AI_GATEWAY_REQUIRED", errors)
     mcp_required = _gateway_flag(env, "AI_GATEWAY_MCP_REQUIRED", errors)
     if models_required:
-        parsed = _plain_https_url(env.get("ORDERS_MODEL_GATEWAY_ENDPOINT", ""))
+        parsed = _plain_https_url(setting(env, "AGENT_MODEL_GATEWAY_ENDPOINT"))
         if parsed is None or not parsed.path.endswith("/openai/v1/"):
             errors.append(
-                "AI_GATEWAY_REQUIRED needs ORDERS_MODEL_GATEWAY_ENDPOINT to be an HTTPS URL ending in /openai/v1/ "
+                "AI_GATEWAY_REQUIRED needs AGENT_MODEL_GATEWAY_ENDPOINT to be an HTTPS URL ending in /openai/v1/ "
                 "without credentials, query or fragment."
             )
         for key in GATEWAY_ALIAS_KEYS:
-            if not GATEWAY_MODEL_ALIAS.fullmatch(str(env.get(key) or "")):
+            if not GATEWAY_MODEL_ALIAS.fullmatch(setting(env, key)):
                 errors.append(
                     f"AI_GATEWAY_REQUIRED needs {key} to be a gateway model alias <provider>/<registration>, "
                     "such as aisvc-zurlo-northwind/gpt-4o."
                 )
-        alias = str(env.get("ORDERS_MODEL_GATEWAY_MODEL") or "")
+        alias = setting(env, "AGENT_MODEL_GATEWAY_MODEL")
         if alias and not GATEWAY_MODEL_ALIAS.fullmatch(alias):
-            errors.append("ORDERS_MODEL_GATEWAY_MODEL must be a gateway model alias <provider>/<registration>.")
+            errors.append("AGENT_MODEL_GATEWAY_MODEL must be a gateway model alias <provider>/<registration>.")
     if mcp_required:
-        errors.extend(_validate_mcp_gateway(str(env.get("ORDERS_MCP_GATEWAY") or ""), agent_service))
+        errors.extend(_validate_mcp_gateway(setting(env, "AGENT_MCP_GATEWAY")))
     return errors
 
 
-def validate_environment(env: Mapping[str, str], agent_service: str | None = None) -> list[str]:
-    return validate_reuse_environment(env, agent_service) + validate_gateway(env, agent_service)
+def validate_environment(env: Mapping[str, str]) -> list[str]:
+    return validate_reuse_environment(env) + validate_gateway(env)
 
 
-def validate_agent_manifest(agent_service: str, manifest: object) -> list[str]:
-    expected = AGENT_SERVICES[agent_service]
-    if not isinstance(manifest, dict) or manifest.get("name") != expected:
-        return [
-            "Existing azd agent manifest must retain the literal retail name " + expected
-            + "; unresolved/domain-changing name placeholders are not supported. "
-            + "Use deploy-orders-hosted.py --business-domain insurance for separate insurance agents."
-        ]
-    variables = manifest.get("environment_variables", [])
-    if not isinstance(variables, list) or any(not isinstance(item, dict) for item in variables):
-        return ["Existing azd agent manifest environment_variables must be a list of named values."]
-    for item in variables:
-        if item.get("name") == "NORTHWIND_BUSINESS_DOMAIN" and item.get("value") != "retail":
-            return ["Existing retail azd agent manifests must declare literal retail domain, not insurance or a placeholder."]
-        if item.get("name") == "NORTHWIND_INSURANCE_AGENTS_READY" and item.get("value") not in ("false", False):
-            return ["Existing retail azd agent manifests must not enable or infer insurance readiness."]
-    return []
-
-
-def main(agent_service: str | None = None) -> int:
-    errors = validate_environment(os.environ, agent_service)
-    if not errors and agent_service is not None:
-        import yaml
-
-        manifest_path = Path(__file__).resolve().parents[1] / "agents" / agent_service / "agent.yaml"
-        errors.extend(validate_agent_manifest(agent_service, yaml.safe_load(manifest_path.read_text(encoding="utf-8"))))
+def main() -> int:
+    errors = validate_environment(os.environ)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
     if os.environ.get("NORTHWIND_REUSE_EXISTING_RESOURCES") == "true":
-        print("Reuse inputs validated; provisioning is reference-only and bootstrap is skipped.")
+        print("Reuse inputs validated; provisioning is reference-only.")
         env = os.environ
         print(
             f"Agent target: {env['AZURE_FOUNDRY_RESOURCE_GROUP']}; "
@@ -340,6 +325,4 @@ def main(agent_service: str | None = None) -> int:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--agent-service", choices=AGENT_SERVICES)
-    sys.exit(main(parser.parse_args().agent_service))
+    sys.exit(main())

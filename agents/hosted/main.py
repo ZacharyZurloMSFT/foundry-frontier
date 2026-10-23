@@ -1,4 +1,4 @@
-"""Run one independently deployed Order Concierge role on the GA Responses host."""
+"""Run one independently deployed Northwind Insurance claims role on the GA Responses host."""
 from __future__ import annotations
 
 import json
@@ -16,10 +16,10 @@ from .runtime import account_openai_client, build_agent, mcp_connection_headers,
 from .scope import RequestScope, current_scope
 
 
-class OrdersResponsesHost(ResponsesHostServer):
+class InsuranceResponsesHost(ResponsesHostServer):
     def __init__(self, agent, settings: Settings, *, resources=(), **kwargs):
-        self.orders_settings = settings
-        self.orders_resources = resources
+        self.agent_settings = settings
+        self.agent_resources = resources
         super().__init__(
             agent, options=ResponsesServerOptions(default_model=settings.model), **kwargs,
         )
@@ -33,7 +33,7 @@ class OrdersResponsesHost(ResponsesHostServer):
         try:
             async for event in super()._handle_response(request, context, cancellation_signal):
                 if "response" in event:
-                    metadata = dict(self.orders_settings.metadata)
+                    metadata = dict(self.agent_settings.metadata)
                     if scope.provider_model:
                         metadata["provider_model"] = scope.provider_model
                     if scope.provider_response_id:
@@ -41,7 +41,7 @@ class OrdersResponsesHost(ResponsesHostServer):
                     if scope.workflow_id:
                         metadata["workflow_id"] = scope.workflow_id
                     event["response"]["metadata"] = metadata
-                    event["response"]["model"] = self.orders_settings.model
+                    event["response"]["model"] = self.agent_settings.model
                 yield event
         finally:
             current_scope.reset(token)
@@ -50,7 +50,7 @@ class OrdersResponsesHost(ResponsesHostServer):
         try:
             await super()._cleanup_agent()
         finally:
-            for resource in self.orders_resources:
+            for resource in self.agent_resources:
                 await resource.close()
 
 
@@ -93,8 +93,7 @@ def load_gateway_headers(settings: Settings) -> dict[str, str] | None:
 def main():
     settings = Settings.from_env()
     logging.basicConfig(level=logging.INFO)
-    logging.getLogger(__name__).info("Northwind %s runtime configuration: %s",
-                                   settings.business_domain, json.dumps(settings.metadata))
+    logging.getLogger(__name__).info("Northwind insurance runtime configuration: %s", json.dumps(settings.metadata))
     # One connection-resolved header set per role: the AI Gateway tool server key or the Search knowledge key.
     knowledge_headers = load_mcp_headers(settings)
     gateway_headers = load_gateway_headers(settings)
@@ -108,15 +107,15 @@ def main():
     account_client = account_openai_client(settings, credential) if (
         settings.role == "triage" or settings.uses_model_gateway
     ) else None
-    # The in-process work-order client reaches the AI Gateway as the agent identity, not with a stored key.
+    # The in-process claim-action client reaches the AI Gateway as the agent identity, not with a stored key.
     gateway_token_provider = (
         get_bearer_token_provider(credential, settings.gateway_scope)
-        if settings.role == "resolutiondraft" and settings.mcp_entry is not None else None
+        if settings.role == "claim-action-draft" and settings.mcp_entry is not None else None
     )
     agent = build_agent(settings, project, account_client=account_client, knowledge_headers=knowledge_headers,
                         gateway_headers=gateway_headers, gateway_token_provider=gateway_token_provider)
     resources = (account_client, project, credential) if account_client else (project, credential)
-    server = OrdersResponsesHost(agent, settings, resources=resources)
+    server = InsuranceResponsesHost(agent, settings, resources=resources)
     server.run(host="0.0.0.0", port=8088)
 
 

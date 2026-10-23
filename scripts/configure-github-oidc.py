@@ -20,7 +20,9 @@ APPS = f"{BASE}/resourceGroups/rg-northwind-apps"
 NETWORK = f"{BASE}/resourceGroups/rg-northwind-networking"
 STORAGE = f"{BASE}/resourceGroups/rg-northwind-data/providers/Microsoft.Storage/storageAccounts/stzurlonorthwind"
 ACR = f"{APPS}/providers/Microsoft.ContainerRegistry/registries/acrzurlonorthwind"
-APPS_NAMES = ["ca-api", "ca-web-tech", "ca-web-voice", "ca-mcp-tech-lookup", "ca-mcp-work-order"]
+APPS_NAMES = [
+    "ca-insurance-api", "ca-insurance-portal", "ca-insurance-voice", "ca-insurance-lookup", "ca-insurance-review",
+]  # keep in step with SERVICE_APPS in release-app.py (test_actions_infra checks it)
 IDENTITIES = {
     "apps": ("id-gh-northwind-apps", "northwind-apps", "AZURE_APPS_CLIENT_ID"),
     "infra-plan": ("id-gh-northwind-plan", "northwind-infra-plan", "AZURE_INFRA_PLAN_CLIENT_ID"),

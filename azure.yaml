@@ -8,7 +8,7 @@ services:
         project: ./apps/api
         host: containerapp
         resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-api
+        resourceName: ca-insurance-api
         language: python
         docker:
             path: Dockerfile
@@ -37,11 +37,11 @@ services:
                         cp -R ../../data/northwind/. "$dest/"
                         python ../../scripts/bundle-insurance-assets.py --service api
                         python ../../scripts/bundle-harness-assets.py
-    mcp-tech-lookup:
-        project: ./apps/mcp-tech-lookup
+    mcp-policy-lookup:
+        project: ./apps/mcp-policy-lookup
         host: containerapp
         resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-mcp-tech-lookup
+        resourceName: ca-insurance-lookup
         language: python
         docker:
             path: Dockerfile
@@ -51,18 +51,18 @@ services:
                 windows:
                     shell: pwsh
                     run: |
-                        python ../../scripts/bundle-insurance-assets.py --service mcp-tech-lookup
+                        python ../../scripts/bundle-insurance-assets.py --service mcp-policy-lookup
                         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 posix:
                     shell: sh
                     run: |
                         set -e
-                        python ../../scripts/bundle-insurance-assets.py --service mcp-tech-lookup
-    mcp-work-order:
-        project: ./apps/mcp-work-order
+                        python ../../scripts/bundle-insurance-assets.py --service mcp-policy-lookup
+    mcp-claim-review:
+        project: ./apps/mcp-claim-review
         host: containerapp
         resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-mcp-work-order
+        resourceName: ca-insurance-review
         language: python
         docker:
             path: Dockerfile
@@ -72,237 +72,18 @@ services:
                 windows:
                     shell: pwsh
                     run: |
-                        python ../../scripts/bundle-insurance-assets.py --service mcp-work-order
+                        python ../../scripts/bundle-insurance-assets.py --service mcp-claim-review
                         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
                 posix:
                     shell: sh
                     run: |
                         set -e
-                        python ../../scripts/bundle-insurance-assets.py --service mcp-work-order
-    orchestrator:
-        project: ./agents/orchestrator
-        host: azure.ai.agent
-        language: python
-        config:
-            container:
-                resources:
-                    cpu: "1.0"
-                    memory: 2Gi
-        codeConfiguration:
-            dependencyResolution: remote_build
-            entryPoint: main.py
-            runtime: python_3_13
-        container:
-            resources:
-                cpu: "0.5"
-                memory: 1Gi
-        description: |
-            Manager coordinating four independently hosted Northwind Orders specialists.
-        hooks:
-            prepackage:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service orchestrator
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    python ../../scripts/orders_agent_package.py --output .
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-            predeploy:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service orchestrator
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-        environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - name: ORDERS_MODEL_DEPLOYMENT
-              value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
-            - name: ORDER_AGENT_ROLE
-              value: manager
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_MANAGER_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${AZURE_AI_MODEL_DEPLOYMENT_NAME}"}
-            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
-            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
-            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
-        kind: hosted
-        name: northwind-orchestrator
-        protocols:
-            - protocol: responses
-              version: 2.0.0
-    triage:
-        project: ./agents/triage
-        host: azure.ai.agent
-        language: python
-        kind: hosted
-        name: northwind-triage
-        policies:
-            - type: rai_policy
-              raiPolicyName: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_FOUNDRY_RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/aisvc-zurlo-northwind/raiPolicies/Microsoft.DefaultV2
-        codeConfiguration:
-            dependencyResolution: remote_build
-            entryPoint: main.py
-            runtime: python_3_13
-        container:
-            resources: {cpu: "0.5", memory: 1Gi}
-        protocols: [{protocol: responses, version: 2.0.0}]
-        hooks:
-            prepackage:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service triage
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    python ../../scripts/orders_agent_package.py --output .
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-            predeploy:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service triage
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-        environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: triage}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: ORDERS_OPENAI_ENDPOINT, value: "${ORDERS_OPENAI_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
-            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
-            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
-    orderlookup:
-        project: ./agents/orderlookup
-        host: azure.ai.agent
-        language: python
-        kind: hosted
-        name: northwind-order-lookup
-        codeConfiguration:
-            dependencyResolution: remote_build
-            entryPoint: main.py
-            runtime: python_3_13
-        container:
-            resources: {cpu: "0.5", memory: 1Gi}
-        protocols: [{protocol: responses, version: 2.0.0}]
-        hooks:
-            prepackage:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service orderlookup
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    python ../../scripts/orders_agent_package.py --output .
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-            predeploy:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service orderlookup
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-        environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: orderlookup}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: MCP_TECH_LOOKUP_URL, value: "${MCP_TECH_LOOKUP_URL}"}
-            - {name: MCP_GATEWAY_CONNECTION, value: "${MCP_GATEWAY_CONNECTION}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
-            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
-            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
-    policylookup:
-        project: ./agents/policylookup
-        host: azure.ai.agent
-        language: python
-        kind: hosted
-        name: northwind-policy-lookup
-        codeConfiguration:
-            dependencyResolution: remote_build
-            entryPoint: main.py
-            runtime: python_3_13
-        container:
-            resources: {cpu: "0.5", memory: 1Gi}
-        protocols: [{protocol: responses, version: 2.0.0}]
-        hooks:
-            prepackage:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service policylookup
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    python ../../scripts/orders_agent_package.py --output .
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-            predeploy:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service policylookup
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-        environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: policylookup}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: AZURE_SEARCH_ENDPOINT, value: "${AZURE_SEARCH_ENDPOINT}"}
-            - {name: AZURE_SEARCH_KNOWLEDGE_BASE, value: "${AZURE_SEARCH_KNOWLEDGE_BASE}"}
-            - {name: ORDERS_KB_CONNECTION_NAME, value: "${ORDERS_KB_CONNECTION_NAME}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
-            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
-            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
-    resolutiondraft:
-        project: ./agents/resolutiondraft
-        host: azure.ai.agent
-        language: python
-        kind: hosted
-        name: northwind-resolution-draft
-        codeConfiguration:
-            dependencyResolution: remote_build
-            entryPoint: main.py
-            runtime: python_3_13
-        container:
-            resources: {cpu: "0.5", memory: 1Gi}
-        protocols: [{protocol: responses, version: 2.0.0}]
-        hooks:
-            prepackage:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service resolutiondraft
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    python ../../scripts/orders_agent_package.py --output .
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-            predeploy:
-                shell: pwsh
-                run: |
-                    python ../../scripts/validate-reuse.py --agent-service resolutiondraft
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                continueOnError: false
-        environmentVariables:
-            - {name: NORTHWIND_BUSINESS_DOMAIN, value: "${NORTHWIND_BUSINESS_DOMAIN}"}
-            - {name: NORTHWIND_INSURANCE_AGENTS_READY, value: "false"}
-            - {name: ORDER_AGENT_ROLE, value: resolutiondraft}
-            - {name: ORDERS_MODEL_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: MCP_WORK_ORDER_URL, value: "${MCP_WORK_ORDER_URL}"}
-            - {name: MCP_GATEWAY_CONNECTION, value: "${MCP_GATEWAY_CONNECTION}"}
-            - {name: ORDERS_MODEL_GATEWAY_ENDPOINT, value: "${ORDERS_MODEL_GATEWAY_ENDPOINT}"}
-            - {name: ORDERS_MODEL_GATEWAY_MODEL, value: "${ORDERS_GATEWAY_SPECIALIST_MODEL}"}
-            - {name: ORDERS_MODEL_GATEWAY_DEPLOYMENT, value: "${FOUNDRY_PROMPT_AGENT_DEPLOYMENT}"}
-            - {name: AI_GATEWAY_REQUIRED, value: "${AI_GATEWAY_REQUIRED}"}
-            - {name: AI_GATEWAY_MCP_REQUIRED, value: "${AI_GATEWAY_MCP_REQUIRED}"}
-            - {name: ORDERS_MCP_GATEWAY, value: "${ORDERS_MCP_GATEWAY}"}
-    web-tech:
-        project: ./apps/web-tech
+                        python ../../scripts/bundle-insurance-assets.py --service mcp-claim-review
+    web-portal:
+        project: ./apps/web-portal
         host: containerapp
         resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-web-tech
+        resourceName: ca-insurance-portal
         language: js
         docker:
             path: Dockerfile
@@ -323,7 +104,7 @@ services:
         project: ./apps/web-voice
         host: containerapp
         resourceGroup: ${AZURE_APPS_RESOURCE_GROUP}
-        resourceName: ca-web-voice
+        resourceName: ca-insurance-voice
         language: js
         docker:
             path: Dockerfile
@@ -355,10 +136,3 @@ hooks:
         posix:
             shell: sh
             run: python ./scripts/validate-reuse.py
-    postprovision:
-        windows:
-            shell: pwsh
-            run: ./scripts/postprovision.ps1
-        posix:
-            shell: sh
-            run: ./scripts/postprovision.sh

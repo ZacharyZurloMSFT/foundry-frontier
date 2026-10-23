@@ -25,7 +25,7 @@ from evals.insurance_review import (
 ENDPOINT = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/northwind-orders"
 TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 PREFIX = "azureai://accounts/aisvc-zurlo-northwind/projects/northwind-orders/data/"
-PROMPTS = {"triage": "triage.yaml", "lookup": "tech_lookup.yaml", "policy_wording": "manual_retrieval.yaml"}
+PROMPTS = {"triage": "triage.yaml", "lookup": "policy_claim_lookup.yaml", "policy_wording": "policy_wording.yaml"}
 
 
 def now():
@@ -380,13 +380,15 @@ def execute_sdk(project, client, plan: dict, receipt: dict, save, *, timeout_sec
         definition_value = live.get("definition") or {}
         env = definition_value.get("environment_variables", definition_value.get("environmentVariables", {})) or {}
         deployment = (definition_value.get("model") or env.get("MODEL_DEPLOYMENT_NAME")
-                      or env.get("TRIAGE_MODEL_DEPLOYMENT") or env.get("ORDERS_MODEL_DEPLOYMENT")
+                      or env.get("TRIAGE_MODEL_DEPLOYMENT") or env.get("AGENT_MODEL_DEPLOYMENT")
+                      or env.get("ORDERS_MODEL_DEPLOYMENT")  # deprecated name of AGENT_MODEL_DEPLOYMENT
                       or env.get("AZURE_AI_MODEL_DEPLOYMENT_NAME"))
         if deployment != plan["target_model"]["deployment"]:
             raise ValueError("Live provider deployment does not match pinned target model")
+        # The runtime domain flag is retired; a hosted agent that still carries it must say insurance.
         if (definition_value.get("kind", definition_value.get("type")) == "hosted"
-                and env.get("NORTHWIND_BUSINESS_DOMAIN") != "insurance"):
-            raise ValueError("Live hosted business domain is not insurance; retail fine-tunes/configs are incompatible")
+                and env.get("NORTHWIND_BUSINESS_DOMAIN", "insurance") != "insurance"):
+            raise ValueError("Live hosted agent is configured for a non-insurance business domain")
         dataset_id = job["run"]["data_source"]["source"]["id"]
         name, version = dataset_id[len(PREFIX):].split("/versions/")
         dataset = plain(project.datasets.get(name, version))

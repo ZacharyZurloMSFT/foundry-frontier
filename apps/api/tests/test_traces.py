@@ -10,20 +10,13 @@ from azure.monitor.query import LogsQueryStatus
 from app import traces
 
 
-def test_unavailable_insurance_trace_never_uses_retail_stub(monkeypatch):
-    monkeypatch.setattr(traces, "get_settings", lambda: SimpleNamespace(business_domain="insurance"))
+def test_unavailable_trace_is_explicit_and_never_synthetic(monkeypatch):
     monkeypatch.setattr(traces, "_try_query", lambda *_: None)
     result = traces.get_trace("insurance-session")
+    assert result["status"] == "unavailable"
     assert result["spans"] == []
+    assert result["totals"]["cost_usd"] == 0.0
     assert "No synthetic trace or cost estimate was substituted" in result["note"]
-
-
-def test_retail_trace_preserves_existing_explicit_stub(monkeypatch):
-    monkeypatch.setattr(traces, "get_settings", lambda: SimpleNamespace(business_domain="retail"))
-    monkeypatch.setattr(traces, "_try_query", lambda *_: None)
-    result = traces.get_trace("retail-session")
-    assert result["spans"]
-    assert "Stub trace shown" in result["note"]
 
 
 @pytest.mark.parametrize("result", [

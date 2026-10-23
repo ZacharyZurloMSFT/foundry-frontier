@@ -19,19 +19,18 @@ from urllib.parse import urlsplit
 
 import httpx
 
-STACKS = ("northwind", "insurance")
+STACKS = ("insurance",)
 ACA_SUFFIX = "gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io"
-WEB_APPS = {"northwind": ("ca-web-tech", "ca-web-voice"), "insurance": ("ca-insurance-portal", "ca-insurance-voice")}
+WEB_APPS = {"insurance": ("ca-insurance-portal", "ca-insurance-voice")}
+# The MCP kinds are the live API Management identifiers (insurance-mcp-tech-lookup, insurance-mcp-work-order).
 BACKENDS = {
-    "northwind": {"api": "ca-api", "tech-lookup": "ca-mcp-tech-lookup", "work-order": "ca-mcp-work-order"},
     "insurance": {"api": "ca-insurance-api", "tech-lookup": "ca-insurance-lookup", "work-order": "ca-insurance-review"},
 }
-# Tools each stack's MCP servers must expose. The northwind servers run the repository's canonical image (retail and
-# insurance tools); the insurance stack's servers expose only the insurance tools.
+# Tools each stack's MCP servers must expose: policy and claim lookup, and the claim-action draft for human review.
 MCP_TOOLS = {
-    "northwind": {"tech-lookup": {"lookup_order"}, "work-order": {"propose_resolution"}},
     "insurance": {"tech-lookup": {"lookup_policy", "lookup_claim"}, "work-order": {"draft_claim_action"}},
 }
+CHAT_PATH = "/insurance/chat"  # the stack prefix is added by the gateway: <gateway>/<stack>/insurance/chat
 MIN_MCP_PROTOCOL = "2025-06-18"
 PREFLIGHT_HEADERS = "authorization,content-type,x-department,x-demo-run,idempotency-key,x-synthetic-data"
 FOREIGN_ORIGIN = "https://evil.example"
@@ -115,7 +114,7 @@ def check_rest(client: httpx.Client, base: str, label: str, report: Report) -> N
 
 
 def check_cors(client: httpx.Client, base: str, label: str, origin: str, report: Report) -> None:
-    preflight = client.options(f"{base}/chat", headers={
+    preflight = client.options(f"{base}{CHAT_PATH}", headers={
         "Origin": origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": PREFLIGHT_HEADERS})
     allowed = {h.strip() for h in preflight.headers.get("access-control-allow-headers", "").lower().split(",")}
     report.check(f"{label} CORS preflight from the web app", preflight.status_code == 200
@@ -205,16 +204,15 @@ STREAM_MIN_GAP = 1.0  # the first line must arrive this long before the last one
 
 def check_streaming(client: httpx.Client, base: str, label: str, report: Report, *,
                     min_total: float = STREAM_MIN_TOTAL, min_gap: float = STREAM_MIN_GAP) -> None:
-    """/chat emits its session line at once and the model events seconds later, so a buffering gateway shows up as
-    every line arriving together at the end."""
+    """The insurance chat emits its session line at once and the model events seconds later, so a buffering gateway
+    shows up as every line arriving together at the end."""
     name = f"{label} NDJSON streaming"
     started = time.monotonic()
     first = last = None
     lines = 0
-    with client.stream("POST", f"{base}/chat", json={"message": "Reply with the single word ready."},
-                       headers={"X-Department": "contact-center"}) as response:
+    with client.stream("POST", f"{base}{CHAT_PATH}", json={"message": "Reply with the single word ready."}) as response:
         if response.status_code in (503, 404):
-            report.skip(name, f"/chat unavailable (HTTP {response.status_code})")
+            report.skip(name, f"{CHAT_PATH} unavailable (HTTP {response.status_code})")
             return
         for line in response.iter_lines():
             if line.strip():

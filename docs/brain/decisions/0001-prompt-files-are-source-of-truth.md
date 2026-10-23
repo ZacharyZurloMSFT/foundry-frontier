@@ -13,17 +13,22 @@ commit that shipped it.
 
 ## Decision
 
-- Every `.prompty` file and `agent.yaml` under `agents/` is the source of truth. Prompt text is not forked
+- Prompt files are the source of truth: `agents/insurance/*.yaml` (the five hosted roles),
+  `agents/copilot-harness/instructions.prompty` (the harness), `data/northwind/departments/*/prompts/*.yaml` (prompt
+  agents and adjuster support) and `evals/evaluators/rubrics/*.prompty` (judge rubrics). Prompt text is not forked
   into application code.
-- On a push to `main` that touches `agents/**` or `evals/evaluators/rubrics/**`, `prompt-registry.yml` runs
-  `scripts/publish-prompts.py`, which uploads each prompt to the Foundry Prompt Store tagged with the git SHA.
+- On a push to `main` that touches `agents/insurance/`, `agents/copilot-harness/` or `evals/evaluators/rubrics/`,
+  `prompt-registry.yml` runs `scripts/publish-prompts.py`, which uploads those prompts to the Foundry Prompt Store
+  tagged with the git SHA (department prompts are not published).
 - Prompt changes go through a pull request and the optimizer loop, like any other change.
 
 ## Consequences
 
 - Prefer prompt fixes over code fixes when handling an `eval-regression` or `redteam-failure` issue. If a code
   fix is needed, add a golden-set row that would catch the same failure next time.
-- Runtime code loads the packaged canonical YAML (the hosted manager loads
-  `agents/orchestrator/instructions.yaml`) and reports the canonical prompt SHA-256 in response metadata
-  ([architecture.md](../../architecture.md#order-concierge-hosted-runtime)).
+- Runtime code loads the packaged canonical YAML (a hosted role loads its own file under `agents/insurance/`, for
+  example `orchestrator.yaml`) and reports the canonical prompt SHA-256 in response metadata
+  ([architecture.md](../../architecture.md#hosted-agents)).
+- A hosted role's hash is taken over its file's raw bytes, so keep prompt files LF
+  ([gotchas](../gotchas/evals-and-prompts.md)).
 - Link to prompt files from the brain; never paste their text here.

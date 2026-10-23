@@ -45,7 +45,7 @@ def rid(path):
 
 
 def expected_ids():
-    """Every object the live template creates for the two approved stacks (51 in total)."""
+    """Every object the live template creates for the single approved stack (26 in total)."""
     ids = [rid("loggers/northwind-appinsights")]
     for stack in release.STACKS:
         for kind in API_KINDS:
@@ -66,9 +66,13 @@ def expected_ids():
 
 EXISTING = [
     SERVICE,
-    *(f"{PROVIDERS}/Microsoft.App/containerApps/ca-{name}" for name in (
-        "api", "web-tech", "web-voice", "mcp-tech-lookup", "mcp-work-order",
-        "insurance-api", "insurance-lookup", "insurance-review", "insurance-portal", "insurance-voice")),
+    *(f"{PROVIDERS}/Microsoft.App/containerApps/{name}" for name in (
+        "ca-insurance-api", "ca-insurance-lookup", "ca-insurance-review", "ca-insurance-portal", "ca-insurance-voice",
+        # The retired northwind stack is still deployed live but is no longer managed here.
+        "ca-api", "ca-web-tech", "ca-web-voice", "ca-mcp-tech-lookup", "ca-mcp-work-order")),
+    *(rid(path) for path in (
+        "apis/northwind-api", "apis/northwind-voice", "apis/northwind-mcp-tech-lookup", "apis/northwind-mcp-work-order",
+        "products/northwind-web", "products/northwind-agents", "subscriptions/northwind-agents")),
     f"{PROVIDERS}/Microsoft.Insights/components/appi-zurlo-northwind",
     f"{PROVIDERS}/microsoft.insights/actiongroups/Application Insights Smart Detection",
     f"{PROVIDERS}/Microsoft.ContainerRegistry/registries/acrzurlonorthwind",
@@ -92,7 +96,7 @@ def live_plan():
 
 def test_the_fixture_matches_the_shape_of_the_live_what_if():
     ids = expected_ids()
-    assert len(ids) == 51 == len(set(ids))
+    assert len(ids) == 26 == len(set(ids))
     relative = [identifier.removeprefix(SERVICE + "/").split("/") for identifier in ids]
     assert sorted(parts[1] for parts in relative if parts[0] == "apis" and len(parts) == 2) == sorted(release.API_NAMES)
 
@@ -101,8 +105,8 @@ def test_the_fixture_matches_the_shape_of_the_live_what_if():
 
 
 @pytest.mark.parametrize("identifier", expected_ids() + [
-    rid("apis/northwind-api/operations/get_health_health_get"), rid("apis/insurance-api/operations/a.b-c_d"),
-    rid("apis/northwind-voice/operations/onHandshake"),
+    rid("apis/insurance-api/operations/get_health_health_get"), rid("apis/insurance-api/operations/a.b-c_d"),
+    rid("apis/insurance-voice/operations/onHandshake"),
 ])
 def test_allow_list_accepts_every_object_the_boundary_manages(identifier):
     assert release.allowed_change(identifier)
@@ -111,12 +115,11 @@ def test_allow_list_accepts_every_object_the_boundary_manages(identifier):
 
 def test_allow_list_covers_exactly_the_approved_names():
     assert release.API_NAMES == (
-        "northwind-api", "northwind-voice", "northwind-mcp-tech-lookup", "northwind-mcp-work-order",
         "insurance-api", "insurance-voice", "insurance-mcp-tech-lookup", "insurance-mcp-work-order",
     )
-    assert release.PRODUCT_NAMES == ("northwind-web", "northwind-agents", "insurance-web", "insurance-agents")
-    assert release.AGENT_SUBSCRIPTIONS == ("northwind-agents", "insurance-agents")
-    assert release.STACKS == ("northwind", "insurance")
+    assert release.PRODUCT_NAMES == ("insurance-web", "insurance-agents")
+    assert release.AGENT_SUBSCRIPTIONS == ("insurance-agents",)
+    assert release.STACKS == ("insurance",)
 
 
 FORBIDDEN = {
@@ -125,76 +128,85 @@ FORBIDDEN = {
     "service diagnostics": rid("diagnostics/applicationinsights"), "service named values": rid("namedValues"),
     "named value": rid("namedValues/northwind-tenant-id"), "named value other": rid("namedValues/other"),
     "unknown api": rid("apis/echo-api"), "other stack api": rid("apis/contoso-api"),
-    "api suffix": rid("apis/northwind-api2"), "api prefix": rid("apis/xnorthwind-api"),
-    "unknown api kind": rid("apis/northwind-admin"), "revision suffix": rid("apis/northwind-api;rev=2"),
-    "api with escaped slash": rid("apis/northwind-api%2Foperations"),
-    "api policy on a voice api": rid("apis/northwind-voice/policies/policy"),
-    "api policy on the other voice api": rid("apis/insurance-voice/policies/policy"),
-    "api policy other name": rid("apis/northwind-api/policies/other"),
-    "api diagnostics other": rid("apis/northwind-api/diagnostics/azuremonitor"),
-    "api schema": rid("apis/northwind-api/schemas/default"), "api release": rid("apis/northwind-api/releases/r1"),
-    "api tag": rid("apis/northwind-api/tags/t"), "api wiki": rid("apis/northwind-api/wikis/default"),
-    "api issue": rid("apis/northwind-api/issues/1"), "api documentation": rid("apis/northwind-api/documentations/d"),
-    "operation collection": rid("apis/northwind-api/operations"), "operation empty id": rid("apis/northwind-api/operations/"),
-    "operation policy on rest api": rid("apis/northwind-api/operations/get_health/policies/policy"),
-    "handshake policy on rest api": rid("apis/northwind-api/operations/onHandshake/policies/policy"),
-    "handshake policy on mcp api": rid("apis/northwind-mcp-tech-lookup/operations/onHandshake/policies/policy"),
-    "other operation policy on voice api": rid("apis/northwind-voice/operations/mcp-post/policies/policy"),
-    "handshake policy other name": rid("apis/northwind-voice/operations/onHandshake/policies/other"),
-    "handshake diagnostics": rid("apis/northwind-voice/operations/onHandshake/diagnostics/applicationinsights"),
-    "handshake tags": rid("apis/northwind-voice/operations/onHandshake/tags/t"),
-    "handshake deeper": rid("apis/northwind-voice/operations/onHandshake/policies/policy/x"),
+    # The northwind stack is still deployed live but is no longer managed by this boundary.
+    "retired stack api": rid("apis/northwind-api"), "retired stack voice api": rid("apis/northwind-voice"),
+    "retired stack mcp tech lookup": rid("apis/northwind-mcp-tech-lookup"),
+    "retired stack mcp work order": rid("apis/northwind-mcp-work-order"),
+    "retired stack api policy": rid("apis/northwind-api/policies/policy"),
+    "retired stack api operation": rid("apis/northwind-api/operations/get_health_health_get"),
+    "retired stack handshake policy": rid("apis/northwind-voice/operations/onHandshake/policies/policy"),
+    "retired stack web product": rid("products/northwind-web"), "retired stack agents product": rid("products/northwind-agents"),
+    "retired stack agents subscription": rid("subscriptions/northwind-agents"),
+    "retired stack product link": rid("products/northwind-web/apis/northwind-api"),
+    "api suffix": rid("apis/insurance-api2"), "api prefix": rid("apis/xinsurance-api"),
+    "unknown api kind": rid("apis/insurance-admin"), "revision suffix": rid("apis/insurance-api;rev=2"),
+    "api with escaped slash": rid("apis/insurance-api%2Foperations"),
+    "api policy on a voice api": rid("apis/insurance-voice/policies/policy"),
+    "api policy other name": rid("apis/insurance-api/policies/other"),
+    "api diagnostics other": rid("apis/insurance-api/diagnostics/azuremonitor"),
+    "api schema": rid("apis/insurance-api/schemas/default"), "api release": rid("apis/insurance-api/releases/r1"),
+    "api tag": rid("apis/insurance-api/tags/t"), "api wiki": rid("apis/insurance-api/wikis/default"),
+    "api issue": rid("apis/insurance-api/issues/1"), "api documentation": rid("apis/insurance-api/documentations/d"),
+    "operation collection": rid("apis/insurance-api/operations"), "operation empty id": rid("apis/insurance-api/operations/"),
+    "operation policy on rest api": rid("apis/insurance-api/operations/get_health/policies/policy"),
+    "handshake policy on rest api": rid("apis/insurance-api/operations/onHandshake/policies/policy"),
+    "handshake policy on mcp api": rid("apis/insurance-mcp-tech-lookup/operations/onHandshake/policies/policy"),
+    "other operation policy on voice api": rid("apis/insurance-voice/operations/mcp-post/policies/policy"),
+    "handshake policy other name": rid("apis/insurance-voice/operations/onHandshake/policies/other"),
+    "handshake diagnostics": rid("apis/insurance-voice/operations/onHandshake/diagnostics/applicationinsights"),
+    "handshake tags": rid("apis/insurance-voice/operations/onHandshake/tags/t"),
+    "handshake deeper": rid("apis/insurance-voice/operations/onHandshake/policies/policy/x"),
     "unknown product": rid("products/starter"), "unlimited product": rid("products/unlimited"),
-    "other product kind": rid("products/northwind-admin"), "other stack product": rid("products/contoso-web"),
-    "product policy": rid("products/northwind-web/policies/policy"),
-    "product group": rid("products/northwind-web/groups/administrators"),
-    "product subscription": rid("products/northwind-web/subscriptions/x"),
-    "product tag": rid("products/northwind-web/tags/x"),
-    "product link to unknown api": rid("products/northwind-web/apis/echo-api"),
-    "link on unknown product": rid("products/starter/apis/northwind-api"),
-    "cross stack link": rid("products/northwind-web/apis/insurance-api"),
+    "other product kind": rid("products/insurance-admin"), "other stack product": rid("products/contoso-web"),
+    "product policy": rid("products/insurance-web/policies/policy"),
+    "product group": rid("products/insurance-web/groups/administrators"),
+    "product subscription": rid("products/insurance-web/subscriptions/x"),
+    "product tag": rid("products/insurance-web/tags/x"),
+    "product link to unknown api": rid("products/insurance-web/apis/echo-api"),
+    "link on unknown product": rid("products/starter/apis/insurance-api"),
+    "cross stack link": rid("products/insurance-web/apis/contoso-api"),
     "cross stack agents link": rid("products/insurance-agents/apis/northwind-mcp-work-order"),
-    "master subscription": rid("subscriptions/master"), "web subscription": rid("subscriptions/northwind-web"),
+    "master subscription": rid("subscriptions/master"), "web subscription": rid("subscriptions/insurance-web"),
     "other agents subscription": rid("subscriptions/contoso-agents"),
     "agents subscription suffix": rid("subscriptions/insurance-agents-2"),
     "other logger": rid("loggers/azuremonitor"), "logger prefix": rid("loggers/northwind-appinsights2"),
-    "backend": rid("backends/northwind-api"), "certificate": rid("certificates/c1"), "user": rid("users/1"),
+    "backend": rid("backends/insurance-api"), "certificate": rid("certificates/c1"), "user": rid("users/1"),
     "group": rid("groups/administrators"), "tag": rid("tags/northwind"),
     "portal settings": rid("portalsettings/delegation"), "policy fragment": rid("policyFragments/f"),
     "authorization server": rid("authorizationServers/a"), "identity provider": rid("identityProviders/aad"),
     "version set": rid("apiVersionSets/v"), "gateway": rid("gateways/g"), "tenant access": rid("tenant/access"),
-    "other service": SERVICE + "-2/apis/northwind-api",
-    "service prefix": SERVICE.replace("apim-northwind", "xapim-northwind") + "/apis/northwind-api",
-    "other resource group": rid("apis/northwind-api").replace("rg-northwind-apps", "rg-northwind-data"),
-    "resource group prefix": rid("apis/northwind-api").replace("rg-northwind-apps", "rg-northwind-apps2"),
-    "other subscription": rid("apis/northwind-api").replace(release.SUBSCRIPTION, "00000000-0000-0000-0000-000000000000"),
-    "other provider": rid("apis/northwind-api").replace("Microsoft.ApiManagement/service", "Microsoft.ApiManagement/Service2"),
-    "container app": f"{PROVIDERS}/Microsoft.App/containerApps/ca-api",
+    "other service": SERVICE + "-2/apis/insurance-api",
+    "service prefix": SERVICE.replace("apim-northwind", "xapim-northwind") + "/apis/insurance-api",
+    "other resource group": rid("apis/insurance-api").replace("rg-northwind-apps", "rg-northwind-data"),
+    "resource group prefix": rid("apis/insurance-api").replace("rg-northwind-apps", "rg-northwind-apps2"),
+    "other subscription": rid("apis/insurance-api").replace(release.SUBSCRIPTION, "00000000-0000-0000-0000-000000000000"),
+    "other provider": rid("apis/insurance-api").replace("Microsoft.ApiManagement/service", "Microsoft.ApiManagement/Service2"),
+    "container app": f"{PROVIDERS}/Microsoft.App/containerApps/ca-insurance-api",
     "app insights": f"{PROVIDERS}/Microsoft.Insights/components/appi-zurlo-northwind",
     "role assignment": f"{PROVIDERS}/Microsoft.Authorization/roleAssignments/x",
     "nested deployment": f"{PROVIDERS}/Microsoft.Resources/deployments/x",
-    "empty": "", "relative": "apis/northwind-api", "no scope": "/apis/northwind-api",
-    "leading space": " " + rid("apis/northwind-api"), "trailing space": rid("apis/northwind-api") + " ",
-    "trailing newline": rid("apis/northwind-api") + "\n", "embedded newline": rid("apis/northwind-api/operations/a\nb"),
-    "nul byte": rid("apis/northwind-api\x00"), "backslash": rid("apis/northwind-api\\operations\\x"),
-    "double slash": rid("apis//northwind-api"), "double slash child": rid("apis/northwind-api//policies/policy"),
-    "dot segment": rid("apis/northwind-api/./policies/policy"),
-    "parent segment": rid("apis/northwind-api/../../policies/policy"),
-    "parent segment to global policy": rid("apis/northwind-api/operations/../../../policies/policy"),
-    "parent operation id": rid("apis/northwind-api/operations/.."), "dot operation id": rid("apis/northwind-api/operations/."),
-    "operation parent then policy": rid("apis/northwind-api/operations/../policies/policy"),
-    "operation deep traversal": rid("apis/northwind-api/operations/x/../../.."),
-    "encoded parent operation id": rid("apis/northwind-api/operations/%2e%2e"),
-    "encoded slash operation id": rid("apis/northwind-api/operations/a%2fb"),
-    "operation with space": rid("apis/northwind-api/operations/a b"),
-    "operation with query": rid("apis/northwind-api/operations/a?x=1"),
-    "operation with hash": rid("apis/northwind-api/operations/a#b"), "operation with star": rid("apis/northwind-api/operations/*"),
-    "operation too long": rid("apis/northwind-api/operations/" + "a" * 81),
-    "api traversal": rid("apis/../policies/policy"), "apis traversal child": rid("apis/northwind-api/operations/x/policies/../.."),
-    "handshake parent": rid("apis/northwind-voice/operations/../onHandshake/policies/policy"),
-    "kelvin sign lookalike": rid("apis/northwind-mcp-tech-loo\u212aup"),
-    "turkish dotless lookalike": rid("apis/northwind-api").replace("api", "ap\u0131"),
-    "fullwidth lookalike": rid("apis/northwind-api").replace("apis", "\uff41pis"),
+    "empty": "", "relative": "apis/insurance-api", "no scope": "/apis/insurance-api",
+    "leading space": " " + rid("apis/insurance-api"), "trailing space": rid("apis/insurance-api") + " ",
+    "trailing newline": rid("apis/insurance-api") + "\n", "embedded newline": rid("apis/insurance-api/operations/a\nb"),
+    "nul byte": rid("apis/insurance-api\x00"), "backslash": rid("apis/insurance-api\\operations\\x"),
+    "double slash": rid("apis//insurance-api"), "double slash child": rid("apis/insurance-api//policies/policy"),
+    "dot segment": rid("apis/insurance-api/./policies/policy"),
+    "parent segment": rid("apis/insurance-api/../../policies/policy"),
+    "parent segment to global policy": rid("apis/insurance-api/operations/../../../policies/policy"),
+    "parent operation id": rid("apis/insurance-api/operations/.."), "dot operation id": rid("apis/insurance-api/operations/."),
+    "operation parent then policy": rid("apis/insurance-api/operations/../policies/policy"),
+    "operation deep traversal": rid("apis/insurance-api/operations/x/../../.."),
+    "encoded parent operation id": rid("apis/insurance-api/operations/%2e%2e"),
+    "encoded slash operation id": rid("apis/insurance-api/operations/a%2fb"),
+    "operation with space": rid("apis/insurance-api/operations/a b"),
+    "operation with query": rid("apis/insurance-api/operations/a?x=1"),
+    "operation with hash": rid("apis/insurance-api/operations/a#b"), "operation with star": rid("apis/insurance-api/operations/*"),
+    "operation too long": rid("apis/insurance-api/operations/" + "a" * 81),
+    "api traversal": rid("apis/../policies/policy"), "apis traversal child": rid("apis/insurance-api/operations/x/policies/../.."),
+    "handshake parent": rid("apis/insurance-voice/operations/../onHandshake/policies/policy"),
+    "kelvin sign lookalike": rid("apis/insurance-mcp-tech-loo\u212aup"),
+    "turkish dotless lookalike": rid("apis/insurance-api").replace("api", "ap\u0131"),
+    "fullwidth lookalike": rid("apis/insurance-api").replace("apis", "\uff41pis"),
 }
 
 
@@ -226,27 +238,28 @@ def test_products_only_expose_apis_of_their_own_stack():
         for product in ("web", "agents"):
             for kind in API_KINDS:
                 assert release.allowed_change(rid(f"products/{stack}-{product}/apis/{stack}-{kind}"))
-                other = next(s for s in release.STACKS if s != stack)
-                assert not release.allowed_change(rid(f"products/{stack}-{product}/apis/{other}-{kind}"))
+                for other in ("northwind", "contoso"):
+                    assert not release.allowed_change(rid(f"products/{stack}-{product}/apis/{other}-{kind}"))
+                    assert not release.allowed_change(rid(f"products/{other}-{product}/apis/{stack}-{kind}"))
 
 
 # ---------------------------------------------------------------- plan allow-list
 
 
 def test_plan_keeps_create_and_modify_lowercased_and_sorted_by_resource():
-    identifiers = [rid("apis/NORTHWIND-API"), rid("apis/insurance-api"), rid("loggers/northwind-appinsights")]
+    identifiers = [rid("apis/INSURANCE-VOICE"), rid("apis/insurance-api"), rid("loggers/northwind-appinsights")]
     result = release.safe_plan(whatif(
         change("Create", identifiers[0]), change("Modify", identifiers[1]), change("Create", identifiers[2])))
     assert result == {"changes": [
         {"resource_id": rid("apis/insurance-api").lower(), "change_type": "Modify"},
-        {"resource_id": rid("apis/northwind-api").lower(), "change_type": "Create"},
+        {"resource_id": rid("apis/insurance-voice").lower(), "change_type": "Create"},
         {"resource_id": rid("loggers/northwind-appinsights").lower(), "change_type": "Create"},
     ]}
 
 
 def test_plan_for_the_live_shape_skips_existing_resources_and_accepts_every_create():
     result = release.safe_plan(live_plan())
-    assert len(result["changes"]) == 51 and {c["change_type"] for c in result["changes"]} == {"Create"}
+    assert len(result["changes"]) == 26 and {c["change_type"] for c in result["changes"]} == {"Create"}
     assert [c["resource_id"] for c in result["changes"]] == sorted(i.lower() for i in expected_ids())
     listed = {c["resource_id"] for c in result["changes"]}
     assert not any(identifier.lower() in listed for identifier in EXISTING)
@@ -254,7 +267,8 @@ def test_plan_for_the_live_shape_skips_existing_resources_and_accepts_every_crea
 
 @pytest.mark.parametrize("kind", ["Ignore", "NoChange"])
 def test_ignore_and_no_change_are_skipped_even_for_resources_outside_the_boundary(kind):
-    outside = [SERVICE, rid("policies/policy"), f"{PROVIDERS}/Microsoft.App/containerApps/ca-api", "not-an-id", "", None]
+    outside = [SERVICE, rid("policies/policy"), f"{PROVIDERS}/Microsoft.App/containerApps/ca-insurance-api",
+               rid("apis/northwind-api"), "not-an-id", "", None]
     assert release.safe_plan(whatif(*({"changeType": kind, "resourceId": identifier} for identifier in outside))) == {
         "changes": []}
     assert release.safe_plan({"changes": [{"changeType": kind}]}) == {"changes": []}
@@ -263,20 +277,20 @@ def test_ignore_and_no_change_are_skipped_even_for_resources_outside_the_boundar
 @pytest.mark.parametrize("kind", ["Delete", "Deploy", "Unsupported", "create", "MODIFY", "", None, 7])
 def test_unsupported_change_types_are_rejected_for_allowed_resources(kind):
     with pytest.raises(ValueError, match="unsupported change"):
-        release.safe_plan(whatif({"changeType": kind, "resourceId": rid("apis/northwind-api")}))
+        release.safe_plan(whatif({"changeType": kind, "resourceId": rid("apis/insurance-api")}))
 
 
-@pytest.mark.parametrize("identifier", [SERVICE, rid("policies/policy"), rid("apis/echo-api"),
-                                        f"{PROVIDERS}/Microsoft.App/containerApps/ca-api", "", None, 5])
+@pytest.mark.parametrize("identifier", [SERVICE, rid("policies/policy"), rid("apis/echo-api"), rid("apis/northwind-api"),
+                                        f"{PROVIDERS}/Microsoft.App/containerApps/ca-insurance-api", "", None, 5])
 @pytest.mark.parametrize("kind", ["Create", "Modify"])
 def test_creating_or_modifying_anything_else_is_rejected(kind, identifier):
     with pytest.raises(ValueError, match="unsupported change or resource"):
-        release.safe_plan(whatif(change("Create", rid("apis/northwind-api")), {"changeType": kind, "resourceId": identifier}))
+        release.safe_plan(whatif(change("Create", rid("apis/insurance-api")), {"changeType": kind, "resourceId": identifier}))
 
 
 def test_a_single_bad_entry_rejects_a_plan_that_is_otherwise_valid():
     plan = live_plan()
-    plan["changes"].append(change("Delete", rid("apis/northwind-api")))
+    plan["changes"].append(change("Delete", rid("apis/insurance-api")))
     with pytest.raises(ValueError, match="unsupported change"):
         release.safe_plan(plan)
 
@@ -311,11 +325,12 @@ def test_what_if_entries_that_are_not_objects_are_rejected():
 
 def test_potential_changes_are_held_to_the_same_allow_list():
     assert release.safe_plan(whatif(potentialChanges=[])) == {"changes": []}
-    ok = release.safe_plan(whatif(potentialChanges=[change("Create", rid("apis/northwind-api"))]))
-    assert [c["resource_id"] for c in ok["changes"]] == [rid("apis/northwind-api").lower()]
+    ok = release.safe_plan(whatif(potentialChanges=[change("Create", rid("apis/insurance-api"))]))
+    assert [c["resource_id"] for c in ok["changes"]] == [rid("apis/insurance-api").lower()]
     assert release.safe_plan(whatif(potentialChanges=[change("Ignore", SERVICE)])) == {"changes": []}
-    for bad in (change("Create", rid("policies/policy")), change("Delete", rid("apis/northwind-api")),
-                {"changeType": "Deploy", "resourceId": rid("apis/northwind-api")}):
+    for bad in (change("Create", rid("policies/policy")), change("Delete", rid("apis/insurance-api")),
+                change("Create", rid("apis/northwind-api")),
+                {"changeType": "Deploy", "resourceId": rid("apis/insurance-api")}):
         with pytest.raises(ValueError, match="unsupported change"):
             release.safe_plan(whatif(potentialChanges=[bad]))
 
@@ -323,7 +338,7 @@ def test_potential_changes_are_held_to_the_same_allow_list():
 # ---------------------------------------------------------------- template boundary
 
 
-def stack(name, prefix=""):
+def stack(name="insurance", prefix="insurance-"):
     return {"name": name, "apiApp": f"ca-{prefix}api", "techLookupApp": f"ca-{prefix}lookup",
             "workOrderApp": f"ca-{prefix}review", "webApp": f"ca-{prefix}portal", "voiceApp": f"ca-{prefix}voice"}
 
@@ -350,7 +365,7 @@ def compiled_template():
         "parameters": {
             "apimName": {"type": "string", "defaultValue": "apim-northwind"},
             "appInsightsName": {"type": "string", "defaultValue": "appi-zurlo-northwind"},
-            "stacks": {"type": "array", "defaultValue": [stack("northwind"), stack("insurance", "insurance-")]},
+            "stacks": {"type": "array", "defaultValue": [stack()]},
             "extraAllowedOrigins": {"type": "array", "defaultValue": ["http://localhost:5173", "http://localhost:5174"]},
             "gatewayAudience": {"type": "string", "defaultValue": ""},
             "businessAuth": {"type": "object", "defaultValue": {}},
@@ -494,25 +509,25 @@ def test_parameter_defaults_are_pinned_to_the_live_targets():
 
 
 @pytest.mark.parametrize("stacks", [
-    [], [stack("northwind")], [stack("insurance", "insurance-")],
-    [stack("northwind"), stack("insurance", "insurance-"), stack("contoso", "contoso-")],
-    [stack("northwind"), stack("northwind")], [stack("northwind"), stack("contoso", "contoso-")],
-    [stack("Northwind"), stack("insurance", "insurance-")], [stack("northwind "), stack("insurance", "insurance-")],
-    [{**stack("northwind"), "name": None}, stack("insurance", "insurance-")],
-    [{**stack("northwind"), "name": ["northwind"]}, stack("insurance", "insurance-")],
-    "northwind", None, {"name": "northwind"}, [None, "x"], [stack("northwind"), "insurance"],
+    [], [stack("northwind", "")], [stack(), stack("contoso", "contoso-")],
+    [stack("northwind", ""), stack()], [stack(), stack()], [stack("northwind", ""), stack("contoso", "contoso-")],
+    [stack("Insurance")], [stack("insurance ")],
+    [{**stack(), "name": None}], [{**stack(), "name": ["insurance"]}],
+    "insurance", None, {"name": "insurance"}, [None], [stack(), "contoso"],
 ])
 def test_stack_names_must_be_exactly_the_approved_stacks(stacks):
     with pytest.raises(ValueError):
         release.validate_template(with_default("stacks", stacks))
 
 
-def test_stack_order_is_not_significant_but_membership_is():
-    release.validate_template(with_default("stacks", [stack("insurance", "insurance-"), stack("northwind")]))
+def test_the_single_approved_stack_is_accepted_and_the_retired_one_is_not():
+    release.validate_template(with_default("stacks", [stack()]))
+    with pytest.raises(ValueError, match="Stacks differ from the approved list"):
+        release.validate_template(with_default("stacks", [stack("northwind", "")]))
 
 
 def broken_stack(**changes):
-    return [{**stack("northwind"), **changes}, stack("insurance", "insurance-")]
+    return [{**stack(), **changes}]
 
 
 def without(mapping, key):
@@ -521,12 +536,12 @@ def without(mapping, key):
 
 @pytest.mark.parametrize("stacks", [
     broken_stack(extraApp="ca-extra"), broken_stack(note="free text"),
-    broken_stack(apps={"api": "ca-api"}), broken_stack(display="ca-api"),
-    [without(stack("northwind"), "webApp"), stack("insurance", "insurance-")],
-    [without(stack("northwind"), "voiceApp"), stack("insurance", "insurance-")],
-    [without(stack("northwind"), "name"), stack("insurance", "insurance-")],
-    [{"name": "northwind"}, stack("insurance", "insurance-")],
-    [stack("northwind"), without(stack("insurance", "insurance-"), "techLookupApp")],
+    broken_stack(apps={"api": "ca-insurance-api"}), broken_stack(display="ca-insurance-api"),
+    [without(stack(), "webApp")],
+    [without(stack(), "voiceApp")],
+    [without(stack(), "name")],
+    [{"name": "insurance"}],
+    [without(stack(), "techLookupApp")],
 ])
 def test_each_stack_carries_exactly_the_approved_key_set(stacks):
     with pytest.raises(ValueError):
@@ -535,8 +550,10 @@ def test_each_stack_carries_exactly_the_approved_key_set(stacks):
 
 @pytest.mark.parametrize("key", ["apiApp", "techLookupApp", "workOrderApp", "webApp", "voiceApp"])
 @pytest.mark.parametrize("value", [
-    "api", "ca-", "CA-api", "ca-API", "ca_api", "ca-api_1", "ca-api ", " ca-api", "ca-api\n", "ca-a b", "ca-api/x", "ca-../x",
-    "https://ca-api", "ca-api.internal", "", None, 5, True, ["ca-api"], {"a": "ca-api"},
+    "api", "ca-", "CA-insurance-api", "ca-Insurance-api", "ca_insurance_api", "ca-insurance-api_1", "ca-insurance-api ",
+    " ca-insurance-api", "ca-insurance-api\n", "ca-insurance a", "ca-insurance-api/x", "ca-../x",
+    "https://ca-insurance-api", "ca-insurance-api.internal", "", None, 5, True, ["ca-insurance-api"],
+    {"a": "ca-insurance-api"},
 ])
 def test_stack_app_names_must_be_container_app_names(key, value):
     with pytest.raises(ValueError):
@@ -545,7 +562,7 @@ def test_stack_app_names_must_be_container_app_names(key, value):
 
 @pytest.mark.parametrize("key", ["apiApp", "techLookupApp", "workOrderApp", "webApp", "voiceApp"])
 def test_stack_app_names_accept_digits_and_dashes(key):
-    release.validate_template(with_default("stacks", broken_stack(**{key: "ca-web-2-tech"})))
+    release.validate_template(with_default("stacks", broken_stack(**{key: "ca-insurance-2-portal"})))
 
 
 @pytest.mark.parametrize("origins", [
@@ -679,7 +696,7 @@ def test_envelope_binds_source_template_and_full_plan(tmp_path):
     assert first["source_sha"] == SHA and first["subscription"] == release.SUBSCRIPTION
     assert first["resource_group"] == "rg-northwind-apps"
     assert first["template_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
-    assert len(first["changes"]) == 51 and first["changes"] == release.safe_plan(result)["changes"]
+    assert len(first["changes"]) == 26 and first["changes"] == release.safe_plan(result)["changes"]
     assert first != release.envelope(path, result, "b" * 40)
     other_template = template_file(tmp_path, {**compiled_template(), "variables": {"policy": "<policies><x/></policies>"}})
     assert first["template_sha256"] != release.envelope(other_template, result, SHA)["template_sha256"]
@@ -696,7 +713,7 @@ def test_envelope_hash_does_not_depend_on_what_if_listing_order(tmp_path):
     reordered = copy.deepcopy(result)
     reordered["changes"].reverse()
     assert release.envelope(path, result, SHA) == release.envelope(path, reordered, SHA)
-    potential = whatif(potentialChanges=[change("Create", rid("apis/northwind-api")), change("Create", rid("apis/insurance-api"))])
+    potential = whatif(potentialChanges=[change("Create", rid("apis/insurance-voice")), change("Create", rid("apis/insurance-api"))])
     flipped = copy.deepcopy(potential)
     flipped["potentialChanges"].reverse()
     assert release.plan_digest(potential) == release.plan_digest(flipped)
@@ -706,7 +723,7 @@ def test_envelope_hash_does_not_depend_on_what_if_listing_order(tmp_path):
 def test_envelope_never_contains_property_values_and_refuses_unsafe_plans(tmp_path):
     path = template_file(tmp_path)
     assert SECRET not in json.dumps(release.envelope(path, live_plan(), SHA))
-    for plan in (whatif(change("Delete", rid("apis/northwind-api"))), whatif(change("Create", rid("policies/policy"))),
+    for plan in (whatif(change("Delete", rid("apis/insurance-api"))), whatif(change("Create", rid("policies/policy"))),
                  {"status": "Failed", "changes": []}):
         with pytest.raises(ValueError):
             release.envelope(path, plan, SHA)
@@ -753,10 +770,10 @@ def listing(*names, next_link=None):
     return page
 
 
-def test_verification_queries_the_apis_collection_and_expects_all_eight(monkeypatch):
+def test_verification_queries_the_apis_collection_and_expects_all_four(monkeypatch):
     calls = []
     monkeypatch.setattr(release, "command", lambda *args: calls.append(args) or listing(*release.API_NAMES, "echo-api"))
-    assert release.verify_apis() == sorted(release.API_NAMES) and len(release.API_NAMES) == 8
+    assert release.verify_apis() == sorted(release.API_NAMES) and len(release.API_NAMES) == 4
     assert calls == [("rest", "--method", "get", "--url",
                       f"https://management.azure.com/subscriptions/{release.SUBSCRIPTION}/resourceGroups/rg-northwind-apps"
                       "/providers/Microsoft.ApiManagement/service/apim-northwind/apis",
@@ -766,7 +783,7 @@ def test_verification_queries_the_apis_collection_and_expects_all_eight(monkeypa
 def test_verification_is_case_insensitive_and_reports_every_missing_api(monkeypatch):
     monkeypatch.setattr(release, "command", lambda *args: listing(*(n.upper() for n in release.API_NAMES)))
     assert release.verify_apis() == sorted(release.API_NAMES)
-    monkeypatch.setattr(release, "command", lambda *args: listing(*release.API_NAMES[:6]))
+    monkeypatch.setattr(release, "command", lambda *args: listing(*release.API_NAMES[:2]))
     with pytest.raises(RuntimeError, match="insurance-mcp-tech-lookup, insurance-mcp-work-order"):
         release.verify_apis()
     monkeypatch.setattr(release, "command", lambda *args: {"value": []})
@@ -786,8 +803,8 @@ def test_verification_rejects_malformed_listings(monkeypatch, page):
 
 def test_verification_follows_continuation_links_within_the_same_collection(monkeypatch):
     calls = []
-    link = release.APIS_URL + "?api-version=2024-05-01&$skip=4"
-    pages = [listing(*release.API_NAMES[:4], next_link=link), listing(*release.API_NAMES[4:])]
+    link = release.APIS_URL + "?api-version=2024-05-01&$skip=2"
+    pages = [listing(*release.API_NAMES[:2], next_link=link), listing(*release.API_NAMES[2:])]
     monkeypatch.setattr(release, "command", lambda *args: calls.append(args) or pages[len(calls) - 1])
     assert release.verify_apis() == sorted(release.API_NAMES)
     assert calls[1] == ("rest", "--method", "get", "--url", link)
@@ -868,11 +885,11 @@ def test_plan_runs_only_what_if_and_publishes_ids_and_change_types(tmp_path, azu
     assert call[call.index("--mode") + 1] == "Incremental" and call[call.index("--validation-level") + 1] == "ProviderNoRbac"
     assert "--no-pretty-print" in call and call[call.index("--resource-group") + 1] == "rg-northwind-apps"
     assert call[call.index("--subscription") + 1] == release.SUBSCRIPTION and "--parameters" not in call
-    assert "applied" not in result and len(result["changes"]) == 51 and result["source_sha"] == SHA
+    assert "applied" not in result and len(result["changes"]) == 26 and result["source_sha"] == SHA
     printed = capsys.readouterr().out
     markdown = summary_file.read_text(encoding="utf-8")
     assert json.loads(printed) == result
-    assert "plan only; nothing was changed" in markdown and "| Create | `apis/northwind-api` |" in markdown
+    assert "plan only; nothing was changed" in markdown and "| Create | `apis/insurance-api` |" in markdown
     assert "| Create | `apis/insurance-voice/operations/onhandshake/policies/policy` |" in markdown
     for identifier in (c["resource_id"] for c in result["changes"]):
         assert identifier.removeprefix(release.SERVICE_SCOPE) in markdown
@@ -942,7 +959,7 @@ def mutate(plan, edit):
 
 @pytest.mark.parametrize("approved_plan", [
     mutate(live_plan(), lambda p: p["changes"].pop()),
-    mutate(live_plan(), lambda p: p["changes"].append(change("Create", rid("apis/northwind-api/operations/get_health")))),
+    mutate(live_plan(), lambda p: p["changes"].append(change("Create", rid("apis/insurance-api/operations/get_health")))),
     mutate(live_plan(), lambda p: p["changes"][-1]["after"]["properties"].update(value="a different property")),
     mutate(live_plan(), lambda p: p["changes"].__setitem__(-1, {**p["changes"][-1], "changeType": "Modify"})),
     whatif(*(change("Ignore", identifier) for identifier in EXISTING)),
@@ -1009,12 +1026,12 @@ def test_apply_deploys_incrementally_after_a_fresh_plan_then_verifies_the_apis(t
     assert not any(argument.startswith("--parameters") or argument == "--what-if" for argument in create)
     assert azure.calls[2][:4] == ("rest", "--method", "get", "--url") and azure.calls[2][4] == release.APIS_URL
     assert result["applied"] is True and result["verified_apis"] == sorted(release.API_NAMES)
-    assert len(result["verified_apis"]) == 8
+    assert len(result["verified_apis"]) == 4
     without_apply_fields = {k: v for k, v in result.items() if k not in {"applied", "verified_apis"}}
     assert without_apply_fields == json.loads(approved.read_text(encoding="utf-8"))
     markdown = summary_file.read_text(encoding="utf-8")
     assert markdown.startswith("## API Management apply") and "Result: applied" in markdown
-    assert "`northwind-api`" in markdown and "`insurance-mcp-work-order`" in markdown
+    assert "`insurance-api`" in markdown and "`insurance-mcp-work-order`" in markdown
     assert SECRET not in markdown and SECRET not in json.dumps(result)
 
 
@@ -1031,8 +1048,8 @@ def test_apply_accepts_a_fresh_plan_listed_in_a_different_order(tmp_path, monkey
 def test_apply_never_deploys_when_the_fresh_plan_contains_an_unsafe_change(tmp_path, monkeypatch):
     approved = approve(tmp_path)
     monkeypatch.setenv("NORTHWIND_APIM_CONFIRM", SHA)
-    for unsafe in (change("Delete", rid("apis/northwind-api")), change("Create", rid("policies/policy")),
-                   change("Modify", SERVICE), {"changeType": "Deploy", "resourceId": rid("apis/northwind-api")}):
+    for unsafe in (change("Delete", rid("apis/insurance-api")), change("Create", rid("policies/policy")),
+                   change("Modify", SERVICE), {"changeType": "Deploy", "resourceId": rid("apis/insurance-api")}):
         fake = FakeAz(mutate(live_plan(), lambda p: p["changes"].append(unsafe)))
         monkeypatch.setattr(release, "command", fake)
         with pytest.raises(ValueError, match="unsupported change"):
@@ -1053,7 +1070,7 @@ def test_apply_never_runs_azure_when_the_template_leaves_the_boundary(tmp_path, 
 
 
 def test_failed_verification_fails_the_run_but_keeps_evidence_that_the_deployment_ran(tmp_path, monkeypatch):
-    fake = FakeAz(apis=list(release.API_NAMES[:7]))
+    fake = FakeAz(apis=list(release.API_NAMES[:3]))
     monkeypatch.setattr(release, "command", fake)
     summary_file = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))

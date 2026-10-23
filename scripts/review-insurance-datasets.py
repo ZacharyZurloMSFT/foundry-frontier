@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "pipelines" / "orders-learning"))
+sys.path.insert(0, str(ROOT / "pipelines" / "insurance-learning"))
 from evals.insurance import FIXTURE
 from evals.insurance_review import approval_template, audit_pack, read_json, sha256, verify_pack, verify_receipt, write_new
 from insurance_learning import SOURCE_PACK, prepare

@@ -18,7 +18,7 @@ export_openapi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export_openapi)
 
 DOC_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
-HTTP_OPERATIONS = 64
+HTTP_OPERATIONS = 59
 BUSINESS_OPERATIONS = 24
 HINT = "The APIM-facing API surface changed: run `python scripts/export-openapi.py` and update docs/api-management.md."
 

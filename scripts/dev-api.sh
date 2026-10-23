@@ -8,7 +8,7 @@
 #   scripts/dev-api.sh              # start API
 #   Ctrl+C                          # stop API
 #
-# See docs/local-dev.md for the matching web-tech instructions.
+# See docs/local-dev.md for the matching web-portal instructions.
 
 set -euo pipefail
 

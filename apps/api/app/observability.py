@@ -99,9 +99,9 @@ def _quiet_noisy_loggers() -> None:
 
 @lru_cache
 def build_info() -> dict[str, str]:
-    """Read git SHA + prompt-version manifest once and cache. All three env
-    vars are set by the deploy workflow (see .github/workflows/prompt-registry.yml
-    and deploy-progressive.yml). Falls back to `"local"` for dev."""
+    """Read git SHA + prompt-version manifest once and cache. The build env
+    vars are set by the app release lane (scripts/release-app.py, run from
+    .github/workflows/deploy-apps.yml). Falls back to `"local"` for dev."""
     info: dict[str, str] = {
         "git_sha":       os.environ.get("GIT_SHA", "local"),
         "build_env":     os.environ.get("BUILD_ENV", "local"),

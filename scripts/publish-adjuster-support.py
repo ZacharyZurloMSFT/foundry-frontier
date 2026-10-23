@@ -1,4 +1,4 @@
-"""Preview isolated fictional employee/adjuster Search content; only --apply writes."""
+"""Preview isolated fictional adjuster-support Search content; only --apply writes."""
 from __future__ import annotations
 
 import argparse
@@ -23,24 +23,9 @@ API = "2026-05-01-preview"
 
 
 def documents(root: Path = ROOT) -> list[dict]:
-    seed = root / "data" / "northwind" / "departments" / "employee-help-desk" / "seed"
+    seed = root / "data" / "northwind" / "departments" / "adjuster-support" / "seed"
     common = {"publisher": OWNER, "business_domain": "insurance", "synthetic": True}
     result = []
-    for path in sorted(seed.glob("*.md")):
-        if path.name.lower() == "readme.md":
-            continue
-        text = path.read_text(encoding="utf-8").strip()
-        title = next((line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("# ")), "")
-        if not title or not text:
-            raise ValueError("Employee source requires a title and content.")
-        version = "snapshot-" + hashlib.sha256(text.encode()).hexdigest()[:16]
-        result.append({
-            **common, "id": path.stem, "title": "Fictional Northwind employee guidance: " + title,
-            "version": version, "effective_from": "not specified in source",
-            "source_uri": f"urn:northwind:synthetic:employee-support:{path.name}:{version}",
-            "category": "it" if path.stem.startswith(("it-", "security-")) else "hr",
-            "content": text,
-        })
     corpus = json.loads((seed / "adjuster-procedures.json").read_text(encoding="utf-8"))
     if (corpus.get("synthetic") is not True or corpus.get("business_domain") != "insurance"
             or not re.fullmatch(r"\d+(?:\.\d+)*", corpus.get("version", ""))
@@ -53,7 +38,7 @@ def documents(root: Path = ROOT) -> list[dict]:
             raise ValueError("Invalid fictional adjuster source.")
         result.append({
             **common, **doc, "version": corpus["version"], "effective_from": corpus["effective_from"],
-            "source_uri": f"urn:northwind:synthetic:employee-support:{doc['id']}:v{corpus['version']}",
+            "source_uri": f"urn:northwind:synthetic:adjuster-support:{doc['id']}:v{corpus['version']}",
             "category": "adjuster",
         })
     if (not result or len({doc["id"] for doc in result}) != len(result)

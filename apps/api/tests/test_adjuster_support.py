@@ -19,7 +19,7 @@ load_support_history = support.load_support_history
 @pytest.fixture
 def config(monkeypatch):
     settings = SimpleNamespace(
-        business_domain="insurance", search_endpoint="https://search.unit.test",
+        search_endpoint="https://search.unit.test",
         foundry_project_endpoint="https://foundry.unit.test/api/projects/northwind-orders",
         cosmos_endpoint="https://cosmos.unit.test", adjuster_support_enabled=True,
         adjuster_support_index=support.INDEX, adjuster_support_search_auth="entra_id",
@@ -35,7 +35,7 @@ def config(monkeypatch):
 @pytest.fixture
 def evidence():
     return [{"id": "ADJ-TEST-001", "title": "Fictional evidence procedure", "version": "1",
-             "source_uri": "urn:northwind:synthetic:employee-support:ADJ-TEST-001:v1",
+             "source_uri": "urn:northwind:synthetic:adjuster-support:ADJ-TEST-001:v1",
              "effective_from": "2026-01-01", "category": "adjuster",
              "content": "Missing evidence requires human review. Never automatically deny a claim."}]
 
@@ -43,15 +43,14 @@ def evidence():
 def test_canonical_prompt_and_explicit_configuration(config):
     assert support.availability()["state"] == "configured"
     assert "Never use model memory" in support.prompt()
-    config.adjuster_support_index = "nw-hr"
+    config.adjuster_support_index = "nw-other-index"
     assert support.availability()["state"] == "unavailable"
     config.adjuster_support_index = support.INDEX
     config.adjuster_support_search_auth = "query_key"
     assert support.availability()["state"] == "unavailable"
     config.adjuster_support_query_key = "explicit-memory-only"
     assert support.availability()["state"] == "configured"
-    config.business_domain = "retail"
-    assert support.availability()["state"] == "unavailable"
+    assert support.availability()["business_domain"] == "insurance"
 
 
 def test_citations_and_quotes_are_server_validated(evidence):
@@ -83,7 +82,7 @@ async def test_rag_no_hit_and_errors_never_fall_back(config, evidence, monkeypat
         model.side_effect = RuntimeError("invalid model")
     monkeypatch.setattr(support, "retrieve", retrieve)
     monkeypatch.setattr(support, "select_evidence", model)
-    events = [e async for e in support.run_support_turn("adjuster-hr-gpt-5-4-unit", "Missing evidence?")]
+    events = [e async for e in support.run_support_turn("adjuster-gpt-5-4-unit", "Missing evidence?")]
     assert events[0]["kind"] == "session" and events[-1]["kind"] == "done"
     if mode in ("model_error", "retrieval_error"):
         assert not any(e["kind"] == "assistant_delta" for e in events)
@@ -113,8 +112,9 @@ async def test_search_is_isolated_and_auth_refreshes_without_fallback(config, ev
     for _ in range(2):
         assert (await support.retrieve("human review"))[0]["id"] == evidence[0]["id"]
     assert credential.get_token.await_count == (2 if auth == "entra_id" else 0)
-    assert support.INDEX in str(requests[0].url) and "nw-hr" not in str(requests[0].url)
+    assert support.INDEX in str(requests[0].url) and "nw-other-index" not in str(requests[0].url)
     assert "publisher eq" in json.loads(requests[0].content)["filter"]
+    assert "category eq 'adjuster'" in json.loads(requests[0].content)["filter"]
     assert ("api-key" in requests[0].headers) is (auth == "query_key")
     assert ("authorization" in requests[0].headers) is (auth == "entra_id")
 
@@ -126,7 +126,7 @@ async def test_failed_entra_search_never_uses_legacy_key(config, monkeypatch):
     monkeypatch.setattr(support, "_async_credential", lambda: credential)
     monkeypatch.setattr(support.httpx, "AsyncClient", lambda **_: pytest.fail("No key-auth fallback is allowed"))
     with pytest.raises(RuntimeError, match="Identity unavailable"):
-        await support.retrieve("PTO")
+        await support.retrieve("evidence")
 
 
 @pytest.mark.asyncio
@@ -140,14 +140,14 @@ async def test_history_loads_latest_bounded_messages_only(config, monkeypatch):
                 yield {"role": "user", "content": "x" * 4000}
             return rows()
     monkeypatch.setattr(support, "_container", AsyncMock(return_value=Container()))
-    rows = await load_support_history("adjuster-hr-gpt-5-4-unit")
+    rows = await load_support_history("adjuster-gpt-5-4-unit")
     assert len(rows[0]["content"]) == 3000 and rows[-1]["content"] == "latest"
     assert "TOP 12" in captured["query"] and "DESC" in captured["query"]
-    assert captured["partition_key"] == "adjuster-hr-gpt-5-4-unit"
+    assert captured["partition_key"] == "adjuster-gpt-5-4-unit"
 
 
 @pytest.mark.asyncio
-async def test_model_client_uses_deployment_not_old_native_hr_agent(config, evidence, monkeypatch):
+async def test_model_client_uses_deployment_not_a_native_agent(config, evidence, monkeypatch):
     captured = {}
     class Context:
         async def __aenter__(self):
@@ -221,7 +221,7 @@ async def test_route_session_isolation_disabled_and_concurrency(config):
     assert disabled.value.status_code == 503
     config.adjuster_support_enabled = True
     with pytest.raises(HTTPException) as wrong:
-        await support.support_chat(support.SupportRequest(message="question", session_id="adjuster-hr-kimi-unit"))
+        await support.support_chat(support.SupportRequest(message="question", session_id="adjuster-kimi-unit"))
     assert wrong.value.status_code == 422
     support._active = 2
     with pytest.raises(HTTPException) as full:
@@ -258,10 +258,23 @@ async def test_public_router_contract(config, monkeypatch):
     app.include_router(support.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/adjuster-support/status")).json()["index"] == support.INDEX
-        response = await client.post("/adjuster-support/hr-gpt-5-4-mini/chat", json={"message": "PTO?"})
+        response = await client.post("/adjuster-support/gpt-5-4-mini/chat", json={"message": "Missing evidence?"})
         events = [json.loads(line) for line in response.text.splitlines()]
-        assert events[0]["session_id"].startswith("adjuster-hr-gpt-5-4-mini-")
+        assert events[0]["session_id"].startswith("adjuster-gpt-5-4-mini-")
         assert events[1]["text"] == support.UNKNOWN and events[-1]["kind"] == "done"
+        # Deprecated slug still served for clients deployed before the rename; it resolves to the canonical model.
+        legacy = await client.post("/adjuster-support/hr-gpt-5-4-mini/chat", json={"message": "Missing evidence?"})
+        legacy_events = [json.loads(line) for line in legacy.text.splitlines()]
+        assert legacy_events[0]["session_id"].startswith("adjuster-gpt-5-4-mini-")
+        assert legacy_events[-1]["kind"] == "done"
+        assert (await client.post("/adjuster-support/unknown-model/chat", json={"message": "Q"})).status_code == 404
+
+
+def test_deprecated_model_slugs_and_session_prefixes_resolve_to_canonical_names():
+    assert support.canonical_model_slug("hr-kimi") == "kimi" == support.canonical_model_slug("kimi")
+    assert support.session_prefixes("gpt-5-4") == ("adjuster-gpt-5-4-", "adjuster-hr-gpt-5-4-")
+    assert support.session_prefixes("gpt-5-4-mini") == ("adjuster-gpt-5-4-mini-", "adjuster-hr-gpt-5-4-mini-")
+    assert set(support.MODELS) == {"gpt-5-4", "gpt-5-4-mini", "kimi"}
 
 
 @pytest.mark.asyncio
@@ -285,7 +298,7 @@ async def test_failures_log_stage_and_class_without_private_data(config, evidenc
         monkeypatch.setattr(support, "render_answer", lambda *_: (_ for _ in ()).throw(RuntimeError(private)))
     else:
         support.append_message.side_effect = [None, AzureError(private)]
-    sid = "adjuster-hr-gpt-5-4-private-person"
+    sid = "adjuster-gpt-5-4-private-person"
     with caplog.at_level(logging.ERROR):
         events = [event async for event in support.run_support_turn(sid, private)]
     records = [record for record in caplog.records if record.name == support.__name__]

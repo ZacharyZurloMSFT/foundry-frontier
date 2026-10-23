@@ -87,7 +87,7 @@ def ticket_container(monkeypatch):
 @pytest.fixture
 def configured(monkeypatch, ticket_container):
     settings = SimpleNamespace(
-        business_domain="insurance", insurance_agents_ready=True,
+        insurance_agents_ready=True,
         voice_live_enabled=True, voice_live_ready=True,
         voice_live_model="gpt-realtime-2.1", voice_live_api_version="2026-04-10",
         foundry_endpoint="https://aisvc-zurlo-northwind.services.ai.azure.com",
@@ -103,7 +103,7 @@ def configured(monkeypatch, ticket_container):
 
 @pytest.mark.parametrize("field,value", [
     ("voice_live_enabled", False), ("voice_live_ready", False),
-    ("business_domain", "retail"), ("insurance_agents_ready", False),
+    ("insurance_agents_ready", False),
     ("voice_live_model", ""), ("voice_live_model", "gpt-5.4-mini"),
     ("voice_live_model", "my-openai-realtime-deployment"), ("voice_live_api_version", ""),
     ("voice_live_api_version", "2025-04-01-preview"),
@@ -147,7 +147,7 @@ def test_native_model_url_and_mandatory_insurance_protocol(configured):
 async def test_session_ticket_not_an_azure_credential_or_invented_mint_api(configured, ticket_container, monkeypatch):
     credential = Mock(side_effect=AssertionError("No Azure call should occur at mint time"))
     monkeypatch.setattr(voice, "get_credential", credential)
-    result = await voice.mint_voice_live_session("Unsafe retail instructions", "untrusted-voice", origin=ORIGIN)
+    result = await voice.mint_voice_live_session("Unsafe client instructions", "untrusted-voice", origin=ORIGIN)
     assert result["transport"] == "websocket-proxy"
     assert result["websocket_path"] == "/voice/realtime"
     assert result["sample_rate"] == 24000
@@ -658,7 +658,7 @@ async def test_relay_cancellation_leaves_no_receive_tasks():
 @pytest.mark.asyncio
 async def test_mismatched_handoff_remains_422_without_claims_run(monkeypatch):
     from app import main
-    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(business_domain="insurance"))
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace())
     monkeypatch.setattr(main, "require_insurance_runtime", lambda: None)
     downstream = Mock(side_effect=AssertionError("No claims action on invalid intake"))
     monkeypatch.setattr(main, "run_turn", downstream)

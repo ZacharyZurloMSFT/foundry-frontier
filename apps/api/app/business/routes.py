@@ -1,4 +1,4 @@
-"""Versioned manual business APIs. Legacy demo routes remain separate."""
+"""Versioned business APIs under /api/v1; the unversioned demo routes remain separate."""
 from __future__ import annotations
 
 import asyncio

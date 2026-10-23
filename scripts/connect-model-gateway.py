@@ -46,7 +46,7 @@ agents. Open points to settle with the canary:
      Foundry may then append its default `api-version` query, which the gateway
      has to tolerate.
   5. BYOM connections serve prompt agents only; hosted agents keep the
-     client-side gateway path (ORDERS_MODEL_GATEWAY_*).
+     client-side gateway path (AGENT_MODEL_GATEWAY_*; the deprecated ORDERS_MODEL_GATEWAY_* names are still read).
 
 Environment (all optional): AI_GATEWAY_MODEL_CONNECTION (default --name),
 AI_GATEWAY_MODEL_PROVIDER (default aisvc-zurlo-northwind) and

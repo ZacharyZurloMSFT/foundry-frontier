@@ -15,7 +15,7 @@ from ..insurance_domain import (
 from ..orchestrator_client import _extract_output_text, invoke_prompt_agent_once
 from ..observability import get_tracer
 from .models import MAX_RESULT_CHARS, Approval, HarnessError, SpecialistInput, ToolEvent, Usage, redact
-from .tools import gateway_headers, mcp_payload
+from .mcp import gateway_headers, mcp_payload
 from .diagnostics import log_failure
 
 NAMES = ("triage", "policy_claim_lookup", "policy_lookup", "claim_action_draft")
@@ -96,10 +96,10 @@ class InsuranceTools:
             raise HarnessError("grounding_required", "Retrieve the linked claim and policy before drafting.")
         if not draft.policy_refs or any(ref not in self.citations for ref in draft.policy_refs):
             raise HarnessError("grounding_required", "Drafts require applicable policy citations retrieved in this run.")
-        if not self.settings.harness_resolution_mcp:
-            raise HarnessError("mcp_unconfigured", "MCP_WORK_ORDER_URL must identify the insurance draft service.")
+        if not self.settings.harness_claim_review_mcp:
+            raise HarnessError("mcp_unconfigured", "MCP_CLAIM_REVIEW_URL must identify the insurance draft service.")
         self.draft_attempted = True
-        await self.store.require_active(self.wid, "insurance")
+        await self.store.require_active(self.wid)
         payload = action_payload(draft)
         response = await self.native(
             "northwind-insurance-claim-action-draft",
@@ -109,9 +109,11 @@ class InsuranceTools:
             "The draft is human-review-only. Never execute payment, coverage, claim or communication decisions.",
             mcp_tool={
                 "type": "mcp", "server_label": "northwind-insurance-claim-action-draft",
-                "server_url": self.settings.harness_resolution_mcp, "require_approval": "never",
+                "server_url": self.settings.harness_claim_review_mcp, "require_approval": "never",
                 "allowed_tools": ["draft_claim_action"],
-                "headers": {"x-orders-workflow": self.wid, **gateway_headers(self.settings)},
+                # Canonical header plus the deprecated name still required by already-deployed MCP builds.
+                "headers": {"x-workflow-id": self.wid, "x-orders-workflow": self.wid,
+                            **gateway_headers(self.settings)},
             }, workflow_id=self.wid,
         )
         calls = {item.call_id for item in response.output
@@ -151,7 +153,7 @@ class InsuranceTools:
             try:
                 self.calls += 1
                 if name not in NAMES:
-                    raise HarnessError("tool_denied", "Retail tools are not exposed in insurance mode.")
+                    raise HarnessError("tool_denied", "Unknown tool; only the registered insurance tools are exposed.")
                 if self.calls > self.settings.harness_max_tools:
                     raise HarnessError("tool_limit", "Insurance tool-call limit exceeded.")
                 self.emit(ToolEvent(kind="tool_start", tool=name, call_id=invocation.tool_call_id,

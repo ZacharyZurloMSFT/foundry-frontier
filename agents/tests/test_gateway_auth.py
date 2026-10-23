@@ -17,30 +17,24 @@ from agents.hosted import tools
 from agents.hosted.config import ENV_KEYS, Settings
 from agents.hosted.runtime import GATEWAY_KEY_HEADER, build_agent, mcp_gateway_headers
 from agents.hosted.scope import RequestScope, current_scope
-from agents.insurance.domain import ClaimActionDraft, action_payload
 from agents.tests import test_hosted as hosted_tests
 from agents.tests.test_hosted import (  # noqa: F401  (no_telemetry is an autouse fixture)
-    BASE, DRAFT, MockProject, function, hosted_request, message, model_events, no_telemetry, settings,
+    BASE, DRAFT, MockProject, function, hosted_request, message, model_events, no_telemetry, pending, settings,
 )
 from agents.tests.test_model_gateway import GATEWAY_ENV
 
 HEADER = "Ocp-Apim-Subscription-Key"
 KEY = "unit-apim-subscription-key-0123456789"
 CONNECTION = "northwind-apim-gateway"
+GATEWAY_ORIGIN = "https://apim-northwind.azure-api.net"
 # APIM exposes the MCP servers without the backend's trailing /mcp.
-LOOKUP_URL = "https://apim-northwind.azure-api.net/northwind/mcp/tech-lookup"
-WORK_ORDER_URL = "https://apim-northwind.azure-api.net/northwind/mcp/work-order"
-INSURANCE_ENV = {
-    "NORTHWIND_BUSINESS_DOMAIN": "insurance",
-    "FOUNDRY_PROJECT_ENDPOINT": BASE["FOUNDRY_PROJECT_ENDPOINT"],
-    "MODEL_DEPLOYMENT_NAME": "baseline",
-    "MCP_TECH_LOOKUP_URL": "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup",
-    "MCP_WORK_ORDER_URL": "https://apim-northwind.azure-api.net/insurance/mcp/work-order",
-}
+LOOKUP_URL = GATEWAY_ORIGIN + "/insurance/mcp/tech-lookup"
+REVIEW_URL = GATEWAY_ORIGIN + "/insurance/mcp/work-order"
+GATED_ROLES = ["policy-claim-lookup", "claim-action-draft"]
 
 
 def gated(role, **overrides):
-    return settings(role, MCP_TECH_LOOKUP_URL=LOOKUP_URL, MCP_WORK_ORDER_URL=WORK_ORDER_URL,
+    return settings(role, MCP_POLICY_LOOKUP_URL=LOOKUP_URL, MCP_CLAIM_REVIEW_URL=REVIEW_URL,
                     MCP_GATEWAY_CONNECTION=CONNECTION, **overrides)
 
 
@@ -61,7 +55,7 @@ def test_header_name_is_the_apim_subscription_key_header():
     assert GATEWAY_KEY_HEADER == HEADER
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "resolutiondraft"])
+@pytest.mark.parametrize("role", GATED_ROLES)
 def test_connection_credential_is_validated_against_the_mcp_endpoint(role):
     config = gated(role)
     assert mcp_gateway_headers(config, connection(config)) == {HEADER: KEY}
@@ -92,16 +86,13 @@ def test_connection_credential_is_validated_against_the_mcp_endpoint(role):
     (credentials(**{HEADER: "k" * 513}), "invalid"),
 ])
 def test_connection_credential_fails_closed_without_echoing_secrets(change, match):
-    config = gated("orderlookup")
+    config = gated("policy-claim-lookup")
     with pytest.raises(ValueError, match=match) as failure:
         mcp_gateway_headers(config, connection(config, **change))
     no_leak(failure.value, repr(failure.value), "".join(traceback.format_exception(failure.value)))
 
 
-GATEWAY_ORIGIN = "https://apim-northwind.azure-api.net"
-
-
-@pytest.mark.parametrize("role", ["orderlookup", "resolutiondraft"])
+@pytest.mark.parametrize("role", GATED_ROLES)
 def test_connection_may_target_exactly_the_role_endpoint(role):
     config = gated(role)
     url = config.mcp_spec()["server_url"]
@@ -112,68 +103,59 @@ def test_connection_may_target_exactly_the_role_endpoint(role):
 @pytest.mark.parametrize("target", [
     GATEWAY_ORIGIN,
     GATEWAY_ORIGIN + "/",
-    GATEWAY_ORIGIN + "/northwind",
-    GATEWAY_ORIGIN + "/northwind/mcp/",
-    "https://APIM-Northwind.azure-api.net/northwind/mcp",
+    GATEWAY_ORIGIN + "/insurance",
+    GATEWAY_ORIGIN + "/insurance/mcp/",
+    "https://APIM-Northwind.azure-api.net/insurance/mcp",
 ])
 def test_one_shared_gateway_connection_serves_both_mcp_servers(target):
-    # azure.yaml hands both gated agents the same connection name, so its target may be a common ancestor.
-    for role in ("orderlookup", "resolutiondraft"):
+    # One connection name is handed to both gated agents, so its target may be a common ancestor.
+    for role in GATED_ROLES:
         config = gated(role)
         assert mcp_gateway_headers(config, connection(config, target=target)) == {HEADER: KEY}
 
 
 @pytest.mark.parametrize("target", [
-    "https://apim-northwind.azure-api.net/insurance",
-    "https://apim-northwind.azure-api.net/northwind/mcp/work-order",
+    GATEWAY_ORIGIN + "/other",
+    REVIEW_URL,
     LOOKUP_URL + "/extra",
-    "https://apim-northwind.azure-api.net/northwind/mcp/tech",
-    "https://apim-northwind.azure-api.net:8443/northwind/mcp/tech-lookup",
-    "http://apim-northwind.azure-api.net/northwind/mcp/tech-lookup",
-    "https://apim-northwind.azure-api.net.evil.example/northwind/mcp/tech-lookup",
-    "https://evil.azure-api.net/northwind/mcp/tech-lookup",
-    "https://user:pw@apim-northwind.azure-api.net/northwind/mcp/tech-lookup",
+    GATEWAY_ORIGIN + "/insurance/mcp/tech",
+    "https://apim-northwind.azure-api.net:8443/insurance/mcp/tech-lookup",
+    "http://apim-northwind.azure-api.net/insurance/mcp/tech-lookup",
+    "https://apim-northwind.azure-api.net.evil.example/insurance/mcp/tech-lookup",
+    "https://evil.azure-api.net/insurance/mcp/tech-lookup",
+    "https://user:pw@apim-northwind.azure-api.net/insurance/mcp/tech-lookup",
     GATEWAY_ORIGIN + "?x=1",
     GATEWAY_ORIGIN + "#fragment",
     "https://[bad",
     "",
 ])
 def test_connection_target_must_not_reach_other_servers_or_paths(target):
-    config = gated("orderlookup")
+    config = gated("policy-claim-lookup")
     with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL"):
         mcp_gateway_headers(config, connection(config, target=target))
 
 
 def test_connection_must_belong_to_the_role_own_mcp_server():
-    lookup, work_order = gated("orderlookup"), gated("resolutiondraft")
+    lookup, review = gated("policy-claim-lookup"), gated("claim-action-draft")
     with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL"):
-        mcp_gateway_headers(lookup, connection(work_order))
+        mcp_gateway_headers(lookup, connection(review))
     with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL"):
-        mcp_gateway_headers(work_order, connection(lookup))
-
-
-def test_insurance_connection_is_validated_against_the_insurance_mcp_server():
-    config = Settings.from_env({**INSURANCE_ENV, "ORDER_AGENT_ROLE": "resolutiondraft",
-                                "MCP_GATEWAY_CONNECTION": CONNECTION})
-    assert mcp_gateway_headers(config, connection(config)) == {HEADER: KEY}
-    assert mcp_gateway_headers(config, connection(config, target=GATEWAY_ORIGIN + "/insurance")) == {HEADER: KEY}
+        mcp_gateway_headers(review, connection(lookup))
     with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL"):
-        mcp_gateway_headers(config, connection(config, target=WORK_ORDER_URL))
-    with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL"):
-        mcp_gateway_headers(config, connection(config, target=GATEWAY_ORIGIN + "/northwind"))
+        mcp_gateway_headers(review, connection(review, target=GATEWAY_ORIGIN + "/other"))
 
 
 @pytest.mark.parametrize("model_gateway", [False, True])
-def test_orderlookup_native_mcp_tool_carries_the_gateway_header(model_gateway):
+def test_policy_claim_lookup_native_mcp_tool_carries_the_gateway_header(model_gateway):
     project = MockProject(lambda *_: [])
-    config = gated("orderlookup", **(GATEWAY_ENV if model_gateway else {}))
+    config = gated("policy-claim-lookup", **(GATEWAY_ENV if model_gateway else {}))
     client = project.get_openai_client() if model_gateway else None
     try:
         agent = build_agent(config, project, account_client=client, gateway_headers={HEADER: KEY})
         native = agent.default_options["tools"][0]
         assert native["server_url"] == LOOKUP_URL
         assert native["headers"] == {HEADER: KEY}
-        assert native["allowed_tools"] == ["lookup_order"]
+        assert native["allowed_tools"] == ["lookup_policy", "lookup_claim"]
         assert native["require_approval"] == "never"
         assert "project_connection_id" not in native
         no_leak(agent.additional_properties, config.metadata)
@@ -181,7 +163,7 @@ def test_orderlookup_native_mcp_tool_carries_the_gateway_header(model_gateway):
         asyncio.run(project.close())
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "resolutiondraft"])
+@pytest.mark.parametrize("role", GATED_ROLES)
 def test_configured_gateway_never_runs_without_its_credential(role):
     project = MockProject(lambda *_: [])
     try:
@@ -192,17 +174,16 @@ def test_configured_gateway_never_runs_without_its_credential(role):
         asyncio.run(project.close())
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "resolutiondraft"])
+@pytest.mark.parametrize("role", GATED_ROLES)
 def test_nothing_changes_while_the_gateway_is_not_configured(role, monkeypatch):
     project = MockProject(lambda *_: [])
     # Headers handed to the builder are inert unless MCP_GATEWAY_CONNECTION selects them.
     agent = build_agent(settings(role), project, gateway_headers={HEADER: KEY})
     native = agent.default_options["tools"][0]
-    if role == "orderlookup":
-        assert "headers" not in native and native["server_url"] == BASE["MCP_TECH_LOOKUP_URL"]
+    if role == "policy-claim-lookup":
+        assert "headers" not in native and native["server_url"] == BASE["MCP_POLICY_LOOKUP_URL"]
     else:
-        mcp = AsyncMock(side_effect=lambda url, workflow, draft, **extra: {
-            "status": "pending_approval", "workflow_id": workflow, "hitl_id": "hitl-real", "draft": draft})
+        mcp = AsyncMock(side_effect=lambda url, workflow, draft, tool_name, **extra: pending(workflow, draft))
         monkeypatch.setattr(tools, "call_proposal_mcp", mcp)
 
         async def run():
@@ -212,35 +193,36 @@ def test_nothing_changes_while_the_gateway_is_not_configured(role, monkeypatch):
             finally:
                 current_scope.reset(token)
         asyncio.run(run())
-        mcp.assert_awaited_once_with(BASE["MCP_WORK_ORDER_URL"], "wf-owned", tools.ResolutionDraft(**DRAFT).model_dump())
+        mcp.assert_awaited_once_with(BASE["MCP_CLAIM_REVIEW_URL"], "wf-owned", DRAFT, "draft_claim_action")
     asyncio.run(project.close())
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_orderlookup_request_reaches_the_model_service_with_the_gateway_header(monkeypatch, stream):
+def test_policy_claim_lookup_request_reaches_the_model_service_with_the_gateway_header(monkeypatch, stream):
     async def run():
         project = MockProject(lambda *_: model_events([
-            {"id": "mcp_gateway", "type": "mcp_call", "name": "lookup_order", "server_label": "northwind-order-lookup",
-             "arguments": '{"query":"NW-40021"}', "status": "completed", "output": '{"order_id":"NW-40021"}'},
-            message("Order NW-40021 is in transit."),
+            {"id": "mcp_gateway", "type": "mcp_call", "name": "lookup_claim",
+             "server_label": "northwind-insurance-policy-claim-lookup",
+             "arguments": '{"claim_id":"CLM-2001"}', "status": "completed", "output": '{"claim_id":"CLM-2001"}'},
+            message("Claim CLM-2001 is open."),
         ]))
         monkeypatch.setattr(hosted_tests, "build_agent", partial(build_agent, gateway_headers={HEADER: KEY}))
-        result = await hosted_request(gated("orderlookup"), project, {"stream": stream})
+        result = await hosted_request(gated("policy-claim-lookup"), project, {"stream": stream})
         final = result[-1]["response"] if stream else result
         assert final["status"] == "completed", final.get("error")
         native = project.requests[0][1]["tools"][0]
         assert native["server_url"] == LOOKUP_URL
         assert native["headers"] == {HEADER: KEY}
-        assert native["allowed_tools"] == ["lookup_order"]
+        assert native["allowed_tools"] == ["lookup_policy", "lookup_claim"]
         no_leak(json.dumps(result))
     asyncio.run(run())
 
 
-def test_resolution_proposal_is_persisted_through_the_gateway_without_leaking_the_key(monkeypatch):
+def test_claim_action_is_persisted_through_the_gateway_without_leaking_the_key(monkeypatch):
     async def run():
-        async def persisted(url, workflow, draft, gateway_headers=None):
-            assert url == WORK_ORDER_URL
-            return {"status": "pending_approval", "workflow_id": workflow, "hitl_id": "hitl-real", "draft": draft}
+        async def persisted(url, workflow, draft, tool_name, gateway_headers=None):
+            assert url == REVIEW_URL and tool_name == "draft_claim_action"
+            return pending(workflow, draft)
         mcp = AsyncMock(side_effect=persisted)
         monkeypatch.setattr(tools, "call_proposal_mcp", mcp)
         monkeypatch.setattr(hosted_tests, "build_agent", partial(build_agent, gateway_headers={HEADER: KEY}))
@@ -249,38 +231,17 @@ def test_resolution_proposal_is_persisted_through_the_gateway_without_leaking_th
         def infer(name, body):
             nonlocal count
             count += 1
-            return model_events([function("propose_resolution", {"draft": DRAFT})] if count == 1
-                                else [message("The draft is awaiting human approval.")])
-        events = await hosted_request(gated("resolutiondraft"), MockProject(infer), {
+            return model_events([function("draft_claim_action", {"draft": DRAFT})] if count == 1
+                                else [message("The draft is awaiting human review.")])
+        events = await hosted_request(gated("claim-action-draft"), MockProject(infer), {
             "stream": True, "metadata": {"workflow_id": "wf-owned"},
         })
         assert events[-1]["type"] == "response.completed", events[-1]
         mcp.assert_awaited_once()
         assert mcp.await_args.kwargs == {"gateway_headers": {HEADER: KEY}}
-        assert mcp.await_args.args[:2] == (WORK_ORDER_URL, "wf-owned")
+        assert mcp.await_args.args[:2] == (REVIEW_URL, "wf-owned")
         no_leak(json.dumps(events))
     asyncio.run(run())
-
-
-@pytest.mark.asyncio
-async def test_insurance_claim_action_draft_is_persisted_through_the_gateway(monkeypatch):
-    config = Settings.from_env({**INSURANCE_ENV, "ORDER_AGENT_ROLE": "resolutiondraft",
-                                "MCP_GATEWAY_CONNECTION": CONNECTION})
-    draft = ClaimActionDraft(
-        claim_id="CLM-2001", policy_id="POL-1001", policyholder_id="PH-1001",
-        action_type="request_evidence", summary="Request photos.", policy_refs=[])
-    payload = action_payload(draft)
-    mcp = AsyncMock(return_value={
-        "status": "pending_approval", "hitl_id": "saved", "workflow_id": "wf-insurance-bound", "draft": payload,
-        "kind": "insurance_claim_action", "synthetic": True, "execution_status": "not_executed"})
-    monkeypatch.setattr(tools, "call_proposal_mcp", mcp)
-    token = current_scope.set(RequestScope(workflow_id="wf-insurance-bound"))
-    try:
-        await tools.proposal_tool(config, {HEADER: KEY}).invoke(arguments={"draft": payload})
-    finally:
-        current_scope.reset(token)
-    mcp.assert_awaited_once_with(INSURANCE_ENV["MCP_WORK_ORDER_URL"], "wf-insurance-bound", payload,
-                                 "draft_claim_action", gateway_headers={HEADER: KEY})
 
 
 def mcp_server(seen):
@@ -298,8 +259,7 @@ def mcp_server(seen):
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": {"tools": []}})
         if body.get("method") == "tools/call":
             arguments = body["params"]["arguments"]
-            approval = {"status": "pending_approval", "workflow_id": arguments["workflow_id"],
-                        "hitl_id": "hitl-real", "draft": arguments["draft"]}
+            approval = pending(arguments["workflow_id"], arguments["draft"])
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": {
                 "content": [{"type": "text", "text": json.dumps(approval)}],
                 "structuredContent": approval, "isError": False}})
@@ -319,26 +279,27 @@ async def test_gateway_header_is_sent_on_every_mcp_request_beside_the_workflow_b
     use_mcp_server(monkeypatch, mcp_server(seen))
     # A caller-supplied header set can never displace the application-owned workflow binding.
     result = await asyncio.wait_for(tools.call_proposal_mcp(
-        WORK_ORDER_URL, "wf-harness-owned", DRAFT,
-        gateway_headers={HEADER: KEY, "x-orders-workflow": "wf-attacker"}), 30)
+        REVIEW_URL, "wf-owned", DRAFT,
+        gateway_headers={HEADER: KEY, "x-workflow-id": "wf-attacker", "x-orders-workflow": "wf-attacker"}), 30)
     assert result["hitl_id"] == "hitl-real"
     methods = [json.loads(r.content).get("method") for r in seen if r.method == "POST"]
     assert methods[0] == "initialize" and "tools/call" in methods
     for request in seen:
-        assert str(request.url) == WORK_ORDER_URL
+        assert str(request.url) == REVIEW_URL
         assert request.headers[HEADER] == KEY
-        assert request.headers["x-orders-workflow"] == "wf-harness-owned"
-        assert request.headers["x-harness-workflow"] == "wf-harness-owned"
+        assert request.headers["x-workflow-id"] == "wf-owned"
+        assert request.headers["x-orders-workflow"] == "wf-owned"
+        assert "x-harness-workflow" not in request.headers
 
 
 @pytest.mark.asyncio
 async def test_no_gateway_header_is_sent_unless_configured(monkeypatch):
     seen = []
     use_mcp_server(monkeypatch, mcp_server(seen))
-    await asyncio.wait_for(tools.call_proposal_mcp(BASE["MCP_WORK_ORDER_URL"], "wf-owned", DRAFT), 30)
+    await asyncio.wait_for(tools.call_proposal_mcp(BASE["MCP_CLAIM_REVIEW_URL"], "wf-owned", DRAFT), 30)
     assert seen and all(HEADER not in request.headers for request in seen)
+    assert all(request.headers["x-workflow-id"] == "wf-owned" for request in seen)
     assert all(request.headers["x-orders-workflow"] == "wf-owned" for request in seen)
-    assert all("x-harness-workflow" not in request.headers for request in seen)
 
 
 @pytest.mark.asyncio
@@ -346,7 +307,7 @@ async def test_gateway_header_is_never_sent_over_plain_http(monkeypatch):
     seen = []
     use_mcp_server(monkeypatch, mcp_server(seen))
     with pytest.raises(ValueError, match="HTTPS") as failure:
-        await tools.call_proposal_mcp("http://apim-northwind.azure-api.net/northwind/mcp/work-order",
+        await tools.call_proposal_mcp("http://apim-northwind.azure-api.net/insurance/mcp/work-order",
                                       "wf-owned", DRAFT, gateway_headers={HEADER: KEY})
     assert not seen
     no_leak(failure.value)
@@ -363,7 +324,7 @@ async def test_rejected_key_does_not_leak_through_errors_or_logs(monkeypatch, ca
     with caplog.at_level(logging.DEBUG):
         with pytest.raises(Exception) as failure:
             await asyncio.wait_for(tools.call_proposal_mcp(
-                WORK_ORDER_URL, "wf-owned", DRAFT, gateway_headers={HEADER: KEY}), 30)
+                REVIEW_URL, "wf-owned", DRAFT, gateway_headers={HEADER: KEY}), 30)
     assert seen and seen[0].headers[HEADER] == KEY
     assert not isinstance(failure.value, TimeoutError)
     no_leak(failure.value, repr(failure.value), "".join(traceback.format_exception(failure.value)), caplog.text)
@@ -399,7 +360,7 @@ def azure_fakes(monkeypatch):
     return seen
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "resolutiondraft"])
+@pytest.mark.parametrize("role", GATED_ROLES)
 def test_credential_is_loaded_once_at_startup_under_the_agent_identity(azure_fakes, caplog, role):
     config = gated(role, AZURE_CLIENT_ID="11111111-1111-1111-1111-111111111111")
     azure_fakes["connection"] = connection(config)
@@ -417,10 +378,10 @@ def test_credential_is_loaded_once_at_startup_under_the_agent_identity(azure_fak
 
 
 @pytest.mark.parametrize("config", [
-    settings("orderlookup"),
-    settings("resolutiondraft", MCP_GATEWAY_CONNECTION=""),
-    settings("policylookup", MCP_GATEWAY_CONNECTION=CONNECTION),
-    settings("manager", MCP_GATEWAY_CONNECTION=CONNECTION),
+    settings("policy-claim-lookup"),
+    settings("claim-action-draft", MCP_GATEWAY_CONNECTION=""),
+    settings("policy-wording", MCP_GATEWAY_CONNECTION=CONNECTION),
+    settings("orchestrator", MCP_GATEWAY_CONNECTION=CONNECTION),
     settings("triage", MCP_GATEWAY_CONNECTION=CONNECTION),
 ])
 def test_startup_never_touches_foundry_connections_unless_a_gated_role_configures_one(azure_fakes, config):
@@ -429,8 +390,8 @@ def test_startup_never_touches_foundry_connections_unless_a_gated_role_configure
 
 
 def test_startup_fails_clearly_when_the_connection_does_not_match_the_mcp_server(azure_fakes):
-    config = gated("orderlookup")
-    azure_fakes["connection"] = connection(config, target=WORK_ORDER_URL)
+    config = gated("policy-claim-lookup")
+    azure_fakes["connection"] = connection(config, target=REVIEW_URL)
     with pytest.raises(ValueError, match="MCP endpoint or its gateway base URL") as failure:
         hosted_main.load_gateway_headers(config)
     no_leak(failure.value)
@@ -443,14 +404,24 @@ def test_startup_fails_clearly_when_the_connection_does_not_match_the_mcp_server
 def test_startup_does_not_continue_without_the_key_when_foundry_cannot_supply_it(azure_fakes):
     azure_fakes["error"] = RuntimeError("connection lookup failed")
     with pytest.raises(RuntimeError, match="lookup failed"):
-        hosted_main.load_gateway_headers(gated("resolutiondraft"))
+        hosted_main.load_gateway_headers(gated("claim-action-draft"))
+
+
+def test_a_pre_cleanup_environment_selects_the_same_gated_role_and_connection(azure_fakes):
+    legacy = Settings.from_env({
+        **{key: value for key, value in BASE.items() if not key.startswith("MCP_")},
+        "ORDER_AGENT_ROLE": "orderlookup", "MCP_TECH_LOOKUP_URL": LOOKUP_URL, "MCP_GATEWAY_CONNECTION": CONNECTION,
+    })
+    assert legacy.role == "policy-claim-lookup" and legacy.mcp_route == "api-management"
+    azure_fakes["connection"] = connection(legacy)
+    assert hosted_main.load_gateway_headers(legacy) == {HEADER: KEY}
 
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_main_hands_the_startup_credential_to_the_agent(monkeypatch, azure_fakes, enabled):
     for name in ENV_KEYS:
         monkeypatch.delenv(name, raising=False)
-    environment = {**BASE, "ORDER_AGENT_ROLE": "orderlookup", "MCP_TECH_LOOKUP_URL": LOOKUP_URL,
+    environment = {**BASE, "AGENT_ROLE": "policy-claim-lookup", "MCP_POLICY_LOOKUP_URL": LOOKUP_URL,
                    **({"MCP_GATEWAY_CONNECTION": CONNECTION} if enabled else {})}
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
@@ -467,7 +438,7 @@ def test_main_hands_the_startup_credential_to_the_agent(monkeypatch, azure_fakes
     monkeypatch.setattr(hosted_main, "DefaultAzureCredential", lambda **options: SimpleNamespace())
     monkeypatch.setattr(hosted_main, "AIProjectClient", lambda **options: SimpleNamespace())
     monkeypatch.setattr(hosted_main, "build_agent", lambda *args, **options: built.update(options=options) or "agent")
-    monkeypatch.setattr(hosted_main, "OrdersResponsesHost", Host)
+    monkeypatch.setattr(hosted_main, "InsuranceResponsesHost", Host)
     hosted_main.main()
     assert built["agent"] == "agent" and built["run"] == {"host": "0.0.0.0", "port": 8088}
     assert built["options"]["gateway_headers"] == ({HEADER: KEY} if enabled else None)

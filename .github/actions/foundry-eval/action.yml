@@ -1,5 +1,5 @@
 name: "foundry-eval"
-description: "Run the Foundry golden-set evaluator against a deployed agent and post the diff vs baseline."
+description: "Run the Northwind Insurance golden-set evaluator against the deployed API (POST /insurance/chat) and post the diff vs baseline."
 inputs:
   dataset:
     description: "Path to the golden JSONL dataset"
@@ -10,7 +10,7 @@ inputs:
     required: false
     default: "evals/baseline.json"
   api_uri:
-    description: "Deployed API endpoint under test"
+    description: "Deployed insurance API endpoint under test (ca-insurance-api)"
     required: true
   foundry_endpoint:
     description: "Foundry AI Services endpoint"

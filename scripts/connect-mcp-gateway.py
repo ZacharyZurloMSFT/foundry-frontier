@@ -1,7 +1,8 @@
 """Create the per-project Foundry connection that holds the AI Gateway runtime key for provider-executed MCP.
 
-Hosted `orderlookup` / `policylookup` agents reach their MCP server through a
-gateway tool server (`ORDERS_MCP_GATEWAY`). The agent reads the gateway runtime
+Hosted `policy-claim-lookup` / `policy-wording` agents reach their MCP server through a
+gateway tool server (`AGENT_MCP_GATEWAY`; the deprecated `ORDERS_MCP_GATEWAY` name is still
+read). The agent reads the gateway runtime
 key once at startup, under its own identity, from a project connection, exactly
 like the Search knowledge-base connection created by
 `scripts/connect-knowledge-base.py`:
@@ -12,7 +13,7 @@ like the Search knowledge-base connection created by
   keys      {"api-key": <gateway runtime key>}
 
 The agent checks that the connection `target` equals the `url` of its
-`ORDERS_MCP_GATEWAY` entry, so use the target this script prints. The key is
+`AGENT_MCP_GATEWAY` entry, so use the target this script prints. The key is
 read only from the environment variable named by --key-env (default
 AI_GATEWAY_RUNTIME_KEY); it is never printed, logged or written to the repo, and
 it does not appear on the `az` command line. Create the runtime key itself with
@@ -232,7 +233,7 @@ def main(argv: Sequence[str] | None = None, *, runner: Runner = az_rest,
         print("DRY RUN: no request sent. Re-run with --apply to create or update the connection.")
         print(f"PUT {url}")
         print(json.dumps(redact(body), indent=2))
-        print("Matching ORDERS_MCP_GATEWAY entry (set tool_prefix to the endpoint namespace plus '_'):")
+        print("Matching AGENT_MCP_GATEWAY entry (set tool_prefix to the endpoint namespace plus '_'):")
         print(json.dumps({"url": target, "tool_prefix": "<namespace>_", "connection": args.connection_name}))
         if not env.get(args.key_env):
             print(f"Note: {args.key_env} is not set; --apply will refuse to run without it.")

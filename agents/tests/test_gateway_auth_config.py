@@ -1,33 +1,30 @@
 """MCP gateway authentication configuration contracts, runnable without installing the host."""
-from pathlib import Path
-
 import pytest
-import yaml
 
-from agents.hosted.config import AGENTS_DIR, ENV_KEYS, Settings
+from agents.hosted.config import ENV_KEYS, ROLE_ALIASES, Settings
 
-ROOT = Path(__file__).resolve().parents[2]
 CONNECTION = "northwind-apim-gateway"
 BASE = {
-    "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/northwind-orders",
+    "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/nw-insurance-claims",
     "MODEL_DEPLOYMENT_NAME": "baseline-deployment",
-    "MCP_TECH_LOOKUP_URL": "https://apim-northwind.azure-api.net/northwind/mcp/tech-lookup",
-    "MCP_WORK_ORDER_URL": "https://apim-northwind.azure-api.net/northwind/mcp/work-order",
+    "MCP_POLICY_LOOKUP_URL": "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup",
+    "MCP_CLAIM_REVIEW_URL": "https://apim-northwind.azure-api.net/insurance/mcp/work-order",
     "AZURE_SEARCH_ENDPOINT": "https://search.example",
-    "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-kb",
-    "ORDERS_KB_CONNECTION_NAME": "northwind-kb-mcp",
-    "ORDERS_OPENAI_ENDPOINT": "https://account.openai.azure.com/openai/v1/",
+    "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
+    "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
+    "AGENT_KB_CONNECTION_NAME": "northwind-insurance-kb-mcp",
+    "AGENT_OPENAI_ENDPOINT": "https://account.openai.azure.com/openai/v1/",
 }
-GATED_ROLES = ("orderlookup", "resolutiondraft")
+GATED_ROLES = ("policy-claim-lookup", "claim-action-draft")
 
 
 def config(role, **overrides):
-    return Settings.from_env({**BASE, "ORDER_AGENT_ROLE": role, **overrides})
+    return Settings.from_env({**BASE, "AGENT_ROLE": role, **overrides})
 
 
 def test_gateway_connection_is_an_allowlisted_environment_key():
     assert "MCP_GATEWAY_CONNECTION" in ENV_KEYS
-    assert config("orderlookup", MCP_GATEWAY_CONNECTION=CONNECTION).env["MCP_GATEWAY_CONNECTION"] == CONNECTION
+    assert config("policy-claim-lookup", MCP_GATEWAY_CONNECTION=CONNECTION).env["MCP_GATEWAY_CONNECTION"] == CONNECTION
 
 
 @pytest.mark.parametrize("role", GATED_ROLES)
@@ -51,25 +48,22 @@ def test_connection_name_must_be_a_foundry_connection_name(role, name):
         config(role, MCP_GATEWAY_CONNECTION=name)
 
 
-@pytest.mark.parametrize("role", ["manager", "triage", "policylookup"])
+@pytest.mark.parametrize("role", ["orchestrator", "triage", "policy-wording"])
 def test_roles_without_a_gated_mcp_server_ignore_the_connection(role):
     # One shared environment must never change, or break, the roles that do not call a gated MCP server.
     assert config(role, MCP_GATEWAY_CONNECTION=CONNECTION).mcp_gateway_connection == ""
     assert config(role, MCP_GATEWAY_CONNECTION="not a connection name").mcp_gateway_connection == ""
 
 
+@pytest.mark.parametrize("legacy", ["orderlookup", "resolutiondraft", "manager", "policylookup"])
+def test_deprecated_role_ids_are_gated_exactly_like_their_canonical_role(legacy):
+    canonical = ROLE_ALIASES[legacy]
+    old = config(legacy, MCP_GATEWAY_CONNECTION=CONNECTION)
+    new = config(canonical, MCP_GATEWAY_CONNECTION=CONNECTION)
+    assert old.role == canonical and old.mcp_gateway_connection == new.mcp_gateway_connection
+    assert old.mcp_route == new.mcp_route and old.metadata == new.metadata
+
+
 def test_connection_never_enters_response_metadata():
     for role in GATED_ROLES:
         assert CONNECTION not in str(config(role, MCP_GATEWAY_CONNECTION=CONNECTION).metadata)
-
-
-def test_azd_and_hosted_manifests_plumb_the_connection_to_only_the_two_mcp_agents():
-    azure = yaml.safe_load((ROOT / "azure.yaml").read_text(encoding="utf-8"))["services"]
-    for service in ("orchestrator", "triage", "orderlookup", "policylookup", "resolutiondraft"):
-        azd_env = {item["name"]: item["value"] for item in azure[service]["environmentVariables"]}
-        manifest = yaml.safe_load((AGENTS_DIR / service / "agent.yaml").read_text(encoding="utf-8"))
-        manifest_env = {item["name"]: item["value"] for item in manifest["environment_variables"]}
-        gated = service in GATED_ROLES
-        # An unset azd variable resolves to an empty value, which leaves gateway authentication off.
-        assert azd_env.get("MCP_GATEWAY_CONNECTION") == ("${MCP_GATEWAY_CONNECTION}" if gated else None), service
-        assert manifest_env.get("MCP_GATEWAY_CONNECTION") == ("${MCP_GATEWAY_CONNECTION}" if gated else None), service

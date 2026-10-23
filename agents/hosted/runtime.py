@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal, Mapping
+from typing import Mapping
 from urllib.parse import urlsplit
 
 from agent_framework import Agent, AgentMiddleware, AgentResponse, ChatResponse, ChatResponseUpdate, Content, ResponseStream
@@ -12,22 +12,19 @@ from agent_framework.openai import OpenAIChatClient, OpenAIChatCompletionClient
 from azure.identity.aio import get_bearer_token_provider
 from openai import AsyncOpenAI
 from openai.types.responses import Response as ProviderResponse
-from pydantic import BaseModel, ConfigDict
 
 from .config import Settings, https_url
 from .scope import current_scope
 from .tools import proposal_tool, specialist_tools
 from ..insurance.models import InsuranceTriageResult
 
-
-class TriageResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    order_id: str | None
-    customer_hint: str | None
-    intent: Literal["ORDER_STATUS", "RETURN", "CANCEL", "MODIFY", "COMPLAINT", "REFUND_REQUEST", "OTHER"]
-    sentiment: Literal["calm", "frustrated", "angry"]
-    urgency: Literal["P1", "P2", "P3", "P4"]
-    problem_summary: str
+# Agent session state binds one workflow per session; the deprecated key is still honoured so a session
+# started by an earlier build cannot be rebound.
+WORKFLOW_STATE_KEY = "workflow_id"
+LEGACY_WORKFLOW_STATE_KEY = "orders_workflow_id"
+# Specialists that must ground every answer in a successful tool result, and every role with such a tool.
+GROUNDED_ROLES = ("policy-claim-lookup", "policy-wording")
+TOOL_ROLES = (*GROUNDED_ROLES, "claim-action-draft")
 
 
 def check_retrieval_result(output):
@@ -61,14 +58,15 @@ class RequestMiddleware(AgentMiddleware):
         scope = current_scope.get()
         if scope.failures:
             raise ValueError(scope.failures[0])
-        if self.settings.role == "resolutiondraft":
+        if self.settings.role == "claim-action-draft":
             scope.require_workflow()
         if context.session is not None:
-            bound = context.session.state.get("orders_workflow_id")
+            state = context.session.state
+            bound = state.get(WORKFLOW_STATE_KEY, state.get(LEGACY_WORKFLOW_STATE_KEY))
             if bound is not None and scope.workflow_id != bound:
                 raise ValueError("Workflow metadata cannot change within an agent session")
             if scope.workflow_id:
-                context.session.state["orders_workflow_id"] = scope.workflow_id
+                state[WORKFLOW_STATE_KEY] = scope.workflow_id
         # Caller options cannot add tools, change model, or remove grounding.
         context.options = {
             **(context.options or {}),
@@ -77,8 +75,7 @@ class RequestMiddleware(AgentMiddleware):
             "allow_multiple_tool_calls": False,
         }
         if self.settings.role == "triage":
-            context.options["response_format"] = (
-                InsuranceTriageResult if self.settings.business_domain == "insurance" else TriageResult)
+            context.options["response_format"] = InsuranceTriageResult
         scope.relay_enabled = context.stream
         await call_next()
         original = context.result
@@ -108,7 +105,7 @@ class RequestMiddleware(AgentMiddleware):
                     if content.type == "text" and content.text:
                         text.append(content.text)
                 if self.settings.role == "triage" or (
-                    self.settings.role in ("orderlookup", "policylookup", "resolutiondraft")
+                    self.settings.role in TOOL_ROLES
                     and scope.tool_results == 0 and any(c.type == "text" for c in update.contents)
                 ):
                     held.append(update)
@@ -145,18 +142,18 @@ class RequestMiddleware(AgentMiddleware):
         if scope.failures:
             raise RuntimeError(scope.failures[0])
         if self.settings.role == "triage":
-            (InsuranceTriageResult if self.settings.business_domain == "insurance" else TriageResult).model_validate_json(text)
-        if self.settings.role in ("orderlookup", "policylookup") and not scope.tool_results:
+            InsuranceTriageResult.model_validate_json(text)
+        if self.settings.role in GROUNDED_ROLES and not scope.tool_results:
             raise RuntimeError("Specialist did not use its required grounding tool")
-        if self.settings.role == "resolutiondraft" and scope.approval is None:
-            raise RuntimeError("No persisted resolution draft was confirmed")
+        if self.settings.role == "claim-action-draft" and scope.approval is None:
+            raise RuntimeError("No persisted claim-action draft was confirmed")
 
 
 def account_openai_client(settings: Settings, credential, *, http_client=None) -> AsyncOpenAI:
     if settings.model_gateway_required and not settings.uses_model_gateway:
         raise ValueError("AI_GATEWAY_REQUIRED forbids direct model inference; "
-                         "ORDERS_MODEL_GATEWAY_ENDPOINT is not configured")
-    variable = "ORDERS_MODEL_GATEWAY_ENDPOINT" if settings.uses_model_gateway else "ORDERS_OPENAI_ENDPOINT"
+                         "AGENT_MODEL_GATEWAY_ENDPOINT is not configured")
+    variable = "AGENT_MODEL_GATEWAY_ENDPOINT" if settings.uses_model_gateway else "AGENT_OPENAI_ENDPOINT"
     endpoint = https_url(settings.env.get(variable, ""), variable)
     if not endpoint.rstrip("/").endswith("/openai/v1"):
         raise ValueError(f"{variable} must end in /openai/v1/")
@@ -172,9 +169,9 @@ def account_openai_client(settings: Settings, credential, *, http_client=None) -
 
 def mcp_connection_headers(settings: Settings, connection: Mapping) -> dict[str, str]:
     # The connection must be the one that fronts exactly this role's canonical (or gateway) endpoint.
-    if settings.role == "policylookup":
+    if settings.role == "policy-wording":
         label, expected = "Knowledge", settings.knowledge_spec()["url"]
-    elif settings.role == "orderlookup" and settings.mcp_entry is not None:
+    elif settings.role == "policy-claim-lookup" and settings.mcp_entry is not None:
         label, expected = "MCP", settings.mcp_spec()["server_url"]
     else:
         raise ValueError("This role has no MCP connection credential to resolve")
@@ -243,22 +240,22 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
                 mcp_headers=None, gateway_token_provider=None, gateway_headers=None) -> Agent:
     if settings.model_gateway_required and not settings.uses_model_gateway:
         raise ValueError("AI_GATEWAY_REQUIRED forbids direct model inference; "
-                         "ORDERS_MODEL_GATEWAY_ENDPOINT is not configured")
+                         "AGENT_MODEL_GATEWAY_ENDPOINT is not configured")
     if settings.uses_model_gateway and account_client is None:
         raise ValueError("Gateway inference requires an identity-authenticated gateway client")
     headers = mcp_headers or knowledge_headers
     if settings.role == "triage":
         if account_client is None:
-            raise ValueError("Triage requires an identity-authenticated ORDERS_OPENAI_ENDPOINT client")
+            raise ValueError("Triage requires an identity-authenticated AGENT_OPENAI_ENDPOINT client")
         client = OpenAIChatCompletionClient(model=settings.inference_model, async_client=account_client)
     elif settings.uses_model_gateway:
         client = OpenAIChatClient(model=settings.inference_model, async_client=account_client)
     else:
         client = FoundryChatClient(project_client=project, model=settings.model)
     tools = []
-    if settings.role == "manager":
+    if settings.role == "orchestrator":
         tools = specialist_tools(settings, project)
-    elif settings.role == "orderlookup":
+    elif settings.role == "policy-claim-lookup":
         spec = settings.mcp_spec()
         options = {}
         if settings.mcp_entry is not None:
@@ -274,7 +271,7 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
             name=spec["server_label"], url=spec["server_url"],
             allowed_tools=spec["allowed_tools"], approval_mode="never_require", **options,
         )]
-    elif settings.role == "policylookup":
+    elif settings.role == "policy-wording":
         spec = settings.knowledge_spec()
         if settings.mcp_entry is not None or settings.uses_model_gateway:
             # Account-level Responses cannot resolve a project-scoped connection.
@@ -284,7 +281,7 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
             spec.pop("project_connection_id", None)
             spec["headers"] = headers
         tools = [client.get_mcp_tool(**spec)]
-    elif settings.role == "resolutiondraft":
+    elif settings.role == "claim-action-draft":
         tools = [proposal_tool(settings, require_gateway_headers(settings, gateway_headers),
                                token_provider=gateway_token_provider)]
     return Agent(
@@ -295,7 +292,6 @@ def build_agent(settings: Settings, project, *, account_client=None, knowledge_h
         tools=tools,
         middleware=[RequestMiddleware(settings)],
         default_options={"store": False, "max_tokens": 4096, "allow_multiple_tool_calls": False,
-                         **({"response_format": InsuranceTriageResult if settings.business_domain == "insurance"
-                             else TriageResult} if settings.role == "triage" else {})},
+                         **({"response_format": InsuranceTriageResult} if settings.role == "triage" else {})},
         additional_properties=settings.metadata,
     )

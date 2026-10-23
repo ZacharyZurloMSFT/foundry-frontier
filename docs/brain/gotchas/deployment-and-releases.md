@@ -4,49 +4,55 @@
 > wrong, fix it in the same PR.
 
 Part of the [gotchas index](README.md): non-obvious traps, written as **trap, why, what to do**. Read this when
-changing `infra/`, `azure.yaml` or the `postprovision` hooks, merging a PR or releasing apps. Keep each entry
+changing `infra/`, `azure.yaml`, the azd hooks or the release lane, merging a PR or releasing apps. Keep each entry
 short and cite a source.
 
 ## `azd up` and deployment
 
-- **A fresh `azd up` runs the legacy retail bootstrap.** `businessDomain` defaults to `retail`
-  ([`infra/main.bicep`](../../../infra/main.bicep)), so `postprovision` enables public access, fetches keys, seeds
-  data and creates agents. `NORTHWIND_BUSINESS_DOMAIN=insurance` skips all of that (publish knowledge explicitly
-  with `scripts/publish-insurance-knowledge.py`); `NORTHWIND_REUSE_EXISTING_RESOURCES=true` skips everything.
-  Values must be exactly `retail` / `insurance` and `true` / `false` or the hook fails. Keep `postprovision.sh` and
-  `postprovision.ps1` in `scripts/` equivalent: azd runs the `.ps1` on Windows, the `.sh` elsewhere (`azure.yaml`).
-- **Hooks block by design.** `scripts/validate-reuse.py` runs in azd `preprovision` and `predeploy`, and each
-  hosted agent's `prepackage` / `predeploy` runs `validate-reuse.py --agent-service <name>` with
-  `continueOnError: false`. A failure there is a real stop, not noise. Source: [`azure.yaml`](../../../azure.yaml).
-- **Generated copies are git-ignored; edit the source.** Bundled at azd package time: `apps/api/app/_northwind/`
-  (from `data/northwind/` plus insurance assets, `scripts/bundle-insurance-assets.py`),
-  `apps/api/app/_agent_prompts/` (from `agents/copilot-harness/`, `scripts/bundle-harness-assets.py`) and
-  `agents/*/agents/` (`scripts/orders_agent_package.py`); `data/seed/generated/` is regenerated at deploy.
-  `.release-state/` holds the grant and enforce receipts that rollback needs; keep it. The MCP apps'
-  `gateway_guard.py` copies also come from `scripts/bundle-insurance-assets.py`: edit
-  [`apps/api/app/gateway_guard.py`](../../../apps/api/app/gateway_guard.py). Sources:
+- **Nothing runs after `azd provision`.** The azd hooks are `preprovision` and `predeploy` (both run
+  `scripts/validate-reuse.py`) plus each service's `prepackage`; there is no `postprovision` hook and no hosted-agent
+  azd service. A fresh `azd up` gives running apps but no knowledge base, prompt agents, hosted agents or Content
+  Understanding analyzer: those are explicit, dry-run-first scripts, and agent inference stays `503` until an
+  operator sets `NORTHWIND_INSURANCE_AGENTS_READY`. Sources: [`azure.yaml`](../../../azure.yaml),
+  [README](../../../README.md#fresh-environment).
+- **`validate-reuse.py` blocks by design.** It checks the azd environment without Azure calls or writes, and a failure
+  is a real stop, not noise: a flag that is not exactly `true` or `false`, readiness without a
+  `northwind-insurance-` orchestrator id, a gateway URL that is not a bare `https://<name>.azure-api.net` origin, or
+  an older azd environment whose `NORTHWIND_GATEWAY_STACK` is not `insurance`. Source:
+  [`validate-reuse.py`](../../../scripts/validate-reuse.py).
+- **Generated copies: edit the source.** `apps/api/app/_northwind/` (from `data/northwind/` plus the fixtures and four
+  claim PDFs) and `apps/api/app/_agent_prompts/` (the harness and adjuster-support prompts, from
+  `scripts/bundle-harness-assets.py`) are git-ignored build inputs, as are `data/seed/generated/` (run
+  `python data/seed/generate.py --domain insurance` before packaging or testing the API) and `.release-state/` (the
+  grant and enforce receipts that rollback needs; keep it). The MCP apps carry **checked-in** copies of
+  `gateway_guard.py`, `insurance_domain.py` and the fixtures: edit
+  [`apps/api/app/gateway_guard.py`](../../../apps/api/app/gateway_guard.py) and re-run
+  `python scripts/bundle-insurance-assets.py --service mcp-policy-lookup` (and `mcp-claim-review`);
+  `scripts/tests/test_deployment_insurance_bundle.py` fails when a guard copy drifts. Sources:
   [`.gitignore`](../../../.gitignore), [`azure.yaml`](../../../azure.yaml),
   [api-management.md](../../api-management.md#repository-map).
+- **Five apps, one name map.** The azd service names and the Container App each maps to live in `azure.yaml`, in
+  `SERVICE_APPS` in `scripts/release-app.py` and in `.github/workflows/deploy-apps.yml`; the Container App names also
+  appear in the `insurance` stack of `infra/live/apim-apis.bicep`. Tests fail when they drift. Each image is tagged
+  `<service>:<sha>-<run>-<attempt>`, so renaming a service starts a new registry repository: read
+  [legacy-decommission.md](../../legacy-decommission.md#4-container-apps-rg-northwind-apps) before deleting an old one,
+  and never rename live Azure resources from code (golden rule 1).
 - **`AZURE_RESOURCE_GROUP` is the Foundry AI resource group, not Apps.** App services use
-  `AZURE_APPS_RESOURCE_GROUP` (`resourceGroup` in [`azure.yaml`](../../../azure.yaml)). Source:
-  [architecture.md](../../architecture.md#replacement-stack-placement).
-- **Container Apps environment attachment is immutable.** To move an app to another environment, recreate it
-  there and then move the recreated resource; a resource-group move alone cannot change the attachment. Source:
-  [architecture.md](../../architecture.md#replacement-stack-placement).
-- **Hosted agents: do not redeclare platform variables.** The platform injects `FOUNDRY_PROJECT_ENDPOINT`, agent
-  name and version, so do not redeclare reserved `FOUNDRY_*` variables in deployment environment maps. Install
-  `agents/hosted/requirements.txt` in the agent image or a dedicated environment (not the shared API one), and never
-  package virtual environments, tests or secrets. Source:
-  [architecture.md](../../architecture.md#order-concierge-hosted-runtime).
-- **The legacy orchestrator needs its own azd environment.** `agents/legacyorchestrator` uses the isolated
-  `northwind-legacy-gateway` environment, not the root `northwind-dev` one, and its local environment must bind
-  both `AZURE_AI_PROJECT_ENDPOINT` and `FOUNDRY_PROJECT_ENDPOINT` to the legacy project so azd cannot pick an
-  unrelated default. Source: [architecture.md](../../architecture.md#order-concierge-hosted-runtime).
+  `AZURE_APPS_RESOURCE_GROUP` (`resourceGroup` in [`azure.yaml`](../../../azure.yaml)), and reuse mode requires
+  `AZURE_RESOURCE_GROUP` to agree with `AZURE_FOUNDRY_RESOURCE_GROUP`. Sources:
+  [README](../../../README.md#existing-deployment-reuse-mode),
+  [architecture.md](../../architecture.md#networking-regions-and-identity).
+- **Hosted agents: platform and readiness settings stay out of the deploy config.** `FOUNDRY_*` variables are
+  platform-reserved and `NORTHWIND_INSURANCE_AGENTS_READY=true` is refused: readiness is an API setting that an
+  operator flips after verifying every specialist. Install `agents/hosted/requirements.txt` in a dedicated environment
+  (not the shared API one) and never package virtual environments, tests or secrets. Sources:
+  [architecture.md](../../architecture.md#hosted-agents), [README](../../../README.md#hosted-agents).
 - **Config is intent, not evidence.** Manifests, agent YAML and settings describe intended targets, not proof that
-  a resource exists or is current. Readiness gates are real: insurance chat, harness execution, voice and handoff
-  stay unavailable until `/insurance/fixtures` reports `agent_runtime_ready: true`, and harness dependencies are
-  not "ready" until a real SDK run completes. Source:
-  [departments.md](../../departments.md#active-insurance-surfaces-and-rollout-boundary).
+  a resource exists or is current. Readiness gates are real: insurance chat, `/handoff`, voice and harness runs stay
+  unavailable until `/insurance/fixtures` reports `agent_runtime_ready: true`, and the harness is not `ready` until a
+  complete SDK run verifies it. Sources:
+  [architecture.md](../../architecture.md#runtime-readiness-and-feature-switches),
+  [departments.md](../../departments.md#search-knowledge-bases-and-what-is-actually-queried).
 
 ## Releases and merging
 
@@ -54,6 +60,13 @@ short and cite a source.
   `agents/copilot-harness/`, `azure.yaml` and `.dockerignore` release all five services; docs-only changes release
   none. The release re-checks that `main` still equals its source SHA, so merging while `Scoped App Release` runs
   aborts it part-way; an abort does not advance the baseline, so the next release covers it (check that it
-  passed). It never touches `ca-insurance-api`, `-lookup` or `-review`. Sources:
-  [`release-app.py`](../../../scripts/release-app.py),
+  passed). Sources: [`release-app.py`](../../../scripts/release-app.py),
   [`deploy-apps.yml`](../../../.github/workflows/deploy-apps.yml).
+- **Live apps were released by hand, canary-first; do not release `api` from the workflow yet.** The workflow now
+  covers all five `ca-insurance-*` apps, but the live API image carries a data overlay with the live department
+  project names that a workflow build lacks, so releasing it before the `insurance-resource-cleanup` work lands
+  would swap them for the names in `company.yaml`. A CI `api` image once made `/health` report
+  `insurance_agent_runtime_ready: false` (`main` then hard-coded the original project name; `INSURANCE_PROJECTS`
+  now accepts both). Canary on a throwaway copy of the live app and keep the previous digest. Sources:
+  [insurance cut-over](../../api-management.md#insurance-stack-cut-over-2026-10-23),
+  [Remaining steps](../../api-management.md#remaining-steps).

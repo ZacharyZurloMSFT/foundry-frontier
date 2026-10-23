@@ -12,18 +12,18 @@ publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 
 
-def test_preview_is_offline_and_preserves_hr_it_sources(monkeypatch):
+def test_preview_is_offline_and_publishes_only_adjuster_procedures(monkeypatch):
     monkeypatch.setattr(publisher.httpx, "Client", lambda **_: pytest.fail("Preview must not create network clients"))
     monkeypatch.setattr(Path, "write_text", lambda *_args, **_kwargs: pytest.fail("Sources must not be overwritten"))
     result = publisher.publish()
-    assert result["mode"] == "preview" and result["categories"] == ["adjuster", "hr", "it"]
+    assert result["mode"] == "preview" and result["categories"] == ["adjuster"]
     assert result["index"] == "nw-insurance-adjuster-support"
     docs = publisher.documents()
-    assert len([d for d in docs if d["category"] == "adjuster"]) == 4
-    pto = next(d for d in docs if d["id"] == "pto-policy")
-    assert "Years 0–2" in pto["content"] and pto["version"].startswith("snapshot-")
+    assert sorted(d["id"] for d in docs) == [
+        "ADJ-DUTY-001", "ADJ-ESCALATION-001", "ADJ-EVIDENCE-001", "ADJ-PRIVACY-001"]
+    assert all(d["category"] == "adjuster" and d["version"] == "1" for d in docs)
     assert all(d["synthetic"] and d["publisher"] == publisher.OWNER
-               and d["source_uri"].startswith("urn:northwind:synthetic:employee-support:") for d in docs)
+               and d["source_uri"].startswith("urn:northwind:synthetic:adjuster-support:") for d in docs)
 
 
 @pytest.fixture

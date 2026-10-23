@@ -146,7 +146,7 @@ def role_definition_id(role: str, subscription: str = SUBSCRIPTION) -> str:
 
 
 def assignment_name(scope: str, principal: str, role: str) -> str:
-    """Deterministic role assignment name; the same scheme as ``grant()`` in deploy-orders-hosted.py."""
+    """Deterministic role assignment name; the same scheme as ``grant()`` in deploy-hosted-agents.py."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{scope.lower()}|{principal}|{role}"))
 
 

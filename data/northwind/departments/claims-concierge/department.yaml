@@ -1,0 +1,44 @@
+schema_version: 1
+slug: claims-concierge
+name: "Claims Concierge"
+tagline: "Auto claims and policy records with safe, human-reviewed action drafts."
+pillar: multi_agent
+icon: "🚘"
+brand_color: "#0b6bcb"
+foundry_project: northwind-orders
+search_index: northwind-insurance-knowledge
+cu_inbox_prefix: claims-concierge
+enabled_tabs: [insurance_records, agent_chat, reviewed_drafts, hitl]
+customer_archetype: "Claims leaders, adjusters, policyholder servicing teams."
+
+# The flagship reuses the pre-existing top-level assets so `azd up` keeps
+# working during the phased rollout. A later phase physically relocates
+# these files under data/northwind/departments/claims-concierge/.
+seed_dir: ../../../seed                 # -> data/seed
+golden_path: ../../../golden/dataset.jsonl  # -> data/golden/dataset.jsonl
+prompts_dir: ../../../../agents          # -> agents/
+cu_analyzer_dir: null
+
+agents:
+  hosted:
+    # One hosted-agent runtime (agents/hosted) serves every role; AGENT_ROLE selects it.
+    - name: northwind-insurance-orchestrator
+      role: orchestrator
+      path: ../../../../agents/hosted
+    - name: northwind-insurance-triage
+      role: triage
+      path: ../../../../agents/hosted
+    - name: northwind-insurance-policy-claim-lookup
+      role: policy-claim-lookup
+      path: ../../../../agents/hosted
+    - name: northwind-insurance-policy-wording
+      role: policy-wording
+      path: ../../../../agents/hosted
+    - name: northwind-insurance-claim-action-draft
+      role: claim-action-draft
+      path: ../../../../agents/hosted
+  prompt: []
+
+# Claims Concierge owns the platform-wide agent-harness demo. This is a
+# demo-only decision; a future rev may spin a dedicated `nw-platform` project.
+hosts_platform_tabs: [agent_harness]

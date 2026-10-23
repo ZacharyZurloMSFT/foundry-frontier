@@ -326,12 +326,12 @@ def _document_locations():
     here = Path(__file__).resolve()
     bundle = here.parent / "_northwind"
     yield (
-        bundle / "departments" / "claims-warranty" / "claims-documents.json",
+        bundle / "departments" / "claims-documents" / "claims-documents.json",
         bundle / "claims-documents",
     )
     for parent in here.parents:
         yield (
-            parent / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json",
+            parent / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json",
             parent / "data" / "seed" / "generated",
         )
 

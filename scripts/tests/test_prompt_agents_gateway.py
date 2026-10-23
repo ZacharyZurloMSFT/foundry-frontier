@@ -1,9 +1,7 @@
 """Prompt agents routed through the AI Gateway model connection (offline; no Foundry calls)."""
 import asyncio
-import hashlib
 import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,7 +26,6 @@ def load(name, filename):
 
 
 agents_script = load("create_prompt_agents_gateway", "create-prompt-agents.py")
-setup_script = load("setup_orders_foundry_demo_gateway", "setup-orders-foundry-demo.py")
 connect_script = load("connect_model_gateway_for_agents", "connect-model-gateway.py")
 
 
@@ -37,7 +34,7 @@ def clean_environment(monkeypatch):
     for name in GATEWAY_VARS:
         monkeypatch.delenv(name, raising=False)
     for name in ("FOUNDRY_PROJECT_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINTS", "FOUNDRY_ENDPOINT",
-                 "FOUNDRY_WORKER_DEPLOYMENT", "ORDER_AGENTS_HOSTED", "AZURE_SEARCH_INDEX",
+                 "FOUNDRY_WORKER_DEPLOYMENT", "AZURE_SEARCH_INDEX",
                  "AZURE_SEARCH_KNOWLEDGE_BASE", "FOUNDRY_KB_CONNECTION_NAME"):
         monkeypatch.delenv(name, raising=False)
 
@@ -108,8 +105,8 @@ def test_settings_from_environment():
 
 @pytest.mark.parametrize("flag", ["true", "1", "yes", " TRUE ", "Yes"])
 def test_required_without_a_connection_leaves_prompt_agent_models_direct(flag):
-    # Prompt-agent models cannot be routed through the AI Gateway tier (finding 9), so the flag must not make a
-    # connection mandatory: azd's postprovision runs this script with the flag set for the hosted agents.
+    # Prompt-agent models cannot be routed through the AI Gateway tier (docs/ai-gateway.md finding 9), so a flag
+    # that applies to the hosted agents and the API must not make a model connection mandatory here.
     assert agents_script.gateway_models_from_env({"AI_GATEWAY_REQUIRED": flag}) is None
 
 
@@ -200,34 +197,74 @@ def forbid_foundry(monkeypatch):
     monkeypatch.setattr(agents_script, "_get_credential", Offline)
 
 
-def test_dry_run_prints_every_planned_agent_with_its_gateway_model(monkeypatch, capsys, prompt_environment):
+# --- a hermetic company: department prompts change with the departments' content --------------------------
+
+CLAIMS_ROUTES = json.dumps({"nw-claims-kb": {"toolserver": "nw-claims-knowledge", "connection": "nw-claims-kb-gw"}})
+CLAIMS_TOOLSERVER = "https://ai-gateway-northwind.azure-api.net/default/toolservers/nw-claims-knowledge/mcp"
+SEARCH_AGENT = "northwind-claims-evidence-search"
+ADJUSTER_AGENT = "northwind-insurance-adjuster-support"
+TRIAGE_AGENT = "northwind-claims-triage"
+CLASSIFIER_AGENT = "northwind-intent-classifier"
+
+
+def write_prompt(directory, name, **extra):
+    directory.mkdir(parents=True, exist_ok=True)
+    document = {"name": name, "description": name + " test prompt", "instructions": "Answer.", **extra}
+    (directory / (name + ".yaml")).write_text(yaml.safe_dump(document), encoding="utf-8")
+
+
+def department(slug, prompts_dir, search_index):
+    return agents_script.Department(
+        slug=slug, name=slug, tagline="", pillar="", icon="", brand_color="", foundry_project="project-" + slug,
+        search_index=search_index, cu_inbox_prefix=slug, enabled_tabs=(), seed_dir=prompts_dir,
+        golden_path=prompts_dir, prompts_dir=prompts_dir, cu_analyzer_dir=None, customer_archetype="")
+
+
+@pytest.fixture
+def manifest(tmp_path, monkeypatch):
+    indexes = {"claims-concierge": "northwind-insurance-knowledge", "adjuster-support": "nw-insurance-adjuster-support",
+               "claims-documents": "nw-claims", "contact-center": "nw-contact-center"}
+    prompts = {slug: tmp_path / slug for slug in indexes}
+    write_prompt(prompts["claims-concierge"], "northwind-hosted-flagship-stray")
+    write_prompt(prompts["adjuster-support"], ADJUSTER_AGENT)
+    write_prompt(prompts["claims-documents"], TRIAGE_AGENT)
+    write_prompt(prompts["claims-documents"], SEARCH_AGENT, model="gpt-5.4",
+                 tools=[{"type": "knowledge", "index": "nw-claims"}])
+    write_prompt(prompts["contact-center"], CLASSIFIER_AGENT)
+    company = SimpleNamespace(
+        name="Northwind Insurance",
+        departments=tuple(department(slug, path, indexes[slug]) for slug, path in prompts.items()))
+    monkeypatch.setattr(agents_script, "load_company", lambda: company)
+    return company
+
+
+def test_dry_run_prints_every_planned_agent_with_its_gateway_model(monkeypatch, capsys, prompt_environment, manifest):
     monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
     out = capsys.readouterr().out
     assert "DRY RUN" in out and "Gateway model connection: my-conn" in out
     for line in (
-        "northwind-hr-assistant-kimi (model=my-conn/aisvc-zurlo-northwind/kimi-k2-6; tools=mcp:nw-hr-kb@direct)",
-        ("northwind-hr-assistant-gpt-5-4-mini (model=my-conn/aisvc-zurlo-northwind/gpt-5-4-mini; "
-         "tools=mcp:nw-hr-kb@direct)"),
-        "northwind-hr-assistant (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=mcp:nw-hr-kb@direct)",
-        "northwind-claims-triage (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=none)",
-        "northwind-intent-classifier (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=none)",
+        SEARCH_AGENT + " (model=my-conn/aisvc-zurlo-northwind/gpt-5-4; tools=mcp:nw-claims-kb@direct)",
+        TRIAGE_AGENT + " (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=none)",
+        ADJUSTER_AGENT + " (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=none)",
+        CLASSIFIER_AGENT + " (model=my-conn/aisvc-zurlo-northwind/gpt-4o; tools=none)",
     ):
         assert line in out
+    assert "northwind-hosted-flagship-stray" not in out
     assert "nothing was sent to Foundry" in out
 
 
-def test_dry_run_without_a_gateway_shows_the_direct_models(monkeypatch, capsys, prompt_environment):
+def test_dry_run_without_a_gateway_shows_the_direct_models(monkeypatch, capsys, prompt_environment, manifest):
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
     out = capsys.readouterr().out
     assert "Gateway model connection" not in out
-    assert "northwind-hr-assistant-kimi (model=Kimi-K2.6;" in out
-    assert "northwind-claims-triage (model=gpt-4o; tools=none)" in out
+    assert SEARCH_AGENT + " (model=gpt-5.4;" in out
+    assert TRIAGE_AGENT + " (model=gpt-4o; tools=none)" in out
 
 
-def test_dry_run_reports_a_planning_error_and_exits_non_zero(monkeypatch, capsys, prompt_environment):
+def test_dry_run_reports_a_planning_error_and_exits_non_zero(monkeypatch, capsys, prompt_environment, manifest):
     monkeypatch.delenv("AZURE_SEARCH_ENDPOINT")
     forbid_foundry(monkeypatch)
     with pytest.raises(SystemExit) as raised:
@@ -236,16 +273,18 @@ def test_dry_run_reports_a_planning_error_and_exits_non_zero(monkeypatch, capsys
     assert "AZURE_SEARCH_ENDPOINT" in capsys.readouterr().out
 
 
-def test_required_without_a_connection_still_plans_direct_prompt_agents(monkeypatch, capsys, prompt_environment):
+def test_required_without_a_connection_still_plans_direct_prompt_agents(monkeypatch, capsys, prompt_environment,
+                                                                        manifest):
     monkeypatch.setenv("AI_GATEWAY_REQUIRED", "true")
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
     out = capsys.readouterr().out
     assert "Gateway model connection" not in out
-    assert "northwind-claims-triage (model=gpt-4o; tools=none)" in out
+    assert TRIAGE_AGENT + " (model=gpt-4o; tools=none)" in out
 
 
-def test_a_configured_model_connection_warns_that_foundry_rejects_the_alias(monkeypatch, capsys, prompt_environment):
+def test_a_configured_model_connection_warns_that_foundry_rejects_the_alias(monkeypatch, capsys, prompt_environment,
+                                                                            manifest):
     monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
@@ -253,7 +292,7 @@ def test_a_configured_model_connection_warns_that_foundry_rejects_the_alias(monk
     assert "Foundry rejects a model id that contains '/'" in err and "finding 9" in err
 
 
-def test_without_a_model_connection_nothing_is_warned(monkeypatch, capsys, prompt_environment):
+def test_without_a_model_connection_nothing_is_warned(monkeypatch, capsys, prompt_environment, manifest):
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
     assert "finding 9" not in capsys.readouterr().err
@@ -274,8 +313,8 @@ def recording_project(sink):
 
 
 DEPARTMENT_ENDPOINTS = {
-    "order-concierge": "https://e.example/oc", "employee-help-desk": "https://e.example/hr",
-    "claims-warranty": "https://e.example/cw", "contact-center": "https://e.example/cc",
+    "claims-concierge": "https://e.example/cc1", "adjuster-support": "https://e.example/as",
+    "claims-documents": "https://e.example/cd", "contact-center": "https://e.example/cc",
 }
 
 
@@ -288,28 +327,79 @@ def recorded_run(monkeypatch, prompt_environment):
     return created
 
 
-def test_default_run_still_creates_agents_with_the_direct_models(recorded_run, capsys):
+def test_default_run_still_creates_agents_with_the_direct_models(manifest, recorded_run, capsys):
     asyncio.run(agents_script.main())
-    assert len(recorded_run) == 7
-    assert recorded_run["northwind-hr-assistant-kimi"] == ("https://e.example/hr", "Kimi-K2.6")
-    assert recorded_run["northwind-hr-assistant-gpt-5-4"] == ("https://e.example/hr", "gpt-5.4")
-    assert recorded_run["northwind-claims-triage"] == ("https://e.example/cw", "gpt-4o")
-    assert recorded_run["northwind-intent-classifier"] == ("https://e.example/cc", "gpt-4o")
-    assert "All 7 prompt agents ready" in capsys.readouterr().out
+    assert recorded_run == {
+        ADJUSTER_AGENT: ("https://e.example/as", "gpt-4o"),
+        TRIAGE_AGENT: ("https://e.example/cd", "gpt-4o"),
+        SEARCH_AGENT: ("https://e.example/cd", "gpt-5.4"),
+        CLASSIFIER_AGENT: ("https://e.example/cc", "gpt-4o"),
+    }
+    assert "All 4 prompt agents ready" in capsys.readouterr().out
 
 
-def test_gateway_run_creates_the_same_agents_with_connection_qualified_models(monkeypatch, recorded_run, capsys):
+def test_gateway_run_creates_the_same_agents_with_connection_qualified_models(monkeypatch, manifest, recorded_run,
+                                                                              capsys):
     monkeypatch.setenv("AI_GATEWAY_REQUIRED", "true")
     monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
     monkeypatch.setenv("AI_GATEWAY_MODEL_ALIASES", '{"gpt-5.4": "aisvc-zurlo-northwind/gpt-5-4"}')
     asyncio.run(agents_script.main())
-    assert len(recorded_run) == 7
-    assert recorded_run["northwind-hr-assistant-kimi"] == (
-        "https://e.example/hr", "my-conn/aisvc-zurlo-northwind/kimi-k2-6")
-    assert recorded_run["northwind-hr-assistant-gpt-5-4"][1] == "my-conn/aisvc-zurlo-northwind/gpt-5-4"
-    assert recorded_run["northwind-claims-triage"] == ("https://e.example/cw", "my-conn/aisvc-zurlo-northwind/gpt-4o")
+    assert len(recorded_run) == 4
+    assert recorded_run[SEARCH_AGENT] == ("https://e.example/cd", "my-conn/aisvc-zurlo-northwind/gpt-5-4")
+    assert recorded_run[TRIAGE_AGENT] == ("https://e.example/cd", "my-conn/aisvc-zurlo-northwind/gpt-4o")
     assert all(model.startswith("my-conn/") for _, model in recorded_run.values())
-    assert "All 7 prompt agents ready" in capsys.readouterr().out
+    assert "All 4 prompt agents ready" in capsys.readouterr().out
+
+
+def test_hosted_flagship_agents_are_never_created_as_prompt_agents(monkeypatch, manifest, recorded_run, capsys):
+    monkeypatch.setenv("HOSTED_AGENTS_ENABLED", "false")
+    asyncio.run(agents_script.main())
+    assert "northwind-hosted-flagship-stray" not in recorded_run
+    assert "Hosted agents are deployed by scripts/deploy-hosted-agents.py" in capsys.readouterr().out
+
+
+def test_deprecated_department_slugs_in_the_endpoint_map_still_resolve(monkeypatch, manifest, recorded_run):
+    monkeypatch.setenv("FOUNDRY_PROJECT_ENDPOINTS", json.dumps({
+        "order-concierge": "https://e.example/cc1", "employee-help-desk": "https://e.example/as",
+        "claims-warranty": "https://e.example/cd", "contact-center": "https://e.example/cc",
+    }))
+    asyncio.run(agents_script.main())
+    assert recorded_run[ADJUSTER_AGENT][0] == "https://e.example/as"
+    assert recorded_run[TRIAGE_AGENT][0] == "https://e.example/cd"
+    assert recorded_run[CLASSIFIER_AGENT][0] == "https://e.example/cc"
+
+
+@pytest.mark.parametrize("raw", [
+    {"claims-warranty": "https://old", "claims-documents": "https://new"},
+    {"claims-documents": "https://new", "claims-warranty": "https://old"},
+])
+def test_a_canonical_slug_wins_over_its_deprecated_alias(monkeypatch, raw):
+    monkeypatch.setenv("FOUNDRY_PROJECT_ENDPOINTS", json.dumps(raw))
+    assert agents_script._resolve_endpoints() == {"claims-documents": "https://new"}
+
+
+def shipped_agent_names():
+    names = set()
+    for dept in agents_script.load_company().departments:
+        if dept.slug in agents_script._HOSTED_DEPARTMENTS:
+            continue
+        names.update(yaml.safe_load(path.read_text(encoding="utf-8"))["name"] for path in dept.prompts_dir.glob("*.yaml"))
+    return names
+
+
+def test_every_shipped_department_prompt_is_created(recorded_run, capsys):
+    asyncio.run(agents_script.main())
+    assert recorded_run and set(recorded_run) == shipped_agent_names()
+    assert {TRIAGE_AGENT, CLASSIFIER_AGENT} <= set(recorded_run)
+    assert f"All {len(recorded_run)} prompt agents ready" in capsys.readouterr().out
+
+
+def test_every_shipped_department_prompt_plans_through_the_gateway(monkeypatch, capsys, prompt_environment):
+    monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
+    forbid_foundry(monkeypatch)
+    asyncio.run(agents_script.main(dry_run=True))
+    out = capsys.readouterr().out
+    assert f"Dry run complete: {len(shipped_agent_names())} prompt agent(s) planned" in out
 
 
 def test_connection_models_and_agent_models_agree():
@@ -332,152 +422,32 @@ def test_alias_maps_are_parsed_identically_by_the_agent_and_connection_scripts(r
         assert connect_script.parse_aliases(raw) == expected
 
 
-def setup_arguments(monkeypatch, *extra):
-    monkeypatch.setattr(sys, "argv", [
-        "setup-orders-foundry-demo.py",
-        "--project-endpoint", "https://aisvc.example/api/projects/northwind-orders",
-        "--tenant", "tenant-fixture",
-        "--template-id", "/subscriptions/s/projects/northwind-orders/humanevaluationtemplates/t",
-        *extra,
-    ])
-
-
-def test_review_agent_model_is_unchanged_by_default(monkeypatch):
-    def refuse(*args, **kwargs):
-        pytest.fail("The gateway helpers must not even load without gateway settings")
-
-    monkeypatch.setattr(setup_script.importlib.util, "spec_from_file_location", refuse)
-    assert setup_script.agent_model("gpt-4o") == "gpt-4o"
-
-
-def test_review_agent_model_follows_the_prompt_agent_rule(monkeypatch):
-    monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
-    assert setup_script.agent_model("gpt-4o") == "my-conn/aisvc-zurlo-northwind/gpt-4o"
-    assert setup_script.agent_model("Kimi-K2.6") == "my-conn/aisvc-zurlo-northwind/kimi-k2-6"
-    monkeypatch.delenv("AI_GATEWAY_MODEL_CONNECTION")
-    monkeypatch.setenv("AI_GATEWAY_REQUIRED", "true")
-    assert setup_script.agent_model("gpt-4o") == "gpt-4o"
-
-
-def test_review_dry_run_report_only_names_the_model_in_gateway_mode(monkeypatch, capsys):
-    setup_arguments(monkeypatch)
-    setup_script.main()
-    assert "model" not in json.loads(capsys.readouterr().out)
-    monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", CONNECTION)
-    setup_script.main()
-    assert json.loads(capsys.readouterr().out)["model"] == "my-conn/aisvc-zurlo-northwind/gpt-4o"
-
-
-def test_review_required_without_a_connection_keeps_the_direct_model(monkeypatch, capsys):
-    setup_arguments(monkeypatch)
-    monkeypatch.setenv("AI_GATEWAY_REQUIRED", "yes")
-    setup_script.main()
-    assert "model" not in json.loads(capsys.readouterr().out)
-
-
-def review_project(versions, created):
-    """Stand-in for the Foundry project client used by the review-agent setup (apply path)."""
-
-    class Agents:
-        def list_versions(self, name):
-            return list(versions)
-
-        def create_version(self, name, *, definition, description, metadata):
-            created.append(definition.model)
-            return SimpleNamespace(version="8")
-
-    class Rules:
-        def create_or_update(self, rule_id, rule):
-            return SimpleNamespace(as_dict=lambda: {"id": rule_id})
-
-    class OpenAI:
-        evals = SimpleNamespace(list=lambda: [SimpleNamespace(name=setup_script.EVALUATION_NAME, id="eval-1")])
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    class Project:
-        def __init__(self, **kwargs):
-            self.agents = Agents()
-            self.evaluation_rules = Rules()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def get_openai_client(self):
-            return OpenAI()
-
-    return Project
-
-
-class ReviewCredential:
-    def __init__(self, **kwargs):
-        pass
-
-    def close(self):
-        pass
-
-
-def review_digest():
-    prompt = yaml.safe_load((SCRIPTS.parent / "agents" / "triage.yaml").read_text(encoding="utf-8"))
-    return hashlib.sha256(prompt["instructions"].encode()).hexdigest()
-
-
-@pytest.mark.parametrize("connection,expected", [
-    (None, "gpt-4o"), (CONNECTION, "my-conn/aisvc-zurlo-northwind/gpt-4o"),
-])
-def test_review_apply_creates_once_per_effective_model(monkeypatch, capsys, connection, expected):
-    setup_arguments(monkeypatch, "--apply")
-    if connection:
-        monkeypatch.setenv("AI_GATEWAY_MODEL_CONNECTION", connection)
-    monkeypatch.setattr(setup_script, "AzureCliCredential", ReviewCredential)
-    versions, created = [], []
-    monkeypatch.setattr(setup_script, "AIProjectClient", review_project(versions, created))
-    setup_script.main()
-    assert created == [expected]
-    assert json.loads(capsys.readouterr().out)["review_agent_version"] == "8"
-    # A version that already carries the effective model is reused rather than duplicated.
-    versions.append(SimpleNamespace(
-        version="7", metadata={"instructions_sha256": review_digest()}, definition=SimpleNamespace(model=expected)))
-    setup_script.main()
-    assert created == [expected]
-    assert json.loads(capsys.readouterr().out)["review_agent_version"] == "7"
-    # A version that carries a different model does not count as the same agent.
-    versions[:] = [SimpleNamespace(
-        version="6", metadata={"instructions_sha256": review_digest()}, definition=SimpleNamespace(model="other"))]
-    setup_script.main()
-    assert created == [expected, expected]
-
-
 # --- knowledge-base MCP tools through the gateway tool servers -----------------------------------------
 
-HR_TOOLSERVER = "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-hr-knowledge/mcp"
-HR_ROUTES = json.dumps({"nw-hr-kb": {"toolserver": "northwind-hr-knowledge", "connection": "nw-hr-kb-gw"}})
+KB = "northwind-insurance-kb"
+KB_CONNECTION = "northwind-insurance-kb-mcp"
+KB_TOOLSERVER = "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-knowledge/mcp"
+KB_ROUTES = json.dumps({KB: {"toolserver": "northwind-insurance-knowledge", "connection": "nw-insurance-kb-gw"}})
 
 
-def hr_route(prefix="knowledge_"):
-    return agents_script.KbRoute(HR_TOOLSERVER, "nw-hr-kb-gw", prefix)
+def kb_route(prefix="knowledge_"):
+    return agents_script.KbRoute(KB_TOOLSERVER, "nw-insurance-kb-gw", prefix)
 
 
 def test_kb_routes_parse_with_the_default_tool_prefix():
-    routes = agents_script._parse_kb_routes(HR_ROUTES)
-    assert routes == {"nw-hr-kb": hr_route()}
-    custom = agents_script._parse_kb_routes(json.dumps({" nw-hr-kb ": {
-        "toolserver": "northwind-hr-knowledge", "connection": " nw-hr-kb-gw ", "tool_prefix": "kb_"}}))
-    assert custom == {"nw-hr-kb": hr_route("kb_")}
+    routes = agents_script._parse_kb_routes(KB_ROUTES)
+    assert routes == {KB: kb_route()}
+    custom = agents_script._parse_kb_routes(json.dumps({" " + KB + " ": {
+        "toolserver": "northwind-insurance-knowledge", "connection": " nw-insurance-kb-gw ", "tool_prefix": "kb_"}}))
+    assert custom == {KB: kb_route("kb_")}
     assert agents_script._parse_kb_routes("") == {} and agents_script._parse_kb_routes("  ") == {}
     assert agents_script._parse_kb_routes("{}") == {}
 
 
 @pytest.mark.parametrize("raw", [
-    "not json", "[]", '"x"', '{"nw-hr-kb": "northwind-hr-knowledge"}', '{"": {"toolserver": "a-b", "connection": "abc"}}',
-    '{"k": {"toolserver": "northwind-hr-knowledge"}}',
+    "not json", "[]", '"x"', '{"northwind-insurance-kb": "northwind-insurance-knowledge"}',
+    '{"": {"toolserver": "a-b", "connection": "abc"}}',
+    '{"k": {"toolserver": "northwind-insurance-knowledge"}}',
     '{"k": {"connection": "abc"}}',
     '{"k": {"toolserver": 5, "connection": "abc"}}',
     '{"k": {"toolserver": "Bad Name", "connection": "abc"}}',
@@ -496,8 +466,8 @@ def test_malformed_kb_routes_are_rejected(raw):
 def test_mcp_settings_from_environment():
     assert agents_script.gateway_mcp_from_env({}) is None
     assert agents_script.gateway_mcp_from_env({"AI_GATEWAY_MCP_REQUIRED": "false", "AI_GATEWAY_MCP_KB_ROUTES": ""}) is None
-    routed = agents_script.gateway_mcp_from_env({"AI_GATEWAY_MCP_KB_ROUTES": HR_ROUTES})
-    assert routed.required is False and routed.routes == {"nw-hr-kb": hr_route()}
+    routed = agents_script.gateway_mcp_from_env({"AI_GATEWAY_MCP_KB_ROUTES": KB_ROUTES})
+    assert routed.required is False and routed.routes == {KB: kb_route()}
     required = agents_script.gateway_mcp_from_env({"AI_GATEWAY_MCP_REQUIRED": "true"})
     assert required.required is True and dict(required.routes) == {}
     with pytest.raises(ValueError, match="must be true, 1 or yes"):
@@ -508,65 +478,89 @@ def test_mcp_settings_from_environment():
 
 def test_a_routed_kb_uses_its_tool_server_without_needing_the_search_endpoint(monkeypatch):
     monkeypatch.delenv("AZURE_SEARCH_ENDPOINT", raising=False)
-    mcp = agents_script.GatewayMcp(False, {"nw-hr-kb": hr_route()})
-    assert agents_script._kb_mcp_entry("agent", "nw-hr-kb", "nw-hr-kb-mcp", mcp) == {
-        "type": "mcp", "server_label": "nw-hr-kb", "server_url": HR_TOOLSERVER, "require_approval": "never",
-        "allowed_tools": ["knowledge_knowledge_base_retrieve"], "project_connection_id": "nw-hr-kb-gw",
+    mcp = agents_script.GatewayMcp(False, {KB: kb_route()})
+    assert agents_script._kb_mcp_entry("agent", KB, KB_CONNECTION, mcp) == {
+        "type": "mcp", "server_label": KB, "server_url": KB_TOOLSERVER, "require_approval": "never",
+        "allowed_tools": ["knowledge_knowledge_base_retrieve"], "project_connection_id": "nw-insurance-kb-gw",
     }
-    custom = agents_script.GatewayMcp(False, {"nw-hr-kb": hr_route("kb_")})
-    assert agents_script._kb_mcp_entry("agent", "nw-hr-kb", "x", custom)["allowed_tools"] == [
+    custom = agents_script.GatewayMcp(False, {KB: kb_route("kb_")})
+    assert agents_script._kb_mcp_entry("agent", KB, "x", custom)["allowed_tools"] == [
         "kb_knowledge_base_retrieve"]
 
 
 def test_an_unrouted_kb_keeps_its_direct_search_endpoint(monkeypatch):
     monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net/")
     direct = {
-        "type": "mcp", "server_label": "nw-hr-kb", "require_approval": "never",
-        "server_url": "https://search.example.net/knowledgebases/nw-hr-kb/mcp?api-version=2026-05-01-preview",
-        "allowed_tools": ["knowledge_base_retrieve"], "project_connection_id": "nw-hr-kb-mcp",
+        "type": "mcp", "server_label": KB, "require_approval": "never",
+        "server_url": f"https://search.example.net/knowledgebases/{KB}/mcp?api-version=2026-05-01-preview",
+        "allowed_tools": ["knowledge_base_retrieve"], "project_connection_id": KB_CONNECTION,
     }
-    assert agents_script._kb_mcp_entry("agent", "nw-hr-kb", "nw-hr-kb-mcp", None) == direct
-    other = agents_script.GatewayMcp(False, {"another-kb": hr_route()})
-    assert agents_script._kb_mcp_entry("agent", "nw-hr-kb", "nw-hr-kb-mcp", other) == direct
+    assert agents_script._kb_mcp_entry("agent", KB, KB_CONNECTION, None) == direct
+    other = agents_script.GatewayMcp(False, {"another-kb": kb_route()})
+    assert agents_script._kb_mcp_entry("agent", KB, KB_CONNECTION, other) == direct
     monkeypatch.delenv("AZURE_SEARCH_ENDPOINT")
     with pytest.raises(RuntimeError, match="AZURE_SEARCH_ENDPOINT"):
-        agents_script._kb_mcp_entry("agent", "nw-hr-kb", "nw-hr-kb-mcp", None)
+        agents_script._kb_mcp_entry("agent", KB, KB_CONNECTION, None)
 
 
 def test_required_mcp_refuses_a_kb_without_a_route(monkeypatch):
     monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net")
-    mcp = agents_script.GatewayMcp(True, {"another-kb": hr_route()})
-    with pytest.raises(ValueError, match=r"AI_GATEWAY_MCP_REQUIRED.*no route for knowledge base 'nw-hr-kb'.*'agent'"):
-        agents_script._kb_mcp_entry("agent", "nw-hr-kb", "nw-hr-kb-mcp", mcp)
-    assert agents_script._kb_mcp_entry("agent", "another-kb", "x", mcp)["server_url"] == HR_TOOLSERVER
+    mcp = agents_script.GatewayMcp(True, {"another-kb": kb_route()})
+    with pytest.raises(ValueError, match=rf"AI_GATEWAY_MCP_REQUIRED.*no route for knowledge base '{KB}'.*'agent'"):
+        agents_script._kb_mcp_entry("agent", KB, KB_CONNECTION, mcp)
+    assert agents_script._kb_mcp_entry("agent", "another-kb", "x", mcp)["server_url"] == KB_TOOLSERVER
 
 
 def test_both_knowledge_block_styles_are_routed(monkeypatch):
     monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net")
-    monkeypatch.setenv("AZURE_SEARCH_KNOWLEDGE_BASE", "northwind-kb")
-    mcp = agents_script.GatewayMcp(True, {"nw-hr-kb": hr_route(), "northwind-kb": agents_script.KbRoute(
-        "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-orders-knowledge/mcp",
-        "northwind-kb-gw", "knowledge_")})
-    tool_block = {"name": "hr", "instructions": "x", "tools": [{"type": "knowledge", "index": "nw-hr"}]}
+    monkeypatch.setenv("AZURE_SEARCH_KNOWLEDGE_BASE", KB)
+    mcp = agents_script.GatewayMcp(True, {
+        "nw-claims-kb": agents_script.KbRoute(CLAIMS_TOOLSERVER, "nw-claims-kb-gw", "knowledge_"),
+        KB: agents_script.KbRoute(KB_TOOLSERVER, "northwind-insurance-kb-gw", "knowledge_")})
+    tool_block = {"name": "claims", "instructions": "x", "tools": [{"type": "knowledge", "index": "nw-claims"}]}
     [entry] = agents_script._knowledge_tools_for_agent(tool_block, mcp=mcp)
-    assert entry["server_url"] == HR_TOOLSERVER and entry["project_connection_id"] == "nw-hr-kb-gw"
-    legacy_block = {"name": "orders", "instructions": "x", "knowledge": [
-        {"kind": "foundry_iq", "knowledge_base": "northwind-kb", "connection": "northwind-kb-mcp"}]}
+    assert entry["server_url"] == CLAIMS_TOOLSERVER and entry["project_connection_id"] == "nw-claims-kb-gw"
+    legacy_block = {"name": "insurance", "instructions": "x", "knowledge": [
+        {"kind": "foundry_iq", "knowledge_base": KB, "connection": KB_CONNECTION}]}
     [entry] = agents_script._knowledge_tools_for_agent(legacy_block, mcp=mcp)
-    assert entry["server_url"].endswith("/northwind-orders-knowledge/mcp")
-    assert entry["project_connection_id"] == "northwind-kb-gw"
+    assert entry["server_url"] == KB_TOOLSERVER
+    assert entry["project_connection_id"] == "northwind-insurance-kb-gw"
     # Without routing the same blocks still go straight to Search, exactly as before.
     [direct] = agents_script._knowledge_tools_for_agent(tool_block)
-    assert direct["server_url"].startswith("https://search.example.net/knowledgebases/nw-hr-kb/mcp")
+    assert direct["server_url"].startswith("https://search.example.net/knowledgebases/nw-claims-kb/mcp")
+
+
+def test_unresolved_knowledge_placeholders_default_to_the_isolated_insurance_knowledge_base(monkeypatch):
+    monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net")
+    block = {"name": "agent", "instructions": "x", "knowledge": [{
+        "kind": "foundry_iq", "knowledge_base": "${AZURE_SEARCH_KNOWLEDGE_BASE}",
+        "connection": "${FOUNDRY_KB_CONNECTION_NAME}"}]}
+    [entry] = agents_script._knowledge_tools_for_agent(block)
+    assert entry["server_url"].startswith(f"https://search.example.net/knowledgebases/{KB}/mcp")
+    assert entry["project_connection_id"] == KB_CONNECTION
+    monkeypatch.setenv("AZURE_SEARCH_KNOWLEDGE_BASE", "override-kb")
+    monkeypatch.setenv("FOUNDRY_KB_CONNECTION_NAME", "override-connection")
+    [entry] = agents_script._knowledge_tools_for_agent(block)
+    assert "/knowledgebases/override-kb/mcp" in entry["server_url"]
+    assert entry["project_connection_id"] == "override-connection"
+
+
+def test_the_flagship_index_keeps_its_published_knowledge_base_and_connection(monkeypatch):
+    monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "https://search.example.net")
+    block = {"name": "agent", "instructions": "x", "tools": [
+        {"type": "knowledge", "index": "northwind-insurance-knowledge"}]}
+    [entry] = agents_script._knowledge_tools_for_agent(block)
+    assert f"/knowledgebases/{KB}/mcp" in entry["server_url"]
+    assert entry["project_connection_id"] == KB_CONNECTION
 
 
 def test_required_mcp_also_covers_yaml_declared_mcp_tools():
-    gateway_tool = {"type": "mcp", "server_label": "lookup", "server_url": HR_TOOLSERVER}
+    gateway_tool = {"type": "mcp", "server_label": "lookup", "server_url": KB_TOOLSERVER}
     direct_tool = {"type": "mcp", "server_label": "lookup", "server_url": "https://ca-x.example.io/mcp"}
     cfg = {"name": "agent-one", "instructions": "x"}
     mcp = agents_script.GatewayMcp(True, {})
     [resolved] = agents_script._tools_for_agent({**cfg, "tools": [gateway_tool]}, mcp=mcp)
-    assert resolved["server_url"] == HR_TOOLSERVER
+    assert resolved["server_url"] == KB_TOOLSERVER
     with pytest.raises(ValueError, match=r"AI_GATEWAY_MCP_REQUIRED.*'agent-one'.*directly"):
         agents_script._tools_for_agent({**cfg, "tools": [direct_tool]}, mcp=mcp)
     # Not required (or no MCP settings at all): a direct MCP server is left alone.
@@ -577,53 +571,55 @@ def test_required_mcp_also_covers_yaml_declared_mcp_tools():
 
 def test_tool_summary_marks_where_each_mcp_tool_goes():
     tools = [
-        {"type": "mcp", "server_label": "nw-hr-kb", "server_url": HR_TOOLSERVER},
+        {"type": "mcp", "server_label": KB, "server_url": KB_TOOLSERVER},
         {"type": "mcp", "server_label": "x", "server_url": "https://search.example.net/knowledgebases/x/mcp"},
-        {"type": "mcp", "server_label": "api", "server_url": "https://apim-northwind.azure-api.net/northwind/mcp/work-order"},
+        {"type": "mcp", "server_label": "api", "server_url": "https://apim-northwind.azure-api.net/insurance/mcp/work-order"},
         {"type": "function", "name": "lookup"},
     ]
     assert agents_script._tool_summary(tools) == (
-        "mcp:nw-hr-kb@ai-gateway, mcp:x@direct, mcp:api@apim, function:lookup")
+        f"mcp:{KB}@ai-gateway, mcp:x@direct, mcp:api@apim, function:lookup")
     assert agents_script._tool_summary([]) == "none"
 
 
 def test_the_apim_connections_are_never_attached_to_an_ai_gateway_tool_server(monkeypatch):
-    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_TECH_LOOKUP", "apim-tech-lookup")
-    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_WORK_ORDER", "apim-work-order")
-    apim_url = "https://apim-northwind.azure-api.net/northwind/mcp/tech-lookup"
+    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_POLICY_LOOKUP", "apim-policy-lookup")
+    monkeypatch.setenv("MCP_GATEWAY_CONNECTION_CLAIM_REVIEW", "apim-claim-review")
+    apim_url = "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup"
     cfg = {"name": "agent-one", "instructions": "x", "tools": [
         {"type": "mcp", "server_label": "apim", "server_url": apim_url},
-        {"type": "mcp", "server_label": "ai", "server_url": HR_TOOLSERVER},
+        {"type": "mcp", "server_label": "ai", "server_url": KB_TOOLSERVER},
         {"type": "mcp", "server_label": "own", "server_url": apim_url, "project_connection_id": "explicit-connection"},
     ]}
     apim, ai, own = agents_script._tools_for_agent(cfg)
-    assert apim["server_url"] == apim_url and apim["project_connection_id"] == "apim-tech-lookup"
+    assert apim["server_url"] == apim_url and apim["project_connection_id"] == "apim-policy-lookup"
     # The AI Gateway authenticates with its own key, never with an API Management subscription key.
-    assert ai["server_url"] == HR_TOOLSERVER and "project_connection_id" not in ai
+    assert ai["server_url"] == KB_TOOLSERVER and "project_connection_id" not in ai
     assert own["project_connection_id"] == "explicit-connection"
 
 
-def test_dry_run_shows_the_routed_knowledge_base_and_needs_no_search_endpoint(monkeypatch, capsys, prompt_environment):
+def test_dry_run_shows_the_routed_knowledge_base_and_needs_no_search_endpoint(monkeypatch, capsys, prompt_environment,
+                                                                              manifest):
     monkeypatch.delenv("AZURE_SEARCH_ENDPOINT")
-    monkeypatch.setenv("AI_GATEWAY_MCP_KB_ROUTES", HR_ROUTES)
+    monkeypatch.setenv("AI_GATEWAY_MCP_KB_ROUTES", CLAIMS_ROUTES)
     monkeypatch.setenv("AI_GATEWAY_MCP_REQUIRED", "true")
     forbid_foundry(monkeypatch)
     asyncio.run(agents_script.main(dry_run=True))
     out = capsys.readouterr().out
     assert "Gateway MCP: 1 knowledge-base route(s); knowledge bases without a route are an error" in out
-    assert "northwind-hr-assistant (model=gpt-4o; tools=mcp:nw-hr-kb@ai-gateway)" in out
+    assert SEARCH_AGENT + " (model=gpt-5.4; tools=mcp:nw-claims-kb@ai-gateway)" in out
     assert "@direct" not in out and "nothing was sent to Foundry" in out
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_required_mcp_without_a_route_fails_before_anything_is_created(monkeypatch, capsys, recorded_run, dry_run):
+def test_required_mcp_without_a_route_fails_before_anything_is_created(monkeypatch, capsys, manifest, recorded_run,
+                                                                       dry_run):
     monkeypatch.setenv("AI_GATEWAY_MCP_REQUIRED", "true")
     with pytest.raises(SystemExit) as raised:
         asyncio.run(agents_script.main(dry_run=dry_run))
     assert raised.value.code == 1
-    assert "no route for knowledge base 'nw-hr-kb'" in capsys.readouterr().out
-    # The agents without a knowledge base are not the problem; the HR assistants never reach Foundry.
-    assert not any(name.startswith("northwind-hr-assistant") for name in recorded_run)
+    assert "no route for knowledge base 'nw-claims-kb'" in capsys.readouterr().out
+    # The agents without a knowledge base are not the problem; the one that needs a route never reaches Foundry.
+    assert SEARCH_AGENT not in recorded_run
 
 
 def test_malformed_mcp_settings_exit_before_any_agent_is_created(monkeypatch, capsys, prompt_environment):
@@ -643,7 +639,7 @@ class RecordingToolAgents(RecordingAgents):
         self.sink[agent_name] = (self.endpoint, definition.model, definition.tools)
 
 
-def test_routed_run_hands_the_gateway_tool_to_the_prompt_agent_definition(monkeypatch, prompt_environment):
+def test_routed_run_hands_the_gateway_tool_to_the_prompt_agent_definition(monkeypatch, prompt_environment, manifest):
     created = {}
 
     class Project:
@@ -659,11 +655,10 @@ def test_routed_run_hands_the_gateway_tool_to_the_prompt_agent_definition(monkey
     monkeypatch.setenv("FOUNDRY_PROJECT_ENDPOINTS", json.dumps(DEPARTMENT_ENDPOINTS))
     monkeypatch.setattr(agents_script, "AIProjectClient", Project)
     monkeypatch.setattr(agents_script, "_get_credential", lambda: object())
-    monkeypatch.setenv("AI_GATEWAY_MCP_KB_ROUTES", HR_ROUTES)
+    monkeypatch.setenv("AI_GATEWAY_MCP_KB_ROUTES", CLAIMS_ROUTES)
     asyncio.run(agents_script.main())
-    [tool] = created["northwind-hr-assistant"][2]
-    assert tool["server_url"] == HR_TOOLSERVER
-    assert tool["project_connection_id"] == "nw-hr-kb-gw"
+    [tool] = created[SEARCH_AGENT][2]
+    assert tool["server_url"] == CLAIMS_TOOLSERVER
+    assert tool["project_connection_id"] == "nw-claims-kb-gw"
     assert tool["allowed_tools"] == ["knowledge_knowledge_base_retrieve"]
-    assert created["northwind-hr-assistant"][1] == "gpt-4o"
-
+    assert created[SEARCH_AGENT][1] == "gpt-5.4"

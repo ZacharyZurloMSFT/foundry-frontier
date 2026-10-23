@@ -88,8 +88,8 @@ async def enqueue_hitl(workflow_id: str, kind: str, payload: dict) -> dict:
 
 async def list_hitl_pending(limit: int = 50, workflow_id: str | None = None) -> list[dict]:
     c = await _container("hitl_queue")
-    query = "SELECT TOP @lim * FROM c WHERE c.status = 'pending'"
-    params = [{"name": "@lim", "value": limit}]
+    query = "SELECT TOP @lim * FROM c WHERE c.status = 'pending' AND c.kind = @kind"
+    params = [{"name": "@lim", "value": limit}, {"name": "@kind", "value": ACTION_KIND}]
     options = {}
     if workflow_id:
         query += " AND c.workflowId = @workflow"
@@ -106,14 +106,15 @@ async def list_hitl_pending(limit: int = 50, workflow_id: str | None = None) -> 
 
 
 async def list_hitl_resolved(limit: int = 50) -> list[dict]:
-    """Approved or rejected work orders, most-recent first — powers the
-    Work Orders tab."""
+    """Approved or rejected claim-action drafts, most-recent first — powers the
+    reviewed-drafts tab. Items of any other kind (pre-insurance records) are
+    never returned."""
     c = await _container("hitl_queue")
     query = (
-        "SELECT TOP @lim * FROM c WHERE c.status IN ('approved', 'rejected') "
+        "SELECT TOP @lim * FROM c WHERE c.status IN ('approved', 'rejected') AND c.kind = @kind "
         "ORDER BY c.resolvedAt DESC"
     )
-    params = [{"name": "@lim", "value": limit}]
+    params = [{"name": "@lim", "value": limit}, {"name": "@kind", "value": ACTION_KIND}]
     items: list[dict] = []
     async for it in c.query_items(query=query, parameters=params):
         items.append(it)
@@ -125,40 +126,37 @@ async def resolve_hitl(hitl_id: str, workflow_id: str, decision: str, note: str 
         raise ValueError("Decision must be approve or reject")
     c = await _container("hitl_queue")
     item = await c.read_item(item=hitl_id, partition_key=workflow_id)
+    if item.get("kind") != ACTION_KIND:
+        raise ValueError("Only insurance claim-action drafts can be reviewed.")
     target = "approved" if decision == "approve" else "rejected"
-    harness = workflow_id.startswith("wf-harness-")
-    insurance = item.get("kind") == ACTION_KIND
-    if insurance:
-        ClaimActionDraft.model_validate(item["payload"])
-        item["execution_status"] = "not_executed"
-        item["review_scope"] = "draft_only"
-    if (harness or insurance) and item["status"] != "pending":
+    ClaimActionDraft.model_validate(item["payload"])
+    item["execution_status"] = "not_executed"
+    item["review_scope"] = "draft_only"
+    if item["status"] != "pending":
         if item["status"] == target:
             return {**item, "_decision_replayed": True}
         raise ValueError("This draft has already been decided.")
-    item["status"] = "approved" if decision == "approve" else "rejected"
+    item["status"] = target
     item["decision"] = decision
     item["note"] = note
     item["resolvedAt"] = _now()
-    if harness or insurance:
-        try:
-            return await c.replace_item(hitl_id, item, etag=item["_etag"],
-                                        match_condition=MatchConditions.IfNotModified)
-        except CosmosHttpResponseError as exc:
-            if exc.status_code != 412:
-                raise
-            winner = await c.read_item(hitl_id, partition_key=workflow_id)
-            if winner["status"] == target:
-                return {**winner, "_decision_replayed": True}
-            raise ValueError("A conflicting approval decision was saved.") from exc
-    return await c.upsert_item(item)
+    try:
+        return await c.replace_item(hitl_id, item, etag=item["_etag"],
+                                    match_condition=MatchConditions.IfNotModified)
+    except CosmosHttpResponseError as exc:
+        if exc.status_code != 412:
+            raise
+        winner = await c.read_item(hitl_id, partition_key=workflow_id)
+        if winner["status"] == target:
+            return {**winner, "_decision_replayed": True}
+        raise ValueError("A conflicting approval decision was saved.") from exc
 
 
 async def delete_hitl(hitl_id: str, workflow_id: str) -> None:
-    """Hard-delete a HITL queue item. Used by the Work Orders tab so
-    resolved dispatches can be pruned once they're no longer relevant to
-    the demo (post-dispatch, or accidental duplicates). Idempotent —
-    a missing row is treated as already-deleted."""
+    """Hard-delete a HITL queue item. Used by the reviewed-drafts tab so
+    resolved drafts can be pruned once they're no longer relevant to the
+    demo (or are accidental duplicates). Idempotent — a missing row is
+    treated as already-deleted."""
     c = await _container("hitl_queue")
     try:
         await c.delete_item(item=hitl_id, partition_key=workflow_id)

@@ -1,10 +1,10 @@
-"""Thin client to the Northwind orchestrator — a Foundry hosted agent.
+"""Thin client to the Northwind insurance orchestrator — a Foundry hosted agent.
 
-The heavy multi-agent lifting (manager + triage/order_lookup/policy_lookup/
-resolution_draft prompt agents) is done inside the hosted agent itself
-(`agents/orchestrator/main.py`). This module only:
+The heavy multi-agent lifting (manager + triage / policy_claim_lookup /
+policy_lookup / claim_action_draft specialists) is done inside the hosted
+agents themselves (`agents/hosted/`). This module only:
 
-  1. Resolves the orchestrator agent name (env var, defaulting to the name).
+  1. Resolves the insurance orchestrator agent name from configuration.
   2. Invokes hosted agents through their dedicated OpenAI Responses endpoints.
      Prompt agents use the project endpoint with ``agent_reference``.
      Both chain ``previous_response_id`` per session for multi-turn continuity.
@@ -51,53 +51,24 @@ def _async_credential():
     return AsyncDefaultAzureCredential()
 
 
-_cached_agent_name: str | None = None
 _previous_response_by_key: dict[tuple[str, str, str], str] = {}
 
 
 # ── Sub-agent handoff map ─────────────────────────────────────────────────
-# The manager exposes each Foundry prompt agent as a function tool (see
-# agents/orchestrator/main.py :: _make_prompt_tool). When we see a tool_call
-# for one of these names, stamp the outgoing event with `to_agent` so the
-# front-end can render the handoff visually.
+# The manager exposes each insurance specialist as a function tool. When we
+# see a tool_call for one of these names, stamp the outgoing event with
+# `to_agent` so the front-end can render the handoff visually.
 _MANAGER_TOOL_TO_AGENT: dict[str, str] = {
-    "triage":            "northwind-triage",
-    "order_lookup":      "northwind-order-lookup",
-    "policy_lookup":     "northwind-policy-lookup",
-    "resolution_draft":  "northwind-resolution-draft",
+    "triage": "northwind-insurance-triage",
+    "policy_claim_lookup": "northwind-insurance-policy-claim-lookup",
+    "policy_lookup": "northwind-insurance-policy-wording",
+    "claim_action_draft": "northwind-insurance-claim-action-draft",
 }
 
 
 def _resolve_to_agent(tool_name: str) -> str | None:
-    """Map a manager-side tool name to the Foundry agent name it delegates
-    to. Env-var overrides (FOUNDRY_AGENT_*_ID) take precedence so a canary
-    rollout that renames an agent still gets the right label.
-
-    NOTE ON LEGACY ENV VARS: the env var names are still
-    FOUNDRY_AGENT_TECH_LOOKUP_ID and FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID
-    because they're wired through Bicep + azd env. Semantically they now
-    point at the order-lookup and resolution-draft agents.
-    """
-    if get_settings().business_domain == "insurance":
-        return {
-            "triage": "northwind-insurance-triage",
-            "policy_claim_lookup": "northwind-insurance-policy-claim-lookup",
-            "policy_lookup": "northwind-insurance-policy-wording",
-            "claim_action_draft": "northwind-insurance-claim-action-draft",
-        }.get(tool_name)
-    default = _MANAGER_TOOL_TO_AGENT.get(tool_name)
-    if not default:
-        return None
-    env_key = {
-        "triage":           "FOUNDRY_AGENT_TRIAGE_ID",
-        "order_lookup":     "FOUNDRY_AGENT_TECH_LOOKUP_ID",
-        "policy_lookup":    "FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID",
-        "resolution_draft": "FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID",
-    }.get(tool_name)
-    if env_key:
-        import os
-        return os.environ.get(env_key) or default
-    return default
+    """Map a manager-side tool name to the Foundry agent name it delegates to."""
+    return _MANAGER_TOOL_TO_AGENT.get(tool_name)
 
 
 def _project_client(project_endpoint: str | None = None) -> AIProjectClient:
@@ -140,7 +111,7 @@ def _openai_client_kwargs(
     """
     s = get_settings()
     kwargs: dict[str, Any] = {}
-    is_hosted = s.order_agents_hosted if hosted is None else hosted
+    is_hosted = s.hosted_agents_enabled if hosted is None else hosted
     if is_hosted:
         kwargs["agent_name"] = agent_name
     if s.foundry_api_key and not identity_only:
@@ -150,18 +121,11 @@ def _openai_client_kwargs(
 
 
 async def resolve_orchestrator_agent_id() -> str:
-    """The Foundry agent id equals the agent name; the env var override lets
-    ops point at a different name (e.g., during a canary rollout)."""
-    global _cached_agent_name
-    if get_settings().business_domain == "insurance":
-        from .insurance import require_insurance_runtime
-        require_insurance_runtime()
-        return get_settings().insurance_orchestrator_agent_id
-    if _cached_agent_name:
-        return _cached_agent_name
-    s = get_settings()
-    _cached_agent_name = s.orchestrator_agent_id or "northwind-orchestrator"
-    return _cached_agent_name
+    """The Foundry agent id equals the agent name; it must be an explicitly
+    configured insurance orchestrator and the runtime must be verified."""
+    from .insurance import require_insurance_runtime
+    require_insurance_runtime()
+    return get_settings().insurance_orchestrator_agent_id
 
 
 def _agent_reference(agent_name: str) -> dict[str, str]:
@@ -190,11 +154,10 @@ async def invoke_prompt_agent_once(agent_name: str, prompt: str, correlation: st
                                   *, mcp_tool: dict | None = None,
                                   workflow_id: str | None = None) -> Any:
     """Stateless, identity-authenticated specialist call for application tools."""
-    if get_settings().business_domain == "insurance":
-        from .insurance import require_insurance_runtime
-        require_insurance_runtime()
-        if not agent_name.startswith("northwind-insurance-"):
-            raise ValueError("Retail agents cannot serve insurance inference.")
+    from .insurance import require_insurance_runtime
+    require_insurance_runtime()
+    if not agent_name.startswith("northwind-insurance-"):
+        raise ValueError("Only insurance agents can serve inference.")
     async with _project_client() as project:
         client_kwargs = _openai_client_kwargs(agent_name, identity_only=True)
         async with project.get_openai_client(**client_kwargs) as client:
@@ -208,7 +171,7 @@ async def invoke_prompt_agent_once(agent_name: str, prompt: str, correlation: st
                    {"extra_body": {"agent_reference": _agent_reference(agent_name)}}),
                 **({"metadata": {"workflow_id": workflow_id}} if workflow_id else {}),
                 **({"tools": [mcp_tool]} if mcp_tool is not None
-                   and not get_settings().order_agents_hosted else {}),
+                   and not get_settings().hosted_agents_enabled else {}),
             )
     if response.status != "completed":
         raise RuntimeError(f"Specialist response did not complete: {response.status}")
@@ -332,13 +295,12 @@ async def run_agent_turn(
     live in their own project — see ``company.foundry_project_endpoint_for``).
     Defaults to the flagship project.
     ``hosted=False`` keeps department prompt agents on the project protocol,
-    even when the flagship fleet uses ``ORDER_AGENTS_HOSTED=true``.
+    even when the flagship fleet uses ``HOSTED_AGENTS_ENABLED=true``.
     """
-    if get_settings().business_domain == "insurance":
-        from .insurance import require_insurance_runtime
-        require_insurance_runtime()
-        if not agent_name.startswith("northwind-insurance-"):
-            raise ValueError("Retail agents cannot serve insurance inference.")
+    from .insurance import require_insurance_runtime
+    require_insurance_runtime()
+    if not agent_name.startswith("northwind-insurance-"):
+        raise ValueError("Only insurance agents can serve inference.")
     with tracer.start_as_current_span("orchestrator_client.run_agent_turn") as span:
         span.set_attribute("session_id", session_id)
         span.set_attribute("agent_name", agent_name)
@@ -481,13 +443,8 @@ async def run_turn(session_id: str, user_message: str) -> AsyncIterator[dict[str
     messages and workflow state to Cosmos — used by the multi-agent Assistant
     tab where cross-session history matters.
     """
-    workflow_id = f"wf-insurance-{session_id}" if get_settings().business_domain == "insurance" else f"wf-{session_id}"
-    manager_message = (
-        f"[workflow_id: {workflow_id}]\n"
-        f"{user_message}\n\n"
-        "If you call resolution_draft, require it to pass the workflow_id "
-        f"exactly as {workflow_id}; do not derive or invent another value."
-    )
+    workflow_id = f"wf-insurance-{session_id}"
+    manager_message = f"[workflow_id: {workflow_id}]\n{user_message}"
     with tracer.start_as_current_span("orchestrator_client.run_turn") as span:
         span.set_attribute("session_id", session_id)
         span.set_attribute("workflow_id", workflow_id)
@@ -500,7 +457,7 @@ async def run_turn(session_id: str, user_message: str) -> AsyncIterator[dict[str
             )}
             return
 
-        project_name = get_settings().order_project_name
+        project_name = get_settings().insurance_project_name
         await append_message(session_id, "user", user_message,
                              meta={"foundry_project": project_name})
         await save_workflow(workflow_id, {"sessionId": session_id, "state": "running",
@@ -524,17 +481,3 @@ async def run_turn(session_id: str, user_message: str) -> AsyncIterator[dict[str
                                  meta={"foundry_project": project_name})
         await save_workflow(workflow_id, {"sessionId": session_id, "state": "failed" if failed else "idle",
                                           "foundry_project": project_name})
-
-
-async def ask_single_turn(question: str) -> AsyncIterator[str]:
-    """Backwards-compatible single-turn text stream against the policy-lookup
-    prompt agent. Kept for the legacy ``/qa`` route; new callers should use
-    :func:`run_agent_turn` directly.
-    """
-    s = get_settings()
-    agent_name = ("northwind-insurance-policy-wording" if s.business_domain == "insurance"
-                  else s.manual_agent_id or "northwind-policy-lookup")
-    # Use a stable session id so repeated /qa calls share a lightweight thread.
-    async for event in run_agent_turn("qa-legacy", question, agent_name):
-        if event.get("kind") == "assistant_delta" and event.get("text"):
-            yield event["text"]

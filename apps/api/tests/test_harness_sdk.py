@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
-from app.harness import runtime, tools, insurance_tools
+from app.harness import insurance_tools, runtime
 from app.harness.store import RunStore
 from app.settings import Settings
 
@@ -16,12 +16,11 @@ pytestmark = pytest.mark.skipif(os.environ.get("TEST_COPILOT_RUNTIME") != "1",
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["retail", "insurance"])
-async def test_real_sdk_calls_only_registered_tools_and_refreshes_tokens(monkeypatch, domain):
+async def test_real_sdk_calls_only_registered_tools_and_refreshes_tokens(monkeypatch):
     requests = []
-    expected_names = insurance_tools.NAMES if domain == "insurance" else tools.NAMES
-    selected_tool = "policy_claim_lookup" if domain == "insurance" else "triage"
-    final_text = "Claim evidence retrieved." if domain == "insurance" else "Order classified."
+    expected_names = insurance_tools.NAMES
+    selected_tool = "policy_claim_lookup"
+    final_text = "Claim evidence retrieved."
 
     async def model(request):
         body = await request.json()
@@ -37,8 +36,7 @@ async def test_real_sdk_calls_only_registered_tools_and_refreshes_tokens(monkeyp
                     if candidate.get("name", "").endswith(selected_tool):
                         function = {"id": "fc_1", "type": "function_call", "status": "completed",
                                     "call_id": "call_1", "name": candidate["name"],
-                                    "arguments": ('{"claim_id":"CLM-2001"}' if domain == "insurance"
-                                                  else '{"prompt":"Classify this order-status request."}')}
+                                    "arguments": '{"claim_id":"CLM-2001"}'}
                         if tool.get("type") == "namespace":
                             function["namespace"] = tool["name"]
             assert set(names) == set(expected_names), names
@@ -90,12 +88,11 @@ async def test_real_sdk_calls_only_registered_tools_and_refreshes_tokens(monkeyp
     await server.setup()
     await web.TCPSite(server, "127.0.0.1", 0).start()
     settings = Settings(_env_file=None, COPILOT_HARNESS_TIMEOUT_SECONDS=30,
-                        NORTHWIND_BUSINESS_DOMAIN=domain,
                         FOUNDRY_PROJECT_ENDPOINT=f"http://127.0.0.1:{server.addresses[0][1]}/api/projects/northwind")
     monkeypatch.setattr(runtime, "get_settings", lambda: settings)
     specialist = AsyncMock(return_value=SimpleNamespace(
-        status="completed", output_text="Intent: order status", output=[], usage=None))
-    monkeypatch.setattr(tools, "invoke_prompt_agent_once", specialist)
+        status="completed", output_text="Intent: claim status", output=[], usage=None))
+    monkeypatch.setattr(insurance_tools, "invoke_prompt_agent_once", specialist)
     r = runtime.HarnessRuntime()
     try:
         await r.start()
@@ -104,13 +101,11 @@ async def test_real_sdk_calls_only_registered_tools_and_refreshes_tokens(monkeyp
                                      close=AsyncMock())
         r.credential = credential
         events = [e async for e in r.run("harness-local-contract", "wf-harness-local-contract",
-                                         "Retrieve CLM-2001." if domain == "insurance" else "Classify my order request.",
-                                         RunStore())]
+                                         "Retrieve CLM-2001.", RunStore())]
         assert events[-1].text.startswith(final_text)
-        if domain == "insurance":
-            assert "NW-AUTO-WA-2026-v1#collision" in events[-1].text
-            assert "No claim decision" in events[-1].text
-        assert specialist.await_count == (0 if domain == "insurance" else 1)
+        assert "NW-AUTO-WA-2026-v1#collision" in events[-1].text
+        assert "No claim decision" in events[-1].text
+        assert specialist.await_count == 0
         assert any(e.kind == "tool_result" and e.tool == selected_tool for e in events)
         assert len(requests) == 2
         assert all(path == "/api/projects/northwind/openai/v1/responses" for path, _, _ in requests)

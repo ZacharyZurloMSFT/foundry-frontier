@@ -200,21 +200,17 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
     assert review["endpoints"][0]["mcp"]["url"] == "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
     assert review["expectedTools"] == ["review_draft_claim_action"]
     assert set(manifest["observed"]) == {
-        "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge",
-        "northwind-hr-knowledge", "northwind-orders-knowledge"}
-    assert set(manifest["stale"]) == {"northwind-order-lookup", "northwind-resolutions"}
-    assert manifest["deferred"] == {}
+        "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge"}
+    assert manifest["stale"] == {} and manifest["deferred"] == {}
 
 
 def test_review_server_is_registered_but_documents_that_the_gateway_cannot_forward_its_headers(manifest):
     description = manifest["toolServers"][REVIEW]["description"]
-    assert "x-orders-workflow" in description and "does not forward client headers" in description
+    assert "x-workflow-id" in description and "deprecated x-orders-workflow" in description
+    assert "does not forward client headers" in description
     assert "rejected by design" in description and "apim-northwind" in description
     concern = manifest["observed"]["northwind-api"]["concern"].lower()
     assert "decide" in concern and "delete" in concern and "never agent tools" in concern
-    assert all(entry["retiredHostFragment"] == "bluecliff" for entry in manifest["stale"].values())
-    # The removed retail servers stay listed so a re-registration of the retired hosts is flagged again.
-    assert all("Removed" in entry["decision"] for entry in manifest["stale"].values())
 
 
 def test_manifest_models_match_the_verified_registrations(manifest):
@@ -438,7 +434,7 @@ def _change_failure_mode(properties):
 
 
 def _change_namespace(properties):
-    properties["endpoints"][0]["namespace"] = "orders"
+    properties["endpoints"][0]["namespace"] = "claims"
 
 
 def _change_url(properties):
@@ -540,6 +536,13 @@ def test_plan_is_deterministic_and_changes_with_the_manifest(manifest):
 def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manifest):
     manifest = copy.deepcopy(manifest)
     manifest["deferred"]["northwind-deferred-example"] = {"reason": "Deliberately not registered."}
+    # The mechanism stays covered although the repository manifest has no tombstones any more.
+    manifest["stale"]["northwind-retired-example"] = {
+        "reason": "Backend lived on a retired Container Apps domain.", "retiredHostFragment": "bluecliff",
+        "decision": "Removed from the gateway; listed so the plan flags a re-registration of the retired host."}
+    manifest["stale"]["northwind-moved-example"] = {
+        "reason": "Backend lived on a retired Container Apps domain.", "retiredHostFragment": "bluecliff",
+        "decision": "Removed from the gateway; listed so the plan flags a re-registration of the retired host."}
     gateway = FakeGateway(manifest)
     api = copy.deepcopy(live_item(manifest, LOOKUP))
     api["name"] = "northwind-api"
@@ -547,13 +550,13 @@ def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manife
                                        "openApi": {"specSource": {"type": "inline"}}, "required": True}]
     gateway.servers["northwind-api"] = api
     stale = copy.deepcopy(live_item(manifest, LOOKUP))
-    stale["name"] = "northwind-order-lookup"
-    stale["properties"]["endpoints"][0]["mcp"]["url"] = "https://ca-mcp-tech-lookup.bluecliff-1976581f.canadacentral.azurecontainerapps.io/mcp/"
-    gateway.servers["northwind-order-lookup"] = stale
+    stale["name"] = "northwind-retired-example"
+    stale["properties"]["endpoints"][0]["mcp"]["url"] = "https://ca-retired.bluecliff-1976581f.canadacentral.azurecontainerapps.io/mcp/"
+    gateway.servers["northwind-retired-example"] = stale
     fixed = copy.deepcopy(stale)
-    fixed["name"] = "northwind-resolutions"
+    fixed["name"] = "northwind-moved-example"
     fixed["properties"]["endpoints"][0]["mcp"]["url"] = "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"
-    gateway.servers["northwind-resolutions"] = fixed
+    gateway.servers["northwind-moved-example"] = fixed
     deferred = copy.deepcopy(stale)
     deferred["name"] = "northwind-deferred-example"
     gateway.servers["northwind-deferred-example"] = deferred
@@ -568,10 +571,10 @@ def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manife
     plan, _ = release.build_plan(gateway, manifest)
     observed = {row["name"]: row for row in plan["observed"]}
     assert observed["northwind-api"]["present"] and "decide" in observed["northwind-api"]["concern"]
-    assert not observed["northwind-hr-knowledge"]["present"]
+    assert not observed["northwind-claims-knowledge"]["present"]
     stale_rows = {row["name"]: row for row in plan["stale"]}
-    assert stale_rows["northwind-order-lookup"]["status"] == "needs-human-decision"
-    assert stale_rows["northwind-resolutions"]["status"] == "backend-changed-review-manifest"
+    assert stale_rows["northwind-retired-example"]["status"] == "needs-human-decision"
+    assert stale_rows["northwind-moved-example"]["status"] == "backend-changed-review-manifest"
     assert plan["deferred"][0]["status"] == "present-unexpectedly"
     assert plan["unlisted"] == ["mystery-server"]
     problems = {row["registration"]: row["problems"] for row in plan["models"]["problems"]}
@@ -763,16 +766,22 @@ def test_apply_never_overwrites_an_existing_receipt_and_checks_before_writing(ma
 
 
 def test_apply_leaves_observed_stale_and_unlisted_servers_and_models_untouched(manifest, tmp_path):
+    with_stale = copy.deepcopy(manifest)
+    with_stale["stale"]["northwind-retired-example"] = {
+        "reason": "Backend lived on a retired Container Apps domain.", "retiredHostFragment": "bluecliff",
+        "decision": "Removed from the gateway; listed so the plan flags a re-registration of the retired host."}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(with_stale), encoding="utf-8")
     gateway = FakeGateway(manifest)
-    for name in ("northwind-api", "northwind-order-lookup", "northwind-resolutions",
-                 "northwind-hr-knowledge", "mystery-server"):
+    for name in ("northwind-api", "northwind-claims-knowledge", "northwind-retired-example", "mystery-server"):
         item = copy.deepcopy(live_item(manifest, LOOKUP))
         item["name"] = name
         gateway.servers[name] = item
     before = copy.deepcopy({name: gateway.servers[name] for name in gateway.servers})
     models_before = copy.deepcopy(gateway.models)
-    plan_path = make_plan(gateway, tmp_path)
-    assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ=ENVIRON) == 0
+    plan_path = make_plan(gateway, tmp_path, "--manifest", str(manifest_path))
+    assert run(gateway, "apply", "--plan", str(plan_path), "--manifest", str(manifest_path), "--yes",
+               environ=ENVIRON) == 0
     assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE, REVIEW}
     for name, item in before.items():
         assert gateway.servers[name] == item
@@ -970,16 +979,16 @@ def test_verify_reports_transport_and_jsonrpc_errors_per_server(manifest, capsys
 
 def test_verify_can_flag_forbidden_tools_on_observed_servers(manifest, capsys):
     gateway = FakeGateway(manifest)
-    gateway.mcp["northwind-api"] = {"tools": ["api_list_orders", "api_decide_approval", "api_delete_order"],
+    gateway.mcp["northwind-api"] = {"tools": ["api_list_claims", "api_decide_approval", "api_delete_claim"],
                                     "mode": "json", "page_size": 100}
-    gateway.mcp["northwind-hr-knowledge"] = {"tools": ["knowledge_knowledge_base_retrieve"], "mode": "sse",
-                                             "page_size": 100}
+    gateway.mcp["northwind-contact-center-knowledge"] = {"tools": ["knowledge_knowledge_base_retrieve"], "mode": "sse",
+                                                         "page_size": 100}
     code, result = verify(gateway, capsys, "--include-observed")
     observed = {row["name"]: row for row in result["observed"]}
     assert code == 0 and result["ok"] is True
-    assert observed["northwind-api"]["governanceFindings"] == ["api_decide_approval", "api_delete_order"]
+    assert observed["northwind-api"]["governanceFindings"] == ["api_decide_approval", "api_delete_claim"]
     assert observed["northwind-api"]["toolCount"] == 3
-    assert observed["northwind-hr-knowledge"]["reachable"] is True
+    assert observed["northwind-contact-center-knowledge"]["reachable"] is True
     assert observed["northwind-claims-knowledge"]["reachable"] is False
 
 

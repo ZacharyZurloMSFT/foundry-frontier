@@ -73,7 +73,4 @@ resource devSvcRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!
 
 output name string = search.name
 output endpoint string = 'https://${search.name}.search.windows.net'
-output indexName string = 'northwind-knowledge'
-output knowledgeSourceName string = 'northwind-knowledge-ks'
-output knowledgeBaseName string = 'northwind-kb'
 output principalId string = search.identity.principalId

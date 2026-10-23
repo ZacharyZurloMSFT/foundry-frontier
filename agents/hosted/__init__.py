@@ -1,1 +1,1 @@
-"""Shared, role-configured Order Concierge runtime."""
+"""Shared, role-configured Northwind Insurance claims runtime."""

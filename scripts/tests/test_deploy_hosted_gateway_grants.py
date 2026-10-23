@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-SPEC = importlib.util.spec_from_file_location("orders_hosted_deploy_gateway", SCRIPTS / "deploy-orders-hosted.py")
+SPEC = importlib.util.spec_from_file_location("hosted_agents_deploy_gateway", SCRIPTS / "deploy-hosted-agents.py")
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
 common = importlib.import_module("ai_gateway_common")
@@ -29,17 +29,23 @@ CONSUMER = "eed3b665-ab3a-47b6-8f48-c9382fb1dad6"
 MODELS = "a6b68e3d-a1f0-4c60-8678-237c050cf4ea"
 TOOLS = "dce03f8d-857f-4e40-a90d-67770fa6ecd2"
 GATEWAY_SETTINGS = {
-    "ORDERS_MODEL_GATEWAY_ENDPOINT": "https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/",
-    "ORDERS_MODEL_GATEWAY_MODEL": "aisvc-zurlo-northwind/gpt-4o",
-    "ORDERS_MODEL_GATEWAY_DEPLOYMENT": "gpt-4o",
+    "AGENT_MODEL_GATEWAY_ENDPOINT": "https://ai-gateway-northwind.azure-api.net/default/models/openai/v1/",
+    "AGENT_MODEL_GATEWAY_MODEL": "aisvc-zurlo-northwind/gpt-4o",
+    "AGENT_MODEL_GATEWAY_DEPLOYMENT": "gpt-4o",
 }
-MCP_ROUTES = json.dumps({
-    "orderlookup": {"url": "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-lookup/mcp",
-                    "tool_prefix": "lookup_", "connection": "nw-insurance-claims-gateway-mcp"},
-    "policylookup": {"url": "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-knowledge/mcp",
-                     "tool_prefix": "knowledge_", "connection": "nw-insurance-claims-gateway-kb"},
-})
-LEGACY = [(ACCOUNT, OPENAI), (PROJECT, FOUNDRY)]
+DEPRECATED_GATEWAY_SETTINGS = {
+    "ORDERS_MODEL_GATEWAY_ENDPOINT": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_ENDPOINT"],
+    "ORDERS_MODEL_GATEWAY_MODEL": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_MODEL"],
+    "ORDERS_MODEL_GATEWAY_DEPLOYMENT": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_DEPLOYMENT"],
+}
+LOOKUP_ROUTE = {"url": "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-lookup/mcp",
+                "tool_prefix": "lookup_", "connection": "nw-insurance-claims-gateway-mcp"}
+KNOWLEDGE_ROUTE = {
+    "url": "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-knowledge/mcp",
+    "tool_prefix": "knowledge_", "connection": "nw-insurance-claims-gateway-kb"}
+MCP_ROUTES = json.dumps({"policy-claim-lookup": LOOKUP_ROUTE, "policy-wording": KNOWLEDGE_ROUTE})
+DEPRECATED_MCP_ROUTES = json.dumps({"orderlookup": LOOKUP_ROUTE, "policylookup": KNOWLEDGE_ROUTE})
+DIRECT = [(ACCOUNT, OPENAI), (PROJECT, FOUNDRY)]
 
 
 def test_role_ids_and_gateway_resource_match_the_shared_contract():
@@ -57,12 +63,12 @@ def test_role_ids_and_gateway_resource_match_the_shared_contract():
     {"AI_GATEWAY_REQUIRED": "off", "AI_GATEWAY_MCP_REQUIRED": " OFF "},
 ])
 @pytest.mark.parametrize("role", list(module.ROLES))
-def test_without_gateway_flags_the_grants_are_the_legacy_sequence(environment, role):
-    expected = LEGACY + ([(PROJECT, CONSUMER)] if role == "manager" else [])
+def test_without_gateway_flags_the_grants_are_the_direct_sequence(environment, role):
+    expected = DIRECT + ([(PROJECT, CONSUMER)] if role == "orchestrator" else [])
     assert module.runtime_grants(environment, role, PROJECT, ACCOUNT) == expected
 
 
-def test_legacy_grants_never_need_a_parseable_subscription():
+def test_direct_grants_never_need_a_parseable_subscription():
     assert module.runtime_grants({}, "triage", "p", "a") == [("a", OPENAI), ("p", FOUNDRY)]
 
 
@@ -70,13 +76,13 @@ def test_legacy_grants_never_need_a_parseable_subscription():
 @pytest.mark.parametrize("role", list(module.ROLES))
 def test_required_models_replace_the_account_openai_grant_with_models_user_on_the_gateway(flag, role):
     grants = module.runtime_grants({"AI_GATEWAY_REQUIRED": flag}, role, PROJECT, ACCOUNT)
-    expected = [(GATEWAY, MODELS), (PROJECT, FOUNDRY)] + ([(PROJECT, CONSUMER)] if role == "manager" else [])
+    expected = [(GATEWAY, MODELS), (PROJECT, FOUNDRY)] + ([(PROJECT, CONSUMER)] if role == "orchestrator" else [])
     assert grants == expected
     assert all(role_id != OPENAI for _, role_id in grants)
     assert all(role_id != TOOLS for _, role_id in grants)
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "policylookup"])
+@pytest.mark.parametrize("role", ["policy-claim-lookup", "policy-wording"])
 def test_required_mcp_grants_no_gateway_role_because_the_runtime_key_authenticates_it(role):
     environment = {"AI_GATEWAY_REQUIRED": "true", "AI_GATEWAY_MCP_REQUIRED": "true"}
     grants = module.runtime_grants(environment, role, PROJECT, ACCOUNT)
@@ -84,7 +90,7 @@ def test_required_mcp_grants_no_gateway_role_because_the_runtime_key_authenticat
     assert all(role_id != TOOLS for _, role_id in grants)
 
 
-@pytest.mark.parametrize("role", ["triage", "resolutiondraft", "manager"])
+@pytest.mark.parametrize("role", ["triage", "claim-action-draft", "orchestrator"])
 def test_required_mcp_does_not_touch_the_other_roles(role):
     environment = {"AI_GATEWAY_REQUIRED": "true", "AI_GATEWAY_MCP_REQUIRED": "true"}
     assert module.runtime_grants(environment, role, PROJECT, ACCOUNT) == module.runtime_grants(
@@ -94,8 +100,14 @@ def test_required_mcp_does_not_touch_the_other_roles(role):
 
 
 def test_mcp_alone_keeps_the_direct_model_grants_and_adds_nothing():
-    assert module.runtime_grants({"AI_GATEWAY_MCP_REQUIRED": "true"}, "orderlookup", PROJECT, ACCOUNT) == [
-        (ACCOUNT, OPENAI), (PROJECT, FOUNDRY)]
+    assert module.runtime_grants({"AI_GATEWAY_MCP_REQUIRED": "true"}, "policy-claim-lookup", PROJECT, ACCOUNT) == DIRECT
+
+
+@pytest.mark.parametrize("legacy,canonical", list(module.ROLE_ALIASES.items()))
+def test_deprecated_role_ids_receive_the_grants_of_their_canonical_role(legacy, canonical):
+    for environment in ({}, {"AI_GATEWAY_REQUIRED": "true"}, {"AI_GATEWAY_MCP_REQUIRED": "true"}):
+        assert module.runtime_grants(environment, legacy, PROJECT, ACCOUNT) == module.runtime_grants(
+            environment, canonical, PROJECT, ACCOUNT)
 
 
 def test_gateway_grants_need_a_subscription_scope_and_flags_must_not_be_typos():
@@ -119,26 +131,50 @@ def test_required_models_need_every_gateway_setting(missing, blank):
 
 
 def test_complete_gateway_settings_and_disabled_flags_validate():
-    module.validate_gateway_environment({"AI_GATEWAY_REQUIRED": "true", **GATEWAY_SETTINGS}, "manager")
-    module.validate_gateway_environment({}, "manager")
-    module.validate_gateway_environment({"AI_GATEWAY_REQUIRED": "false"}, "manager")
+    module.validate_gateway_environment({"AI_GATEWAY_REQUIRED": "true", **GATEWAY_SETTINGS}, "orchestrator")
+    module.validate_gateway_environment({"AI_GATEWAY_REQUIRED": "true", **DEPRECATED_GATEWAY_SETTINGS}, "orchestrator")
+    module.validate_gateway_environment({}, "orchestrator")
+    module.validate_gateway_environment({"AI_GATEWAY_REQUIRED": "false"}, "orchestrator")
 
 
-@pytest.mark.parametrize("role", ["orderlookup", "policylookup"])
+@pytest.mark.parametrize("canonical,deprecated", list(zip(GATEWAY_SETTINGS, DEPRECATED_GATEWAY_SETTINGS)))
+def test_a_blank_deprecated_gateway_setting_is_reported_by_its_canonical_name(canonical, deprecated):
+    assert module.SETTING_ALIASES[canonical] == (deprecated,)
+    environment = {"AI_GATEWAY_REQUIRED": "true", **DEPRECATED_GATEWAY_SETTINGS, deprecated: " "}
+    with pytest.raises(ValueError, match=canonical):
+        module.validate_gateway_environment(environment, "triage")
+
+
+@pytest.mark.parametrize("role", ["policy-claim-lookup", "policy-wording"])
 def test_required_mcp_needs_a_route_for_the_lookup_role(role):
-    environment = {"AI_GATEWAY_MCP_REQUIRED": "true", "ORDERS_MCP_GATEWAY": MCP_ROUTES}
+    environment = {"AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": MCP_ROUTES}
     module.validate_gateway_environment(environment, role)
     for bad in (None, "", "not json", "[]", "null", json.dumps({"triage": {"url": "https://x"}}),
                 json.dumps({role: {"tool_prefix": "x_"}}), json.dumps({role: "https://x"}),
-                json.dumps({role: {"url": "  "}}), {"orderlookup": {}}):
+                json.dumps({role: {"url": "  "}}), {"policy-claim-lookup": {}}):
         broken = {"AI_GATEWAY_MCP_REQUIRED": "true"}
         if bad is not None:
-            broken["ORDERS_MCP_GATEWAY"] = bad
-        with pytest.raises(ValueError, match="ORDERS_MCP_GATEWAY"):
+            broken["AGENT_MCP_GATEWAY"] = bad
+        with pytest.raises(ValueError, match="AGENT_MCP_GATEWAY"):
             module.validate_gateway_environment(broken, role)
 
 
-@pytest.mark.parametrize("role", ["triage", "resolutiondraft", "manager"])
+@pytest.mark.parametrize("role,legacy", [("policy-claim-lookup", "orderlookup"), ("policy-wording", "policylookup")])
+def test_the_deprecated_gateway_setting_and_role_keys_satisfy_the_mcp_requirement(role, legacy):
+    for routes in (DEPRECATED_MCP_ROUTES, json.dumps({legacy: LOOKUP_ROUTE})):
+        module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true", "ORDERS_MCP_GATEWAY": routes}, role)
+        module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": "",
+                                             "ORDERS_MCP_GATEWAY": routes}, role)
+    # The canonical setting wins when both are present, and a role named both ways is ambiguous.
+    with pytest.raises(ValueError, match=f"has no {role} entry"):
+        module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true", "ORDERS_MCP_GATEWAY": DEPRECATED_MCP_ROUTES,
+                                             "AGENT_MCP_GATEWAY": json.dumps({"triage": {"url": "https://x"}})}, role)
+    both = json.dumps({role: LOOKUP_ROUTE, legacy: LOOKUP_ROUTE})
+    with pytest.raises(ValueError, match="more than once"):
+        module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": both}, role)
+
+
+@pytest.mark.parametrize("role", ["triage", "claim-action-draft", "orchestrator"])
 def test_required_mcp_is_not_checked_for_roles_without_gateway_mcp(role):
     module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true"}, role)
 
@@ -146,8 +182,7 @@ def test_required_mcp_is_not_checked_for_roles_without_gateway_mcp(role):
 def deploy_arguments(tmp_path, role, *, apply, grant_runtime_roles=False):
     return SimpleNamespace(
         output=tmp_path / f"{role}.json", apply=apply, config=tmp_path / "config.json", role=role,
-        agent_name=None, business_domain="retail",
-        project_endpoint="https://existing.invalid/api/projects/northwind-orders",
+        project_endpoint="https://existing.invalid/api/projects/nw-insurance-claims",
         project_arm_id=PROJECT, tenant="tenant-fixture", credential_source="cli", subscription=SUBSCRIPTION,
         requirements=ROOT / "agents" / "hosted" / "requirements.txt", timeout=30,
         grant_runtime_roles=grant_runtime_roles,
@@ -156,7 +191,9 @@ def deploy_arguments(tmp_path, role, *, apply, grant_runtime_roles=False):
 
 def write_config(tmp_path, role, common_environment=None, role_environment=None):
     (tmp_path / "config.json").write_text(json.dumps({
-        "common": {"ORDERS_MODEL_DEPLOYMENT": "baseline", **(common_environment or {})},
+        "common": {"AGENT_MODEL_DEPLOYMENT": "baseline", "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
+                   "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
+                   "AGENT_KB_CONNECTION": "northwind-insurance-kb-mcp", **(common_environment or {})},
         role: role_environment or {},
     }), encoding="utf-8")
 
@@ -174,18 +211,19 @@ def no_azure(monkeypatch):
 def test_deploy_rejects_incomplete_gateway_settings_before_any_network_call(tmp_path, no_azure):
     write_config(tmp_path, "triage", {"AI_GATEWAY_REQUIRED": "true"})
     for apply in (False, True):
-        with pytest.raises(ValueError, match="ORDERS_MODEL_GATEWAY_ENDPOINT"):
+        with pytest.raises(ValueError, match="AGENT_MODEL_GATEWAY_ENDPOINT"):
             module.deploy(deploy_arguments(tmp_path, "triage", apply=apply, grant_runtime_roles=True))
 
 
 def test_deploy_rejects_a_lookup_role_without_its_mcp_route_before_any_network_call(tmp_path, no_azure):
-    write_config(tmp_path, "orderlookup", {"AI_GATEWAY_MCP_REQUIRED": "true"})
-    with pytest.raises(ValueError, match="no orderlookup entry|JSON object"):
-        module.deploy(deploy_arguments(tmp_path, "orderlookup", apply=True, grant_runtime_roles=True))
-    write_config(tmp_path, "orderlookup", {"AI_GATEWAY_MCP_REQUIRED": "true",
-                                           "ORDERS_MCP_GATEWAY": json.dumps({"policylookup": {"url": "https://x"}})})
-    with pytest.raises(ValueError, match="no orderlookup entry"):
-        module.deploy(deploy_arguments(tmp_path, "orderlookup", apply=False))
+    role = "policy-claim-lookup"
+    write_config(tmp_path, role, {"AI_GATEWAY_MCP_REQUIRED": "true"})
+    with pytest.raises(ValueError, match=f"no {role} entry|JSON object"):
+        module.deploy(deploy_arguments(tmp_path, role, apply=True, grant_runtime_roles=True))
+    write_config(tmp_path, role, {"AI_GATEWAY_MCP_REQUIRED": "true",
+                                  "AGENT_MCP_GATEWAY": json.dumps({"policy-wording": {"url": "https://x"}})})
+    with pytest.raises(ValueError, match=f"no {role} entry"):
+        module.deploy(deploy_arguments(tmp_path, role, apply=False))
 
 
 def test_dry_run_receipt_marks_gateway_routing_only_when_enabled(tmp_path, no_azure):
@@ -198,8 +236,8 @@ def test_dry_run_receipt_marks_gateway_routing_only_when_enabled(tmp_path, no_az
     report = json.loads(arguments.output.read_text())
     assert report["ai_gateway"] == {"models_required": True, "mcp_required": False}
     assert report["roles_modified"] is False
-    write_config(tmp_path, "orderlookup", {"AI_GATEWAY_MCP_REQUIRED": "true", "ORDERS_MCP_GATEWAY": MCP_ROUTES})
-    lookup = deploy_arguments(tmp_path, "orderlookup", apply=False)
+    write_config(tmp_path, "policy-claim-lookup", {"AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": MCP_ROUTES})
+    lookup = deploy_arguments(tmp_path, "policy-claim-lookup", apply=False)
     module.deploy(lookup)
     assert json.loads(lookup.output.read_text())["ai_gateway"] == {"models_required": False, "mcp_required": True}
     write_config(tmp_path, "triage", {"AI_GATEWAY_MCP_REQUIRED": "true"})
@@ -209,7 +247,6 @@ def test_dry_run_receipt_marks_gateway_routing_only_when_enabled(tmp_path, no_az
 
 def insurance_arguments(tmp_path, project, arm_project=None, *, apply=False):
     arguments = deploy_arguments(tmp_path, "triage", apply=apply)
-    arguments.business_domain = "insurance"
     arguments.project_endpoint = f"https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/{project}"
     arguments.project_arm_id = f"{ACCOUNT}/projects/{arm_project or project}"
     return arguments
@@ -299,7 +336,8 @@ class Http:
         return Response()
 
 
-def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, grant_runtime_roles=True):
+def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, grant_runtime_roles=True,
+                     document=None):
     agents, calls = Agents(), []
 
     class Project:
@@ -316,7 +354,10 @@ def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, gr
     monkeypatch.setattr(module, "deployment_credential", lambda source, tenant: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(module, "get_bearer_token_provider", lambda credential, scope: (lambda: "token-fixture"))
     monkeypatch.setattr(module.httpx, "Client", lambda **kwargs: Http(calls))
-    write_config(tmp_path, role, common_environment)
+    if document is None:
+        write_config(tmp_path, role, common_environment)
+    else:
+        (tmp_path / "config.json").write_text(json.dumps(document), encoding="utf-8")
     arguments = deploy_arguments(tmp_path, role, apply=True, grant_runtime_roles=grant_runtime_roles)
     module.deploy(arguments)
     return agents, calls, json.loads(arguments.output.read_text())
@@ -338,13 +379,16 @@ def granted(calls):
 
 
 @pytest.mark.parametrize("role", list(module.ROLES))
-def test_apply_without_gateway_flags_issues_exactly_the_legacy_grants(tmp_path, monkeypatch, role):
+def test_apply_without_gateway_flags_issues_exactly_the_direct_grants(tmp_path, monkeypatch, role):
     agents, calls, report = apply_deployment(tmp_path, monkeypatch, role)
-    expected = LEGACY + ([(PROJECT, CONSUMER)] if role == "manager" else [])
+    expected = DIRECT + ([(PROJECT, CONSUMER)] if role == "orchestrator" else [])
     assert granted(calls) == expected
     assert report["roles_modified"] is True and report["principal_id"] == PRINCIPAL
     assert "ai_gateway" not in report
     assert len(agents.created) == 1 and len(agents.updated) == 1
+    assert agents.created[0]["agent_name"] == module.ROLES[role]
+    assert agents.created[0]["metadata"]["business_domain"] == "insurance"
+    assert agents.created[0]["description"] == f"Hosted Northwind insurance {role}"
 
 
 def test_apply_does_not_touch_roles_without_the_explicit_opt_in(tmp_path, monkeypatch):
@@ -354,7 +398,7 @@ def test_apply_does_not_touch_roles_without_the_explicit_opt_in(tmp_path, monkey
 
 def test_apply_with_gateway_models_grants_models_user_on_the_gateway_instead_of_openai_user(tmp_path, monkeypatch):
     environment = {"AI_GATEWAY_REQUIRED": "true", **GATEWAY_SETTINGS}
-    agents, calls, report = apply_deployment(tmp_path, monkeypatch, "manager", common_environment=environment)
+    agents, calls, report = apply_deployment(tmp_path, monkeypatch, "orchestrator", common_environment=environment)
     pairs = granted(calls)
     assert pairs == [(GATEWAY, MODELS), (PROJECT, FOUNDRY), (PROJECT, CONSUMER)]
     assert OPENAI not in [role for _, role in pairs]
@@ -362,15 +406,38 @@ def test_apply_with_gateway_models_grants_models_user_on_the_gateway_instead_of_
         {"scope": GATEWAY, "role_id": MODELS}, {"scope": PROJECT, "role_id": FOUNDRY},
         {"scope": PROJECT, "role_id": CONSUMER}]
     sent = agents.created[0]["definition"].as_dict()["environment_variables"]
-    assert sent["AI_GATEWAY_REQUIRED"] == "true" and sent["ORDERS_MODEL_GATEWAY_MODEL"] == "aisvc-zurlo-northwind/gpt-4o"
+    assert sent["AI_GATEWAY_REQUIRED"] == "true" and sent["AGENT_MODEL_GATEWAY_MODEL"] == "aisvc-zurlo-northwind/gpt-4o"
+    assert sent["AGENT_ROLE"] == "orchestrator" and sent["AGENT_MODEL_DEPLOYMENT"] == "baseline"
+
+
+def test_a_deprecated_config_is_sent_to_the_agent_with_canonical_names_only(tmp_path, monkeypatch):
+    document = {
+        "common": {"ORDERS_MODEL_DEPLOYMENT": "legacy-baseline", "AI_GATEWAY_REQUIRED": "true",
+                   "AI_GATEWAY_MCP_REQUIRED": "true", "ORDERS_MCP_GATEWAY": DEPRECATED_MCP_ROUTES,
+                   "ORDER_AGENT_ROLE": "manager", "NORTHWIND_BUSINESS_DOMAIN": "insurance",
+                   **DEPRECATED_GATEWAY_SETTINGS},
+        "orderlookup": {"MCP_TECH_LOOKUP_URL": "https://lookup.example/mcp"},
+    }
+    agents, calls, report = apply_deployment(tmp_path, monkeypatch, "orderlookup", document=document)
+    sent = agents.created[0]["definition"].as_dict()["environment_variables"]
+    assert sent == {
+        "AGENT_ROLE": "policy-claim-lookup", "AGENT_MODEL_DEPLOYMENT": "legacy-baseline",
+        "AI_GATEWAY_REQUIRED": "true", "AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": DEPRECATED_MCP_ROUTES,
+        "MCP_POLICY_LOOKUP_URL": "https://lookup.example/mcp",
+        "AGENT_MODEL_GATEWAY_ENDPOINT": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_ENDPOINT"],
+        "AGENT_MODEL_GATEWAY_MODEL": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_MODEL"],
+        "AGENT_MODEL_GATEWAY_DEPLOYMENT": GATEWAY_SETTINGS["AGENT_MODEL_GATEWAY_DEPLOYMENT"],
+    }
+    assert agents.created[0]["agent_name"] == "northwind-insurance-policy-claim-lookup"
+    assert granted(calls) == [(GATEWAY, MODELS), (PROJECT, FOUNDRY)] and report["ai_gateway"]["mcp_required"] is True
 
 
 @pytest.mark.parametrize("role,mcp_routed", [
-    ("orderlookup", True), ("policylookup", True), ("triage", False), ("resolutiondraft", False),
+    ("policy-claim-lookup", True), ("policy-wording", True), ("triage", False), ("claim-action-draft", False),
 ])
 def test_apply_with_gateway_mcp_grants_no_tools_role_to_any_agent(tmp_path, monkeypatch, role, mcp_routed):
     environment = {"AI_GATEWAY_REQUIRED": "true", "AI_GATEWAY_MCP_REQUIRED": "true",
-                   "ORDERS_MCP_GATEWAY": MCP_ROUTES, **GATEWAY_SETTINGS}
+                   "AGENT_MCP_GATEWAY": MCP_ROUTES, **GATEWAY_SETTINGS}
     _, calls, report = apply_deployment(tmp_path, monkeypatch, role, common_environment=environment)
     assert granted(calls) == [(GATEWAY, MODELS), (PROJECT, FOUNDRY)]
     assert report["ai_gateway"]["mcp_required"] is mcp_routed

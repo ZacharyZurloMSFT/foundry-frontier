@@ -1,4 +1,8 @@
 name: PR Evals
+# Tier 2: the insurance golden set (data/golden/dataset.jsonl) is posted to
+# POST /insurance/chat on the deployed API and scored with Foundry evaluators,
+# the claim-action draft completeness check and the triage / safety rubrics.
+# STAGING_API_URI must point at the insurance API (ca-insurance-api).
 on:
   pull_request:
     paths:
@@ -6,8 +10,7 @@ on:
       - "agents/**"
       - "evals/**"
       - "data/golden/**"
-      - "apps/mcp-work-order/**"
-      - "apps/web-tech/src/harness*"
+      - "apps/mcp-claim-review/**"
 
 permissions:
   id-token: write
@@ -60,7 +63,7 @@ jobs:
             const results = JSON.parse(fs.readFileSync('evals/results.json', 'utf8'));
             const rows = Object.entries(results.aggregates)
               .map(([k,v]) => `| ${k} | ${v} |`).join('\n');
-            const body = `### Eval results\n\n| Metric | Score |\n|---|---|\n${rows}`;
+            const body = `### Eval results (insurance golden set)\n\n| Metric | Score |\n|---|---|\n${rows}`;
             github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo,
               issue_number: context.issue.number, body

@@ -16,8 +16,10 @@ APIM_NAME = "apim-northwind"
 APP_INSIGHTS_NAME = "appi-zurlo-northwind"
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "infra" / "live" / "apim-apis.bicep"
-# Adding a stack is a deliberate boundary change: it must be reviewed here, not only in Bicep.
-STACKS = ("northwind", "insurance")
+# Adding a stack is a deliberate boundary change: it must be reviewed here, not only in Bicep. The live northwind stack
+# (northwind-api, northwind-mcp-*, ...) is no longer managed by this repository; its APIs stay in APIM untouched.
+STACKS = ("insurance",)
+# The MCP API suffixes are live identifiers (insurance-mcp-tech-lookup, insurance-mcp-work-order) and stay as they are.
 API_SUFFIXES = ("api", "voice", "mcp-tech-lookup", "mcp-work-order")
 PRODUCT_SUFFIXES = ("web", "agents")
 LOGGER = "northwind-appinsights"

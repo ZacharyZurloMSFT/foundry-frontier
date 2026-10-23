@@ -1,10 +1,12 @@
-"""Northwind evaluation runner.
+"""Northwind Insurance evaluation runner (Tier 2).
 
-Reads the golden JSONL dataset, invokes the target Northwind workflow for each
-row (against the deployed API, or the local orchestrator for offline tests),
-then scores every response with:
-  - Foundry built-in evaluators (TaskAdherence, Groundedness, Coherence, safety)
-  - Our custom WorkOrderCompleteness evaluator
+Reads the golden JSONL dataset, posts each row to POST /insurance/chat on the deployed API
+(or a local one for offline tests), then scores every response with:
+  - Foundry built-in evaluators (TaskAdherence, Coherence, HateUnfairness, Violence)
+  - ClaimActionCompleteness (deterministic) on the claim-action draft saved in the
+    human-review queue (GET /hitl)
+  - LLM-as-judge rubrics: `triage` rows are judged on the triage specialist's JSON, `safety`
+    rows on the reply to a coverage / approval / payment demand or an injected instruction
 
 Usage:
     python run_evals.py --dataset ../data/golden/dataset.jsonl \
@@ -27,7 +29,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evaluators import judge_model_config_from_env, load_agent_rubric  # noqa: E402
-from evaluators.work_order_completeness import evaluate as wo_complete  # noqa: E402
+from evaluators.claim_action_completeness import evaluate as score_claim_action  # noqa: E402
 
 # Foundry evaluators SDK
 try:
@@ -45,6 +47,14 @@ except ImportError:  # allow lightweight local runs
 
 API_BASE = os.environ.get("API_URI") or os.environ.get("API_BASE") or "http://localhost:8000"
 
+# Golden-row workflows. Every row is posted to /insurance/chat; the orchestrator picks the specialists.
+CHAT_WORKFLOWS = {"triage", "policy_wording", "policy_claim_lookup", "claim_action_draft", "safety"}
+DRAFT_WORKFLOWS = {"claim_action_draft"}
+RUBRIC_WORKFLOWS = ("triage", "safety")
+ACTION_KIND = "insurance_claim_action"
+# The canonical department slug comes first; the legacy slug is still read from older baseline files.
+BASELINE_DEPARTMENTS = ("claims-concierge", "order-concierge")
+
 
 class BaselineUnavailable(ValueError):
     pass
@@ -57,15 +67,16 @@ def validated_reference(path: str | None, target: str, aggregates: dict) -> dict
     base = document.get("aggregates") if isinstance(document, dict) else None
     if not isinstance(base, dict):
         raise ValueError("Baseline aggregates must be a metric object")
-    if "order-concierge" in base:
-        department = base["order-concierge"]
+    department_key = next((key for key in BASELINE_DEPARTMENTS if key in base), None)
+    if department_key is not None:
+        department = base[department_key]
         if not isinstance(department, dict):
-            raise ValueError("Baseline order-concierge section must be an object")
+            raise ValueError(f"Baseline {department_key} section must be an object")
         reference = department.get(target, {})
     elif target == "orchestrator":
         reference = base
     else:
-        raise BaselineUnavailable("Harness requires an order-concierge/copilot-sdk baseline")
+        raise BaselineUnavailable("Harness requires a claims-concierge/copilot-sdk baseline")
     if not isinstance(reference, dict):
         raise ValueError("Baseline target metrics must be an object")
     if not reference:
@@ -80,58 +91,78 @@ def validated_reference(path: str | None, target: str, aggregates: dict) -> dict
     return reference
 
 
-async def run_workflow(row: dict) -> str:
-    """Invoke the target workflow against the API and return the concatenated assistant response."""
+async def chat_turn(http: httpx.AsyncClient, message: str) -> dict:
+    """Stream one /insurance/chat turn and collect the assistant text, the server-bound
+    workflow ID and the specialists' tool results (keyed by tool name)."""
+    text = ""
+    session_id = None
+    workflow_id = None
+    tool_names: dict[str, str] = {}
+    specialist_results: dict[str, list[str]] = {}
+    async with http.stream("POST", f"{API_BASE}/insurance/chat", json={"message": message}) as r:
+        r.raise_for_status()
+        async for line in r.aiter_lines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            kind = ev.get("kind")
+            if kind == "error":
+                raise RuntimeError(ev.get("message", "Workflow failed"))
+            if ev.get("workflow_id"):
+                if workflow_id is not None and workflow_id != ev["workflow_id"]:
+                    raise RuntimeError("Stream contains conflicting server workflow IDs")
+                workflow_id = ev["workflow_id"]
+            if kind == "session":
+                session_id = ev.get("session_id")
+            elif kind == "assistant_delta":
+                text += ev.get("text", "")
+            elif kind == "assistant_message" and ev.get("text"):
+                text = ev["text"]
+            elif kind == "tool_call" and ev.get("call_id") and ev.get("tool"):
+                tool_names[ev["call_id"]] = ev["tool"]
+            elif kind == "tool_result" and isinstance(ev.get("result"), str) and ev["result"].strip():
+                tool = tool_names.get(ev.get("call_id"), "")
+                specialist_results.setdefault(tool, []).append(ev["result"])
+    return {"text": text, "session_id": session_id, "workflow_id": workflow_id,
+            "tools_called": list(dict.fromkeys(tool_names.values())), "specialist_results": specialist_results}
+
+
+async def saved_draft(http: httpx.AsyncClient, turn: dict) -> str:
+    """The claim-action draft persisted for this turn's server-bound workflow, as JSON."""
+    workflow_id, session_id = turn["workflow_id"], turn["session_id"]
+    if not workflow_id and not session_id:
+        raise RuntimeError("Draft evaluation requires a session-bound persisted approval")
+    workflow_id = workflow_id or f"wf-insurance-{session_id}"
+    saved = await http.get(f"{API_BASE}/hitl", params={"workflow_id": workflow_id})
+    saved.raise_for_status()
+    drafts = [item for item in saved.json().get("items", [])
+              if item.get("workflowId") == workflow_id and item.get("status") == "pending"
+              and item.get("kind") == ACTION_KIND]
+    if len(drafts) != 1 or not isinstance(drafts[0].get("payload"), dict):
+        raise RuntimeError("Exactly one pending draft bound to this session is required")
+    return json.dumps(drafts[0]["payload"])
+
+
+async def run_row(row: dict) -> dict:
+    """Invoke the target workflow against the API. `response` is what the general evaluators
+    grade; `rubric_response` is what the LLM-as-judge rubrics grade (the triage specialist's
+    JSON when the orchestrator called it, otherwise the same text)."""
     wf = row["workflow"]
-    # Legacy Field Services workflow keys (triage / manual_retrieval /
-    # work_order_draft / tech_lookup) are kept for backwards compat with
-    # older golden datasets. Order Concierge adds order_lookup and
-    # resolution_draft. Both sets route through /chat — the manager picks
-    # the right specialist based on the prompt.
-    if wf in {"triage", "manual_retrieval", "work_order_draft", "tech_lookup",
-              "order_lookup", "resolution_draft"}:
-        text = ""
-        session_id = None
-        workflow_id = None
-        async with httpx.AsyncClient(timeout=90.0) as http:
-            async with http.stream("POST", f"{API_BASE}/chat", json={"message": row["input"]}) as r:
-                r.raise_for_status()
-                async for line in r.aiter_lines():
-                    if not line.strip():
-                        continue
-                    ev = json.loads(line)
-                    if ev.get("kind") == "error":
-                        raise RuntimeError(ev.get("message", "Workflow failed"))
-                    if ev.get("workflow_id"):
-                        if workflow_id is not None and workflow_id != ev["workflow_id"]:
-                            raise RuntimeError("Stream contains conflicting server workflow IDs")
-                        workflow_id = ev["workflow_id"]
-                    if ev.get("kind") == "session":
-                        session_id = ev.get("session_id")
-                    elif ev.get("kind") == "assistant_delta":
-                        text += ev.get("text", "")
-                    elif ev.get("kind") == "assistant_message" and ev.get("text"):
-                        text = ev["text"]
-            if wf in {"work_order_draft", "resolution_draft"}:
-                if not workflow_id and not session_id:
-                    raise RuntimeError("Draft evaluation requires a session-bound persisted approval")
-                workflow_id = workflow_id or f"wf-{session_id}"
-                saved = await http.get(f"{API_BASE}/hitl", params={"workflow_id": workflow_id})
-                saved.raise_for_status()
-                drafts = [item for item in saved.json().get("items", [])
-                          if item.get("workflowId") == workflow_id and item.get("status") == "pending"]
-                if len(drafts) != 1 or not isinstance(drafts[0].get("payload"), dict):
-                    raise RuntimeError("Exactly one pending draft bound to this session is required")
-                return json.dumps(drafts[0]["payload"])
-        return text
-    if wf == "cu_extraction":
-        # For eval purposes we hit a helper endpoint (or read cached CU output)
-        async with httpx.AsyncClient(timeout=30.0) as http:
-            r = await http.get(f"{API_BASE}/cu/{row['input']}")
-            if r.status_code == 200:
-                return json.dumps(r.json())
-        return ""
-    return ""
+    if wf not in CHAT_WORKFLOWS:
+        raise ValueError(f"Unsupported golden-row workflow: {wf}")
+    async with httpx.AsyncClient(timeout=90.0) as http:
+        turn = await chat_turn(http, row["input"])
+        if wf in DRAFT_WORKFLOWS:
+            response = await saved_draft(http, turn)
+        else:
+            response = turn["text"]
+    triage = next((r for r in turn["specialist_results"].get("triage", []) if r.strip()), None)
+    return {"response": response, "rubric_response": triage if wf == "triage" and triage else response,
+            "tools_called": turn["tools_called"]}
+
+
+async def run_workflow(row: dict) -> str:
+    return (await run_row(row))["response"]
 
 
 def _score_row(
@@ -139,18 +170,20 @@ def _score_row(
     response: str,
     foundry_evals: dict | None,
     rubric_evals: dict | None = None,
+    *,
+    rubric_response: str | None = None,
 ) -> dict[str, Any]:
     scores: dict[str, Any] = {
         "id": row["id"], "workflow": row["workflow"],
         "response_len": len(response),
         "response": response,
     }
-    if row["workflow"] in ("work_order_draft", "resolution_draft"):
-        scores.update(wo_complete(response=response))
+    if row["workflow"] in DRAFT_WORKFLOWS:
+        scores.update(score_claim_action(response=response, expected=row.get("expected")))
     if rubric_evals is not None:
         ev = rubric_evals.get(row["workflow"])
         if ev is not None:
-            scores.update(ev(query=row["input"], response=response))
+            scores.update(ev(query=row["input"], response=response if rubric_response is None else rubric_response))
     if foundry_evals is not None:
         for name, ev in foundry_evals.items():
             try:
@@ -170,7 +203,7 @@ async def main() -> int:
     ap.add_argument("--expected-build", help="Require the API's deployed git_sha to match this candidate.")
     args = ap.parse_args()
 
-    rows = [json.loads(line) for line in Path(args.dataset).read_text().splitlines() if line.strip()]
+    rows = [json.loads(line) for line in Path(args.dataset).read_text(encoding="utf-8").splitlines() if line.strip()]
     if args.expected_build:
         async with httpx.AsyncClient(timeout=30) as http:
             build = await http.get(f"{API_BASE}/build")
@@ -192,13 +225,12 @@ async def main() -> int:
             "hate_unfairness": HateUnfairnessEvaluator(azure_ai_project=os.environ["FOUNDRY_PROJECT_ENDPOINT"], credential=DefaultAzureCredential()),
             "violence": ViolenceEvaluator(azure_ai_project=os.environ["FOUNDRY_PROJECT_ENDPOINT"], credential=DefaultAzureCredential()),
         }
-        # Groundedness only for manual_retrieval — needs context, added ad-hoc below
 
     rubric_evals: dict[str, Any] | None = None
     if judge_cfg is not None:
-        # Add per-agent rubric evaluators here as their .prompty files land.
+        # Add per-workflow rubric evaluators here as their .prompty files land.
         rubric_evals = {}
-        for wf in {"triage"}:
+        for wf in RUBRIC_WORKFLOWS:
             try:
                 rubric_evals[wf] = load_agent_rubric(wf, judge_cfg)
             except FileNotFoundError:
@@ -210,7 +242,7 @@ async def main() -> int:
             from harness_eval import grade, invoke
             try:
                 run = await invoke(row["input"], API_BASE)
-                # The deterministic contract checks the stored resolution JSON, not prose.
+                # The deterministic contract checks the stored claim-action draft, not prose.
                 scores = _score_row({**row, "workflow": "harness"}, run["output"], foundry_evals, rubric_evals)
                 scores.update(grade(run, row))
                 scores.update(workflow=row["workflow"], run_id=run["run_id"])
@@ -221,8 +253,11 @@ async def main() -> int:
                                 "harness_contract_pass": 0.0, "error": str(exc)})
         else:
             try:
-                response = await run_workflow(row)
-                results.append(_score_row(row, response, foundry_evals, rubric_evals))
+                turn = await run_row(row)
+                scores = _score_row(row, turn["response"], foundry_evals, rubric_evals,
+                                    rubric_response=turn["rubric_response"])
+                scores["tools_called"] = turn["tools_called"]
+                results.append(scores)
             except Exception as exc:
                 results.append({"id": row["id"], "workflow": row["workflow"], "error": str(exc)})
 
@@ -260,10 +295,11 @@ async def main() -> int:
     if args.target == "copilot-sdk":
         harness_incomplete = not reference or foundry_evals is None
         payload["regression_status"] = baseline_status if baseline_status != "evaluated" else "unavailable" if harness_incomplete else "evaluated"
-        payload["baseline_note"] = "Harness metrics require a reviewer-approved order-concierge/copilot-sdk baseline."
+        payload["baseline_note"] = "Harness metrics require a reviewer-approved claims-concierge/copilot-sdk baseline."
     else:
-        incomplete = not reference or foundry_evals is None or (
-            any(row["workflow"] == "triage" for row in rows) and not (rubric_evals or {}).get("triage")
+        incomplete = not reference or foundry_evals is None or any(
+            any(row["workflow"] == wf for row in rows) and not (rubric_evals or {}).get(wf)
+            for wf in RUBRIC_WORKFLOWS
         )
         payload["regression_status"] = baseline_status if baseline_status != "evaluated" else "unavailable" if incomplete else "evaluated"
     Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -279,8 +315,9 @@ async def main() -> int:
 
     failures = not results or any(
         r.get("error") or any(isinstance(v, dict) and v.get("error") for v in r.values())
-        or ("work_order_completeness" in r and (r["work_order_completeness"] != 1.0 or not r["plausible"]))
-        or ("triage_rubric_pass" in r and not r["triage_rubric_pass"])
+        or ("claim_action_completeness" in r and (
+            r["claim_action_completeness"] != 1.0 or not r["plausible"] or r.get("expected_match") == 0.0))
+        or any(f"{wf}_rubric_pass" in r and not r[f"{wf}_rubric_pass"] for wf in RUBRIC_WORKFLOWS)
         for r in results
     )
     return 1 if failures or payload.get("regressions") else 2 if incomplete else 0

@@ -40,8 +40,9 @@ ACCOUNT_API_VERSION = "2025-06-01"
 APPS_API_VERSION = "2024-03-01"
 DIAGNOSTICS_API_VERSION = "2021-05-01-preview"
 APPS_RESOURCE_GROUP = "rg-northwind-apps"
-MCP_APPS = ("ca-insurance-lookup", "ca-insurance-review", "ca-mcp-tech-lookup", "ca-mcp-work-order")
-WORK_ORDER_APPS = ("ca-insurance-review", "ca-mcp-work-order")
+MCP_APPS = ("ca-insurance-lookup", "ca-insurance-review")
+# The claim-review server is the one the gateway cannot front: it needs the workflow-binding header (see MCP_RECOMMENDATIONS).
+CLAIM_REVIEW_APPS = ("ca-insurance-review",)
 ENFORCED_AUTH_ACTIONS = ("Return401", "Return403", "RedirectToLoginPage")
 INFERENCE_ROLES = {
     common.ROLE_OPENAI_USER: "Cognitive Services OpenAI User",
@@ -83,8 +84,9 @@ MCP_RECOMMENDATIONS = [
         "publishes no static outbound addresses."
     ),
     (
-        "The work-order MCP apps (ca-insurance-review, ca-mcp-work-order) stay direct because the gateway does not "
-        "forward x-orders-workflow / x-harness-workflow; protect them with their own caller identity, not the gateway path."
+        "The claim-review MCP app (ca-insurance-review) stays direct because the gateway does not forward the "
+        "workflow-binding header (x-workflow-id, or the deprecated x-orders-workflow); protect it with its own "
+        "caller identity, not the gateway path."
     ),
     "These are gated manual decisions. This tool never changes container apps, ingress or network settings.",
 ]
@@ -273,7 +275,7 @@ def audit_mcp_apps(runner) -> list[dict]:
         ingress = ((app.get("properties") or {}).get("configuration") or {}).get("ingress") or {}
         auth = _auth_config(runner, app["id"]) if app.get("id") else {"configured": False, "enforced": False}
         reports.append({
-            "name": name, "found": True, "kind": "work-order" if name in WORK_ORDER_APPS else "lookup",
+            "name": name, "found": True, "kind": "claim-review" if name in CLAIM_REVIEW_APPS else "lookup",
             "fqdn": ingress.get("fqdn"), "externalIngress": bool(ingress.get("external")),
             "ipRestrictions": len(ingress.get("ipSecurityRestrictions") or []), "authentication": auth,
             "exposure": mcp_exposure(ingress, auth),

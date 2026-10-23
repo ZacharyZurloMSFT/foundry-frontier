@@ -1,4 +1,6 @@
-"""Synthetic insurance API; inference stays unavailable until explicitly verified."""
+"""Insurance-only runtime gate for agent inference, plus the draft/records router.
+
+Inference stays unavailable until the insurance agent fleet is explicitly verified."""
 from __future__ import annotations
 
 import json
@@ -13,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from .insurance_domain import (
     ACTION_KIND, ClaimActionDraft, InsuranceValidationError, action_payload, fixtures,
-    lookup_claim_record, lookup_policy_record, pending_action, require_insurance_domain,
+    lookup_claim_record, lookup_policy_record, pending_action,
 )
 from .orchestrator_client import run_turn
 from .repositories import enqueue_hitl
@@ -21,9 +23,8 @@ from .settings import get_settings
 
 router = APIRouter(prefix="/insurance", tags=["synthetic-insurance"])
 
-# The converted insurance agents live in the original orders project and in the retained nw-insurance-claims
-# project. The endpoint path must still name the configured project, and the legacy web project is never accepted.
-INSURANCE_PROJECTS = frozenset({"northwind-orders", "nw-insurance-claims"})
+# Foundry projects that may host the insurance agent fleet (mirrors scripts/deploy-hosted-agents.py).
+INSURANCE_PROJECTS = ("northwind-orders", "nw-insurance-claims")
 
 
 def insurance_runtime_ready() -> bool:
@@ -33,11 +34,11 @@ def insurance_runtime_ready() -> bool:
     except ValueError:
         return False
     return (
-        settings.business_domain == "insurance" and settings.insurance_agents_ready
-        and settings.order_project_name in INSURANCE_PROJECTS
-        and settings.order_agents_hosted and project.scheme == "https" and bool(project.hostname)
+        settings.insurance_agents_ready
+        and settings.insurance_project_name in INSURANCE_PROJECTS
+        and settings.hosted_agents_enabled and project.scheme == "https" and bool(project.hostname)
         and not project.username and not project.password and not project.query and not project.fragment
-        and project.path.rstrip("/") == f"/api/projects/{settings.order_project_name}"
+        and project.path.rstrip("/") == f"/api/projects/{settings.insurance_project_name}"
         and settings.insurance_orchestrator_agent_id.startswith("northwind-insurance-")
     )
 
@@ -45,12 +46,10 @@ def insurance_runtime_ready() -> bool:
 def require_insurance_runtime() -> None:
     if not insurance_runtime_ready():
         raise HTTPException(
-            503, "Insurance agent inference is unavailable. Deploy and verify the converted insurance "
-            "agents in the configured insurance project, then configure NORTHWIND_BUSINESS_DOMAIN=insurance, "
-            "NORTHWIND_INSURANCE_AGENTS_READY=true, ORDER_AGENTS_HOSTED=true and "
-            "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID, with FOUNDRY_PROJECT_ENDPOINT pointing to "
-            "ORDER_PROJECT_NAME=northwind-orders or nw-insurance-claims, not the legacy web project. "
-            "Existing retail agents are not insurance-ready.",
+            503, "Insurance agent inference is unavailable. Deploy and verify the insurance agents, "
+            "then configure NORTHWIND_INSURANCE_AGENTS_READY=true, HOSTED_AGENTS_ENABLED=true and "
+            "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID, with FOUNDRY_PROJECT_ENDPOINT pointing at the "
+            "insurance Foundry project named by INSURANCE_PROJECT_NAME.",
         )
 
 
@@ -81,10 +80,6 @@ async def claim_lookup(claim_id: str, policy_id: str | None = None,
 
 @router.post("/actions/draft")
 async def draft_action(req: ClaimActionDraft) -> dict:
-    try:
-        require_insurance_domain()
-    except InsuranceValidationError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
     if not get_settings().cosmos_endpoint:
         raise HTTPException(503, "Cosmos approval storage is not configured; no draft was saved.")
     try:

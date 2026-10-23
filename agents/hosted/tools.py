@@ -1,31 +1,18 @@
-"""Bound proposal MCP and independently hosted Responses delegation."""
+"""Bound claim-action draft MCP and independently hosted Responses delegation."""
 from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Literal, Mapping
+from typing import Any, Mapping
 
 import httpx
 from agent_framework import AgentResponseUpdate, Content, tool
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from pydantic import BaseModel, ConfigDict, Field
 
-from .config import INSURANCE_SPECIALISTS, SPECIALISTS, Settings, https_url
+from .config import SPECIALISTS, Settings, https_url
 from .scope import RequestScope, current_scope
 from ..insurance.domain import ClaimActionDraft, action_payload
-
-
-class ResolutionDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    order_id: str | None = Field(pattern=r"^NW-\d+$")
-    customer_id: str | None = Field(max_length=128)
-    resolution_type: Literal["refund_full", "refund_partial", "reship", "rma",
-                             "store_credit", "address_change", "cancel", "goodwill_credit"]
-    amount_usd: float = Field(ge=0, le=100000, allow_inf_nan=False)
-    reason: str = Field(min_length=1, max_length=2000)
-    policy_ref: str | None = Field(max_length=256)
-    urgency: Literal["P1", "P2", "P3", "P4"]
 
 
 def payload(value: Any) -> dict:
@@ -48,7 +35,7 @@ def pending_approval(value: Any, workflow_id: str) -> dict:
     if (result.get("status") != "pending_approval" or result.get("workflow_id") != workflow_id
             or not isinstance(result.get("hitl_id"), str) or not result["hitl_id"]
             or result.get("warning") or result.get("error") or not isinstance(result.get("draft"), dict)):
-        raise RuntimeError("Resolution service did not confirm a persisted, workflow-bound pending approval")
+        raise RuntimeError("Claim-review service did not confirm a persisted, workflow-bound pending approval")
     return result
 
 
@@ -64,12 +51,11 @@ class GatewayBearerAuth(httpx.Auth):
 
 
 async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
-                            tool_name: str = "propose_resolution",
+                            tool_name: str = "draft_claim_action",
                             gateway_headers: Mapping[str, str] | None = None, *,
                             auth: httpx.Auth | None = None) -> dict:
-    headers = {"x-orders-workflow": workflow_id}
-    if workflow_id.startswith("wf-harness-"):
-        headers["x-harness-workflow"] = workflow_id
+    # x-orders-workflow is the deprecated spelling that already-deployed MCP builds still require.
+    headers = {"x-workflow-id": workflow_id, "x-orders-workflow": workflow_id}
     if gateway_headers:
         # Credentials only travel over HTTPS, and can never override the workflow binding.
         https_url(url, "MCP endpoint")
@@ -82,12 +68,12 @@ async def call_proposal_mcp(url: str, workflow_id: str, draft: dict,
                     tool_name, {"workflow_id": workflow_id, "draft": draft},
                 )
                 if result.isError:
-                    raise RuntimeError("Resolution MCP call failed; no approval is confirmed")
+                    raise RuntimeError("Claim-review MCP call failed; no approval is confirmed")
                 data = result.structuredContent
                 if data is None:
                     texts = [c.text for c in result.content if c.type == "text"]
                     if len(texts) != 1:
-                        raise ValueError("Resolution MCP did not return one structured result")
+                        raise ValueError("Claim-review MCP did not return one structured result")
                     data = json.loads(texts[0])
                 return pending_approval(data, workflow_id)
 
@@ -96,61 +82,34 @@ def proposal_tool(settings: Settings, gateway_headers: Mapping[str, str] | None 
     spec = settings.mcp_spec()
     gateway = settings.mcp_entry
     if gateway is not None and token_provider is None:
-        raise ValueError("Gateway work-order MCP requires an identity token provider for the gateway scope")
+        raise ValueError("Gateway claim-review MCP requires an identity token provider for the gateway scope")
     auth = GatewayBearerAuth(token_provider) if gateway is not None else None
     # API Management credentials are only forwarded when configured, leaving the call unchanged otherwise.
     apim = {"gateway_headers": gateway_headers} if gateway_headers else {}
 
-    if settings.business_domain == "insurance":
-        @tool(name="draft_claim_action", approval_mode="never_require",
-              description="Persist a synthetic claim-action draft for HUMAN review only; NEVER execute coverage/payment.")
-        async def draft_claim_action(draft: ClaimActionDraft) -> str:
-            scope = current_scope.get()
-            workflow = scope.require_workflow()
-            proposed = action_payload(ClaimActionDraft.model_validate(draft))
-            if scope.approval is not None:
-                if scope.approval["draft"] != proposed:
-                    raise RuntimeError("Only one distinct pending draft is permitted per response")
-                return json.dumps(scope.approval)
-            if gateway is None:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **apim)
-            else:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
-                                                 gateway.tool_prefix + "draft_claim_action", auth=auth)
-            if (result.get("draft") != proposed or result.get("kind") != "insurance_claim_action"
-                    or result.get("execution_status") != "not_executed" or result.get("synthetic") is not True):
-                raise RuntimeError("Insurance MCP did not confirm a non-executed synthetic draft")
-            scope.approval = pending_approval(result, workflow)
-            scope.tool_results += 1
-            return json.dumps(scope.approval)
-        return draft_claim_action
-
-    @tool(name="propose_resolution", approval_mode="never_require",
-          description="Persist a draft for HUMAN approval. Workflow identity is bound by the application, not arguments.")
-    async def propose_resolution(draft: ResolutionDraft) -> str:
+    @tool(name="draft_claim_action", approval_mode="never_require",
+          description="Persist a synthetic claim-action draft for HUMAN review only; NEVER execute coverage/payment.")
+    async def draft_claim_action(draft: ClaimActionDraft) -> str:
         scope = current_scope.get()
-        try:
-            workflow = scope.require_workflow()
-            proposed = ResolutionDraft.model_validate(draft).model_dump()
-            if scope.approval is not None:
-                if scope.approval["draft"] != proposed:
-                    raise RuntimeError("Only one distinct pending draft is permitted per response")
-                return json.dumps(scope.approval)
-            if gateway is None:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed, **apim)
-            else:
-                result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
-                                                 gateway.tool_prefix + "propose_resolution", auth=auth)
-            if result.get("draft") != proposed:
-                raise RuntimeError("Resolution MCP persisted a different draft")
-            scope.approval = pending_approval(result, workflow)
-            scope.tool_results += 1
+        workflow = scope.require_workflow()
+        proposed = action_payload(ClaimActionDraft.model_validate(draft))
+        if scope.approval is not None:
+            if scope.approval["draft"] != proposed:
+                raise RuntimeError("Only one distinct pending draft is permitted per response")
             return json.dumps(scope.approval)
-        except Exception:
-            scope.failures.append("Resolution persistence failed")
-            raise
+        if gateway is None:
+            result = await call_proposal_mcp(spec["server_url"], workflow, proposed, "draft_claim_action", **apim)
+        else:
+            result = await call_proposal_mcp(spec["server_url"], workflow, proposed,
+                                             gateway.tool_prefix + "draft_claim_action", auth=auth)
+        if (result.get("draft") != proposed or result.get("kind") != "insurance_claim_action"
+                or result.get("execution_status") != "not_executed" or result.get("synthetic") is not True):
+            raise RuntimeError("Insurance MCP did not confirm a non-executed synthetic draft")
+        scope.approval = pending_approval(result, workflow)
+        scope.tool_results += 1
+        return json.dumps(scope.approval)
 
-    return propose_resolution
+    return draft_claim_action
 
 
 def _obj(value: Any) -> dict:
@@ -180,9 +139,9 @@ def child_tool_updates(item: dict, agent_name: str, namespace: str, *, done: boo
 
 
 async def invoke_hosted_specialist(project, agent_name: str, prompt: str, scope: RequestScope,
-                                  *, resolution: bool = False) -> str:
+                                  *, claim_action: bool = False) -> str:
     metadata = {"workflow_id": scope.workflow_id} if scope.workflow_id else {}
-    if resolution:
+    if claim_action:
         scope.require_workflow()
     namespace = uuid.uuid4().hex[:12]
     completed = None
@@ -222,7 +181,7 @@ async def invoke_hosted_specialist(project, agent_name: str, prompt: str, scope:
             for update in child_tool_updates(item, agent_name, namespace, done=True):
                 if scope.relay_enabled:
                     scope.events.put_nowait(update)
-    if resolution:
+    if claim_action:
         results = [item.get("output") for item in output
                    if item.get("type") in ("function_call_output", "mcp_call") and item.get("output")]
         approvals = []
@@ -232,7 +191,7 @@ async def invoke_hosted_specialist(project, agent_name: str, prompt: str, scope:
             except (ValueError, RuntimeError, TypeError):
                 continue
         if not approvals:
-            raise RuntimeError("Resolution specialist returned no persisted pending approval evidence")
+            raise RuntimeError("Claim-action specialist returned no persisted pending approval evidence")
         scope.approval = approvals[-1]
         return json.dumps(scope.approval)
     text = "".join(c.get("text", "") for item in output if item.get("type") == "message"
@@ -245,8 +204,8 @@ async def invoke_hosted_specialist(project, agent_name: str, prompt: str, scope:
 def specialist_tools(settings: Settings, project) -> list:
     def wrap(fn_name: str, default_name: str, env_name: str):
         agent_name = settings.env.get(env_name) or default_name
-        if settings.business_domain == "insurance" and not agent_name.startswith("northwind-insurance-"):
-            raise ValueError("Insurance specialists cannot delegate to retail agents.")
+        if not agent_name.startswith("northwind-insurance-"):
+            raise ValueError("Specialists can only delegate to northwind-insurance-* hosted agents.")
 
         @tool(name=fn_name, approval_mode="never_require",
               description=f"Delegate to the independently hosted {agent_name} specialist.")
@@ -254,8 +213,7 @@ def specialist_tools(settings: Settings, project) -> list:
             scope = current_scope.get()
             try:
                 return await invoke_hosted_specialist(
-                    project, agent_name, prompt, scope,
-                    resolution=fn_name in {"resolution_draft", "claim_action_draft"},
+                    project, agent_name, prompt, scope, claim_action=fn_name == "claim_action_draft",
                 )
             except Exception:
                 scope.failures.append(f"Hosted specialist {agent_name} failed")
@@ -263,5 +221,4 @@ def specialist_tools(settings: Settings, project) -> list:
 
         return delegate
 
-    specialists = INSURANCE_SPECIALISTS if settings.business_domain == "insurance" else SPECIALISTS
-    return [wrap(fn_name, *target) for fn_name, target in specialists.items()]
+    return [wrap(fn_name, *target) for fn_name, target in SPECIALISTS.items()]

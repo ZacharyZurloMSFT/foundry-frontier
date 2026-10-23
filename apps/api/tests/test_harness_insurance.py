@@ -19,11 +19,11 @@ from test_harness import Session
 @pytest.fixture
 def config(monkeypatch):
     settings = Settings(
-        _env_file=None, NORTHWIND_BUSINESS_DOMAIN="insurance", COPILOT_HARNESS_ENABLED=True,
-        NORTHWIND_INSURANCE_AGENTS_READY=True, ORDER_AGENTS_HOSTED=True,
+        _env_file=None, COPILOT_HARNESS_ENABLED=True,
+        NORTHWIND_INSURANCE_AGENTS_READY=True, HOSTED_AGENTS_ENABLED=True,
         FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID="northwind-insurance-orchestrator",
         FOUNDRY_PROJECT_ENDPOINT="https://unit.test/api/projects/northwind-orders",
-        MCP_WORK_ORDER_URL="https://mcp.unit.test/mcp/", COSMOS_ENDPOINT="https://cosmos.unit.test",
+        MCP_CLAIM_REVIEW_URL="https://mcp.unit.test/mcp/", COSMOS_ENDPOINT="https://cosmos.unit.test",
     )
     for module in (runtime, routes, store, insurance):
         monkeypatch.setattr(module, "get_settings", lambda: settings)
@@ -47,7 +47,7 @@ def test_insurance_is_operator_controlled_and_domain_bound(config):
     assert r.status()["enabled"] is True
     assert set(r.status()["tools"]) == set(insurance_tools.NAMES)
     prompt, sha = runtime.instructions(config)
-    assert "claim_action_draft" in prompt and "order_lookup" not in prompt and len(sha) == 64
+    assert "claim_action_draft" in prompt and len(sha) == 64
     config.harness_enabled = False
     assert r.status()["state"] == "disabled"
     config.harness_enabled = True
@@ -64,7 +64,7 @@ def test_status_never_calls_a_started_but_unverified_runtime_ready(config):
     assert r.status()["state"] == "ready"
     config.harness_model = "a-new-unverified-model"
     assert r.status()["state"] == "configured"
-    config.harness_resolution_mcp = "http://unsafe.test/not-mcp"
+    config.harness_claim_review_mcp = "http://unsafe.test/not-mcp"
     assert r.status()["state"] == "unavailable"
 
 
@@ -80,7 +80,6 @@ async def test_true_sdk_configuration_exposes_only_insurance_tools(config):
     events = [e async for e in r.run("harness-unit", "wf-harness-unit", "hello", store.RunStore())]
     assert captured["available_tools"] == [f"custom:{n}" for n in insurance_tools.NAMES]
     assert {tool.name for tool in captured["tools"]} == set(insurance_tools.NAMES)
-    assert not {"order_lookup", "resolution_draft"} & {tool.name for tool in captured["tools"]}
     assert captured["enable_config_discovery"] is False and captured["enable_session_store"] is False
     assert captured["mcp_servers"] == {} and "api_key" not in captured["provider"]
     for _ in range(2):
@@ -159,7 +158,7 @@ async def test_native_draft_is_verified_against_exact_saved_review(config, datab
     args, kwargs = native.call_args
     assert args[0] == "northwind-insurance-claim-action-draft"
     assert kwargs["workflow_id"] == wid
-    assert kwargs["mcp_tool"]["headers"] == {"x-orders-workflow": wid}
+    assert kwargs["mcp_tool"]["headers"] == {"x-workflow-id": wid, "x-orders-workflow": wid}
     assert kwargs["mcp_tool"]["allowed_tools"] == ["draft_claim_action"]
     again = await tools.handler("claim_action_draft")(invocation(draft))
     assert again.result_type == "failure" and native.await_count == 1

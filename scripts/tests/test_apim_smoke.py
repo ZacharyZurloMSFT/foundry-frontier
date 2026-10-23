@@ -25,8 +25,6 @@ SSE_INIT = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"protocolVer
 
 
 SERVED_TOOLS = {
-    "northwind": {"tech-lookup": {"lookup_order", "lookup_policy", "lookup_claim"},
-                  "work-order": {"propose_resolution", "draft_claim_action"}},
     "insurance": {"tech-lookup": {"lookup_policy", "lookup_claim"}, "work-order": {"draft_claim_action"}},
 }
 
@@ -76,7 +74,7 @@ class FakeGateway:
 
 
 def args(**overrides):
-    base = dict(gateway_url=GATEWAY, stack="northwind", expect_lockdown=False, stream_check=False,
+    base = dict(gateway_url=GATEWAY, stack="insurance", expect_lockdown=False, stream_check=False,
                 aca_suffix=smoke.ACA_SUFFIX, timeout=5.0)
     return SimpleNamespace(**{**base, **overrides})
 
@@ -85,7 +83,7 @@ def run(gateway, monkeypatch, *, ws=(403, 101), environ=None, **overrides):
     codes = iter(ws)
     monkeypatch.setattr(smoke, "websocket_handshake", lambda url, origin, timeout=20: next(codes))
     with httpx.Client(transport=httpx.MockTransport(gateway)) as client:
-        return smoke.run(args(**overrides), client, environ if environ is not None else {"NORTHWIND_MCP_KEY_NORTHWIND": KEY})
+        return smoke.run(args(**overrides), client, environ if environ is not None else {"NORTHWIND_MCP_KEY_INSURANCE": KEY})
 
 
 def failed(report):
@@ -98,13 +96,20 @@ def test_a_correct_gateway_passes_every_check(monkeypatch):
     assert sum(status == "PASS" for _, status, _ in report.rows) >= 14
 
 
-def test_both_stacks_are_checked_by_default(monkeypatch):
-    codes = iter([403, 101, 403, 101])
+def test_insurance_is_the_only_stack_and_all_means_insurance(monkeypatch):
+    assert smoke.STACKS == ("insurance",)
+    assert set(smoke.MCP_TOOLS) == set(smoke.WEB_APPS) == set(smoke.BACKENDS) == {"insurance"}
+    codes = iter([403, 101])
     monkeypatch.setattr(smoke, "websocket_handshake", lambda url, origin, timeout=20: next(codes))
     with httpx.Client(transport=httpx.MockTransport(FakeGateway())) as client:
-        report = smoke.run(args(stack="all"), client, {"NORTHWIND_MCP_KEY_NORTHWIND": KEY, "NORTHWIND_MCP_KEY_INSURANCE": KEY})
+        report = smoke.run(args(stack="all"), client, {"NORTHWIND_MCP_KEY_INSURANCE": KEY})
     assert not report.failed
-    assert {name.split()[0] for name, _, _ in report.rows} == {"northwind", "insurance"}
+    assert {name.split()[0] for name, _, _ in report.rows} == {"insurance"}
+
+
+def test_the_retired_northwind_stack_is_not_selectable():
+    with pytest.raises(SystemExit):
+        smoke.parser().parse_args(["--gateway-url", GATEWAY, "--stack", "northwind"])
 
 
 def test_duplicate_cors_headers_fail(monkeypatch):
@@ -134,19 +139,15 @@ def test_old_mcp_protocol_fails(monkeypatch):
 
 
 def test_a_missing_expected_tool_fails_and_names_it(monkeypatch):
-    report = run(FakeGateway(missing_tool="lookup_order"), monkeypatch)
-    assert failed(report) == {"northwind MCP tech-lookup tools/list"}
-    assert "missing=['lookup_order']" in next(detail for name, _, detail in report.rows if name == "northwind MCP tech-lookup tools/list")
+    report = run(FakeGateway(missing_tool="lookup_policy"), monkeypatch)
+    assert failed(report) == {"insurance MCP tech-lookup tools/list"}
+    assert "missing=['lookup_policy']" in next(detail for name, _, detail in report.rows if name == "insurance MCP tech-lookup tools/list")
 
 
-def test_each_stack_is_checked_against_its_own_tools(monkeypatch):
-    # The insurance servers legitimately expose no retail tools; requiring them was a real false failure.
-    assert "lookup_order" not in smoke.MCP_TOOLS["insurance"]["tech-lookup"]
-    assert "propose_resolution" not in smoke.MCP_TOOLS["insurance"]["work-order"]
-    codes = iter([403, 101])
-    monkeypatch.setattr(smoke, "websocket_handshake", lambda url, origin, timeout=20: next(codes))
-    with httpx.Client(transport=httpx.MockTransport(FakeGateway())) as client:
-        report = smoke.run(args(stack="insurance"), client, {"NORTHWIND_MCP_KEY_INSURANCE": KEY})
+def test_the_insurance_servers_are_checked_against_exactly_the_insurance_tools(monkeypatch):
+    assert smoke.MCP_TOOLS == {
+        "insurance": {"tech-lookup": {"lookup_policy", "lookup_claim"}, "work-order": {"draft_claim_action"}}}
+    report = run(FakeGateway(), monkeypatch)
     assert not report.failed, report.markdown()
     assert any(name == "insurance MCP work-order tools/list" and status == "PASS" for name, status, _ in report.rows)
 
@@ -155,7 +156,7 @@ def test_mcp_without_key_checks_only_the_public_behaviour(monkeypatch):
     report = run(FakeGateway(), monkeypatch, environ={})
     assert not report.failed
     assert {name for name, status, _ in report.rows if status == "SKIP"} >= {
-        "northwind MCP tech-lookup initialize/tools", "northwind MCP work-order initialize/tools"}
+        "insurance MCP tech-lookup initialize/tools", "insurance MCP work-order initialize/tools"}
 
 
 def test_websocket_outcomes(monkeypatch):
@@ -199,7 +200,7 @@ def test_streaming_check_distinguishes_streaming_from_buffering():
     def outcome(handler):
         report = smoke.Report()
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            smoke.check_streaming(client, GATEWAY + "/northwind", "x", report, min_total=0.3, min_gap=0.15)
+            smoke.check_streaming(client, GATEWAY + "/insurance", "x", report, min_total=0.3, min_gap=0.15)
         return report.rows[0]
 
     streaming = outcome(lambda r: httpx.Response(200, stream=Delayed(0, 0.4)))
@@ -212,7 +213,7 @@ def test_streaming_check_distinguishes_streaming_from_buffering():
     assert outcome(lambda r: httpx.Response(500, text="boom"))[1] == "FAIL"
 
 
-def test_streaming_check_posts_to_chat_with_the_department_header():
+def test_streaming_check_posts_to_the_insurance_chat_route_behind_the_stack_prefix():
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -221,7 +222,19 @@ def test_streaming_check_posts_to_chat_with_the_department_header():
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         smoke.check_streaming(client, GATEWAY + "/insurance", "insurance", smoke.Report())
-    assert seen["path"] == "/insurance/chat" and seen["department"] == "contact-center" and "message" in seen["body"]
+    assert seen["path"] == "/insurance/insurance/chat" and seen["department"] is None and "message" in seen["body"]
+
+
+def test_cors_preflight_targets_the_insurance_chat_route_behind_the_stack_prefix():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(200)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        smoke.check_cors(client, GATEWAY + "/insurance", "insurance", "https://app.example", smoke.Report())
+    assert seen[0] == ("OPTIONS", "/insurance/insurance/chat")
 
 
 def test_parse_mcp_handles_sse_and_json():
@@ -254,7 +267,7 @@ def test_websocket_handshake_reads_the_status(status_line, expected):
 
 
 def test_main_validates_the_gateway_url_and_exit_codes(monkeypatch, tmp_path, capsys):
-    assert smoke.main(["--gateway-url", "https://apim.example.test/northwind"]) == 2
+    assert smoke.main(["--gateway-url", "https://apim.example.test/insurance"]) == 2
     assert smoke.main(["--gateway-url", "http://apim.example.test"]) == 2
     monkeypatch.setattr(smoke, "websocket_handshake", lambda url, origin, timeout=20: 403)
     real_client = httpx.Client
@@ -263,8 +276,8 @@ def test_main_validates_the_gateway_url_and_exit_codes(monkeypatch, tmp_path, ca
         out = tmp_path / "result.json"
         summary = tmp_path / "summary.md"
         monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-        assert smoke.main(["--gateway-url", GATEWAY, "--stack", "northwind", "--json", str(out)]) == code
-        assert json.loads(out.read_text())[0]["check"].startswith("northwind")
+        assert smoke.main(["--gateway-url", GATEWAY, "--stack", "insurance", "--json", str(out)]) == code
+        assert json.loads(out.read_text())[0]["check"].startswith("insurance")
         assert "## Gateway smoke test" in summary.read_text()
         summary.unlink()
 
