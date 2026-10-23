@@ -48,8 +48,12 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   Agent Harness run through the gateway passed too: claim and policy lookups from the bundled
 >   records, one draft through the hosted version 2 agent, the gateway and the locked work-order
 >   app, and a final answer; the draft was deleted again.
-> - **Not done:** the AI Gateway's two direct tool-server registrations for the insurance MCP
->   apps (they now get 401 until re-pointed), the three hosted agents that do not call MCP
+> - **AI Gateway tool servers:** re-pointed on 2026-10-23. `northwind-insurance-lookup` and
+>   `northwind-insurance-review` on `ai-gateway-northwind` now call the insurance MCP routes of
+>   this gateway with the `insurance-agents` key (`apim-northwind` -> locked app); a lookup call
+>   through them returned the synthetic records ([ai-gateway.md](./ai-gateway.md#findings-to-act-on),
+>   finding 8).
+> - **Not done:** the three hosted agents that do not call MCP
 >   servers, and landing the insurance-resource-cleanup work. See
 >   [Remaining steps](#remaining-steps) and [what is not verified](#not-verified-live-yet).
 
@@ -414,8 +418,9 @@ entry still has to fall inside the allow-list, which `apim-release.py` enforces.
   update the Foundry connection and re-run `configure-gateway-apps.py` for the harness
   secret, restart the hosted agents, then rotate the primary. For `insurance` the key sits in
   the connection `nw-insurance-claims-apim-mcp` (project `nw-insurance-claims`), in the secret
-  `mcp-gateway-key` of `ca-insurance-api` and in the AI Gateway tool-server credential once it
-  is re-pointed. Hosted agents resolve the connection once at start-up, so a new version (or a
+  `mcp-gateway-key` of `ca-insurance-api` and in the credentials of the AI Gateway tool servers
+  `northwind-insurance-lookup` and `-review` (re-run `ai-gateway-release.py plan --refresh-secrets` and
+  `apply` with the new key in `INSURANCE_AGENTS_KEY`, see ai-gateway.md finding 8). Hosted agents resolve the connection once at start-up, so a new version (or a
   restart) is what makes them pick up a new key.
 - **Telemetry:** every API has an `applicationinsights` diagnostic (logger
   `northwind-appinsights`, W3C correlation, no bodies logged) into `appi-zurlo-northwind`.
@@ -514,7 +519,6 @@ reversible.
 
 | Step | Why it is not done | How to finish |
 | --- | --- | --- |
-| Re-point the AI Gateway tool servers `northwind-insurance-lookup` and `northwind-insurance-review` | They register the direct MCP URLs with no credential, so since the lock-down they get 401. They belong to the AI Gateway work ([ai-gateway.md](./ai-gateway.md#findings-to-act-on), finding 8). | Point `northwind-insurance-lookup` at `https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup` with the `Ocp-Apim-Subscription-Key` header (the `insurance-agents` key). `northwind-insurance-review` cannot work through the AI Gateway (it drops `x-orders-workflow`, which the work-order server requires): remove it or leave it failing by design. |
 | Land the `insurance-resource-cleanup` work | The live department project names and the policy-wording tweaks of hosted version 1 exist only there. Until then the API image carries the data overlay, and the policy-wording agent cannot be rebuilt from `main` (`main` insists on the connection name `northwind-insurance-kb-mcp`, the live one is `nw-insurance-claims-kb-mcp`). | Rebase and merge the branch (a trial merge on 2026-10-22 conflicted in 16 files), then rebuild the API from `main` without the overlay. |
 | The other three hosted agents (`...-triage`, `...-policy-wording`, `...-orchestrator`) | They never call an MCP app, so the lock-down does not touch them; their version-1 environment still lists the direct MCP URLs, unused. | Redeploy from `main` with the same environment when the cleanup work lands. |
 | Release the insurance apps from the workflow | `release-app.py` can release `ca-insurance-api` and the two SPAs but not the two MCP apps, and the workflow releases only the SPAs: it deliberately skips `ca-insurance-api`, `ca-insurance-lookup` and `ca-insurance-review`, so a merge that changes their code does not reach them. | After the cleanup work lands, add the two MCP apps to `RELEASE_APPS` (images `mcp-tech-lookup` and `mcp-work-order`) and the three apps to the workflow. A release changes only the image and build metadata, so the guard variables and `NORTHWIND_MCP_INSURANCE_ONLY` carry over, as they did for the northwind apps. |
@@ -531,7 +535,6 @@ Verified live on 2026-10-22 and 2026-10-23: see Status. Still not exercised:
   are hosted agents that carry their own routing and the lookups read the bundled records, so a
   harness run (verified, see Status) does not use them; they matter only when the specialists
   are prompt agents, and the northwind harness is `unavailable`;
-- the AI Gateway tool servers after they are re-pointed;
 - a rotation of the `insurance-agents` key (see [Operations](#operations));
 - the three hosted agents that stay on version 1.
 
