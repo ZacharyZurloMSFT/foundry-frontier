@@ -44,7 +44,10 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   from the hosted agents. After the insurance lock-down, a full orchestrated `/chat` turn
 >   through the gateway ran the hosted triage and policy/claim lookup agents (the lookup agent
 >   calls the locked MCP app through the gateway), and a claim-action draft saved through the
->   gateway into the locked work-order app (the test record was deleted again).
+>   gateway into the locked work-order app (the test record was deleted again). A synthetic
+>   Agent Harness run through the gateway passed too: claim and policy lookups from the bundled
+>   records, one draft through the hosted version 2 agent, the gateway and the locked work-order
+>   app, and a final answer; the draft was deleted again.
 > - **Not done:** the AI Gateway's two direct tool-server registrations for the insurance MCP
 >   apps (they now get 401 until re-pointed), the three hosted agents that do not call MCP
 >   servers, and landing the insurance-resource-cleanup work. See
@@ -515,7 +518,6 @@ reversible.
 | Land the `insurance-resource-cleanup` work | The live department project names and the policy-wording tweaks of hosted version 1 exist only there. Until then the API image carries the data overlay, and the policy-wording agent cannot be rebuilt from `main` (`main` insists on the connection name `northwind-insurance-kb-mcp`, the live one is `nw-insurance-claims-kb-mcp`). | Rebase and merge the branch (a trial merge on 2026-10-22 conflicted in 16 files), then rebuild the API from `main` without the overlay. |
 | The other three hosted agents (`...-triage`, `...-policy-wording`, `...-orchestrator`) | They never call an MCP app, so the lock-down does not touch them; their version-1 environment still lists the direct MCP URLs, unused. | Redeploy from `main` with the same environment when the cleanup work lands. |
 | Release the insurance apps from the workflow | `release-app.py` can release `ca-insurance-api` and the two SPAs but not the two MCP apps, and the workflow releases only the SPAs: it deliberately skips `ca-insurance-api`, `ca-insurance-lookup` and `ca-insurance-review`, so a merge that changes their code does not reach them. | After the cleanup work lands, add the two MCP apps to `RELEASE_APPS` (images `mcp-tech-lookup` and `mcp-work-order`) and the three apps to the workflow. A release changes only the image and build metadata, so the guard variables and `NORTHWIND_MCP_INSURANCE_ONLY` carry over, as they did for the northwind apps. |
-| Run the harness through the gateway | It is `unavailable` on the northwind stack; on the insurance stack it is `configured` but no run was made. | Run a harness request on `ca-insurance-api` and check the draft reaches the review app through the gateway. |
 | Align `configure-github-oidc.py` with the live roles | Its `APPS_NAMES` lists the five northwind apps, while the apps pipeline identity also holds the release role on the five `ca-insurance-*` apps. The script does not manage those assignments, so it no longer describes the live state. | Add the five insurance apps to `APPS_NAMES` together with its tests. |
 
 ## Not verified live yet
@@ -524,7 +526,11 @@ Verified live on 2026-10-22 and 2026-10-23: see Status. Still not exercised:
 
 - a signed-in browser session: headless Chromium loads both insurance SPAs against the gateway
   without CORS or console errors, but the Entra sign-in and a manual claim flow were not driven;
-- a harness run through the gateway (see [Remaining steps](#remaining-steps));
+- the harness's own `MCP_TECH_LOOKUP_URL`, `MCP_WORK_ORDER_URL` and `MCP_GATEWAY_SUBSCRIPTION_KEY`
+  settings on the API apps. With `ORDER_AGENTS_HOSTED=true` (the insurance stack) the specialists
+  are hosted agents that carry their own routing and the lookups read the bundled records, so a
+  harness run (verified, see Status) does not use them; they matter only when the specialists
+  are prompt agents, and the northwind harness is `unavailable`;
 - the AI Gateway tool servers after they are re-pointed;
 - a rotation of the `insurance-agents` key (see [Operations](#operations));
 - the three hosted agents that stay on version 1.
