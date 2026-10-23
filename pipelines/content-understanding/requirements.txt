@@ -5,5 +5,5 @@ pydantic-settings>=2.7,<3
 azure-identity>=1.26.0
 azure-storage-blob>=12.24
 azure-cosmos>=4.9
-azure-search-documents>=11.6.0b8
+azure-search-documents>=12.1.0b2
 azure-monitor-opentelemetry>=1.8.11
