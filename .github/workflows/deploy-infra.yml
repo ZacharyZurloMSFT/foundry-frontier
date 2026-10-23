@@ -85,7 +85,7 @@ jobs:
         run: |
           az bicep install --version v0.46.1
           az bicep build --file infra/live/storage-networking.bicep --outfile /tmp/storage-networking.json
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Plan without changing live resources
@@ -138,7 +138,7 @@ jobs:
       - run: |
           az bicep install --version v0.46.1
           az bicep build --file infra/live/storage-networking.bicep --outfile /tmp/storage-networking.json
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Re-plan and apply only an unchanged reviewed boundary
