@@ -13,7 +13,10 @@ It is small on purpose. Read only the row you need; do not read everything.
 | Unsure which name is current (Field Services, Order Concierge, Insurance) | [glossary: naming lineage](glossary.md#naming-lineage) | [departments](../departments.md) |
 | Changing evals, baselines, prompts or CI gates | [ADR 0001](decisions/0001-prompt-files-are-source-of-truth.md), [ADR 0002](decisions/0002-four-eval-tiers-and-department-baselines.md), [gotchas: evals](gotchas.md#evals-and-prompts) | [genaiops](../genaiops.md), [evals/README](../../evals/README.md) |
 | Changing `infra/`, `azure.yaml` or `scripts/postprovision.*` | [gotchas: azd up](gotchas.md#azd-up-and-deployment) | [architecture](../architecture.md) (Networking, Regions, Identity) |
-| Changing the API surface or gateway routing | [gotchas: API and gateways](gotchas.md#api-and-gateways), [ADR 0003](decisions/0003-gateways-opt-in-fail-closed-two-tiers.md) | [api-management](../api-management.md), [ai-gateway](../ai-gateway.md) |
+| Changing the API surface or gateway routing | [gotchas: API and gateways](gotchas.md#api-and-gateways), [ADR 0003](decisions/0003-gateways-opt-in-fail-closed-two-tiers.md), [ADR 0005](decisions/0005-mcp-servers-are-plain-http-passthrough-apis.md) | [api-management](../api-management.md), [ai-gateway](../ai-gateway.md) |
+| Picking up the gateway cut-over (what is live, what is left, how to roll back) | [api-management](../api-management.md) (Status block at the top), [Remaining steps](../api-management.md#remaining-steps), [Rollback](../api-management.md#rollback) | [Insurance stack cut-over](../api-management.md#insurance-stack-cut-over-2026-10-23), [gotchas: hosted agent versions](gotchas.md#hosted-agent-versions) |
+| Setting up GitHub OIDC for the pipelines, or the repository goes private or public | [ADR 0004](decisions/0004-oidc-trust-on-a-public-repository-is-an-explicit-opt-in.md) | [api-management: repository visibility](../api-management.md#repository-visibility) |
+| Merging a PR or releasing apps | [gotchas: releases and merging](gotchas.md#releases-and-merging) | [`deploy-apps.yml`](../../.github/workflows/deploy-apps.yml) |
 | Adding or changing a department | [departments: adding a department](../departments.md#adding-a-new-department) | [glossary](glossary.md) |
 | Working on agents, HITL or the Copilot SDK harness | [gotchas: approvals](gotchas.md#approvals-and-agent-tools), [architecture: harness](../architecture.md#copilot-sdk-agent-harness) | [evals/README: harness](../../evals/README.md#copilot-sdk-harness) |
 | Running locally | [local-dev](../local-dev.md) | [gotchas: local development](gotchas.md#local-development) |
@@ -31,6 +34,7 @@ When a doc and a file disagree, trust the file and fix the doc in the same PR.
 | What do the azd services and hooks do? | [`azure.yaml`](../../azure.yaml), `scripts/postprovision.*` |
 | What is the gateway-visible API surface? | `infra/live/apim/specs/northwind-api.openapi.json` (generated from the app) |
 | What does a prompt say? | The prompt file itself, never a copy ([ADR 0001](decisions/0001-prompt-files-are-source-of-truth.md)) |
+| What is live right now (images, guard state, hosted agent versions)? | Azure itself: `az containerapp list -g rg-northwind-apps` and `python scripts/apim-smoke.py --gateway-url https://apim-northwind.azure-api.net --stack <stack> --expect-lockdown`. [api-management.md](../api-management.md) is a dated snapshot, so re-check it before relying on it. |
 
 ## Conventions
 
