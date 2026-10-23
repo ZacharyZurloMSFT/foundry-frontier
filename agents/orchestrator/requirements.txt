@@ -1,6 +1,6 @@
 # Hosted runtime is isolated from the API and development .venv.
 # Current hosting integration requires AF core >=1.19; 1.11 is incompatible.
-agent-framework-core==1.21.0
+agent-framework-core==1.22.0
 agent-framework-foundry==1.10.1
 agent-framework-foundry-hosting==1.0.0b260918
 azure-ai-agentserver-responses==2.2.0
