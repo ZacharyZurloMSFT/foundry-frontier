@@ -1,5 +1,6 @@
 <!--
-  MCP passthrough APIs (tech-lookup and work-order, one pair per stack). These are plain HTTP APIs, not the preview
+  MCP passthrough APIs: the policy/claim lookup server (API kind tech-lookup) and the claim-action review server (API
+  kind work-order) of each stack; the kinds are live API identifiers. These are plain HTTP APIs, not the preview
   "mcp" API type: the backends are FastMCP servers (stateless streamable HTTP) mounted at /mcp/, and a request to
   /mcp (no trailing slash) is a 307 that Foundry's MCP client does not follow, so the backend URI is always rewritten
   to /mcp/. Never read context.Response.Body here (it forces buffering and breaks event streams).

@@ -36,8 +36,8 @@ def test_only_canonical_assets_enter_the_selected_service_build_context(service,
         expected[app / "insurance_domain.py"] = (ROOT / "apps" / "api" / "app" / "insurance_domain.py").read_bytes()
         expected[app / "gateway_guard.py"] = (ROOT / "apps" / "api" / "app" / "gateway_guard.py").read_bytes()
     else:
-        manifest = ROOT / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
-        expected[app / "_northwind" / "departments" / "claims-warranty" / manifest.name] = manifest.read_bytes()
+        manifest = ROOT / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
+        expected[app / "_northwind" / "departments" / "claims-documents" / manifest.name] = manifest.read_bytes()
         for name in module.CLAIMS_DOCUMENTS:
             expected[app / "_northwind" / "claims-documents" / name] = (ROOT / "data" / "seed" / "generated" / name).read_bytes()
     assert staged_files == expected
@@ -46,7 +46,7 @@ def test_only_canonical_assets_enter_the_selected_service_build_context(service,
     assert module.bundle(service) == result
 
 
-@pytest.mark.parametrize("service", ["web-tech", "cu-ingest", "../api", ""])
+@pytest.mark.parametrize("service", ["web-portal", "cu-ingest", "../api", ""])
 def test_unknown_or_retired_services_cannot_be_packaged(service, staged_files):
     with pytest.raises(ValueError, match="only be staged"):
         module.bundle(service)
@@ -64,7 +64,7 @@ def test_missing_canonical_input_fails_before_copying_any_files(source, monkeypa
 
     monkeypatch.setattr(Path, "read_text", read_text)
     with pytest.raises(FileNotFoundError):
-        module.bundle("mcp-tech-lookup")
+        module.bundle("mcp-policy-lookup")
     assert not staged_files
 
 
@@ -92,7 +92,7 @@ def test_incomplete_fixture_fails_before_staging(collection, monkeypatch, staged
         else original(path, *args, **kwargs),
     )
     with pytest.raises(ValueError, match="nonempty " + collection):
-        module.bundle("mcp-work-order")
+        module.bundle("mcp-claim-review")
     assert not staged_files
 
 
@@ -105,7 +105,7 @@ def test_invalid_shared_code_fails_before_staging(shared, monkeypatch, staged_fi
         else original(path, *args, **kwargs),
     )
     with pytest.raises(SyntaxError):
-        module.bundle("mcp-work-order")
+        module.bundle("mcp-claim-review")
     assert not staged_files
 
 

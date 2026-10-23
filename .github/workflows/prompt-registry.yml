@@ -1,12 +1,14 @@
 name: Prompt Registry
-# On merge to main: for every .prompty and agent.yaml under agents/, upload
-# the file to the Foundry Prompt Store tagged with the current git SHA. That
-# creates the trace-back-to-PR link used by Foundry Observability.
+# On merge to main: upload every Northwind Insurance prompt (agents/insurance/*.yaml
+# plus the Copilot harness prompt and the evaluator rubrics) to the Foundry Prompt
+# Store tagged with the current git SHA. That creates the trace-back-to-PR link used
+# by Foundry Observability. scripts/publish-prompts.py selects the files.
 on:
   push:
     branches: [main]
     paths:
-      - "agents/**"
+      - "agents/insurance/**"
+      - "agents/copilot-harness/**"
       - "evals/evaluators/rubrics/**"
 
 permissions:

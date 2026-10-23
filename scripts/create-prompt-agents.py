@@ -1,21 +1,21 @@
-"""Create/update the Northwind Foundry prompt agents after `azd provision`.
+"""Create/update the Northwind Insurance Foundry prompt agents after `azd provision`.
 
-The demo is organized around one company (Northwind Industries) with four
+The demo is organized around one company (Northwind Insurance) with four
 departments, each backed by its own Foundry project inside the shared
 AI Services account. This script iterates every department listed in
 `data/northwind/company.yaml` and creates that department's prompt
-agents in the department's own project:
+agents, read from its `prompts/*.yaml`, in the department's own project:
 
-  - `order-concierge` → the flagship 4-agent set + dispatcher/parts,
-    read from the pre-existing top-level `agents/*.yaml` for backward
-    compat.
-  - `employee-help-desk` → `northwind-hr-assistant` from the department's
-    `prompts/*.yaml`.
-  - `claims-warranty` → `northwind-claims-triage`.
+  - `claims-concierge` → nothing: its agents are the hosted agents that
+    `scripts/deploy-hosted-agents.py` deploys.
+  - `adjuster-support` → `northwind-insurance-adjuster-support`.
+  - `claims-documents` → `northwind-claims-triage`.
   - `contact-center` → `northwind-intent-classifier`.
 
 Project endpoints are resolved from the `FOUNDRY_PROJECT_ENDPOINTS` env
-var (a JSON string emitted by main.bicep). When that var is missing
+var (a JSON string emitted by main.bicep). Keys written with a deprecated
+department slug (`order-concierge`, `employee-help-desk`, `claims-warranty`)
+are mapped to the canonical slug. When that var is missing
 (e.g., an older env deployed before the multi-project change) the
 script falls back to the single `FOUNDRY_PROJECT_ENDPOINT` and creates
 every agent there — preserves backward compatibility.
@@ -32,8 +32,11 @@ environments that predate the split.
 API Management gateway (`apim-northwind`): a yaml `type: mcp` tool whose `server_url` points at
 the gateway (a `*.azure-api.net` host, or the host of `NORTHWIND_GATEWAY_URL`) authenticates through a
 project connection (RemoteTool/CustomKeys holding the `Ocp-Apim-Subscription-Key`) named by
-`MCP_GATEWAY_CONNECTION_TECH_LOOKUP` or `MCP_GATEWAY_CONNECTION_WORK_ORDER`, chosen by the
-URL's `/mcp/<kind>` ending, unless the yaml sets its own `project_connection_id`. Foundry uses
+`MCP_GATEWAY_CONNECTION_POLICY_LOOKUP` or `MCP_GATEWAY_CONNECTION_CLAIM_REVIEW`, chosen by the
+URL's `/mcp/<kind>` ending, unless the yaml sets its own `project_connection_id`. The deprecated
+`MCP_GATEWAY_CONNECTION_TECH_LOOKUP` / `MCP_GATEWAY_CONNECTION_WORK_ORDER` names, and the
+`MCP_TECH_LOOKUP_URL` / `MCP_WORK_ORDER_URL` spellings of `MCP_POLICY_LOOKUP_URL` /
+`MCP_CLAIM_REVIEW_URL`, are read only when the canonical variable is unset. Foundry uses
 a referenced connection's *target* as the MCP endpoint, so each connection's target must be
 exactly the tool's `server_url`; one connection can never serve two endpoints. Gateway URLs are
 never rewritten; direct Container App URLs behave exactly as before. Those connections are never
@@ -50,13 +53,13 @@ yaml `model:` override) is sent as `<connection>/<provider>/<registration>`.
 `AI_GATEWAY_MODEL_PROVIDER` (default `aisvc-zurlo-northwind`) and `AI_GATEWAY_MODEL_ALIASES`
 (JSON map of deployment -> full alias, wins over derivation) tune the alias.
 `AI_GATEWAY_REQUIRED` is validated but does not apply to prompt-agent models: leaving the
-connection unset creates direct agents, so `azd up` post-provision keeps working when the
+connection unset creates direct agents, so this script keeps working when the
 flag is set for the hosted agents and the API.
 
 The knowledge-base MCP tools follow the same opt-in. `AI_GATEWAY_MCP_KB_ROUTES`
 is a JSON object keyed by Search knowledge-base name:
 
-  {"nw-hr-kb": {"toolserver": "northwind-hr-knowledge", "connection": "nw-hr-kb-gw"}}
+  {"northwind-insurance-kb": {"toolserver": "northwind-insurance-knowledge", "connection": "northwind-insurance-kb-gw"}}
 
 A KB with a route gets `server_url` = that gateway tool server's MCP URL,
 `project_connection_id` = the project connection holding the gateway runtime key
@@ -71,8 +74,8 @@ agent before anything is sent.
 `--dry-run` prints every planned agent (name, final model string, tools) and
 makes no Foundry call.
 
-Fails loudly (non-zero exit) on any per-agent error so post-provision
-surfaces the failure instead of silently leaving Foundry empty.
+Fails loudly (non-zero exit) on any per-agent error so a failed run is not
+mistaken for a Foundry that was silently left empty.
 """
 from __future__ import annotations
 
@@ -92,7 +95,6 @@ from urllib.parse import urlsplit
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
-_AGENTS_DIR = _ROOT / "agents"
 
 # Make `data.northwind` and the sibling gateway helpers importable regardless of cwd.
 sys.path.insert(0, str(_ROOT))
@@ -105,6 +107,39 @@ from data.northwind import Department, load_company  # noqa: E402
 
 ai_gateway_common = importlib.import_module("ai_gateway_common")
 
+# Departments whose agents are hosted agents (scripts/deploy-hosted-agents.py), not prompt agents.
+_HOSTED_DEPARTMENTS = {"claims-concierge"}
+
+# Deprecated department slugs still found in already-deployed FOUNDRY_PROJECT_ENDPOINTS values.
+LEGACY_DEPARTMENT_SLUGS = {
+    "order-concierge": "claims-concierge",
+    "employee-help-desk": "adjuster-support",
+    "claims-warranty": "claims-documents",
+}
+
+# Canonical variable -> deprecated alias. The canonical name wins; the alias is read only when the
+# canonical variable is unset or blank.
+ENV_ALIASES = {
+    "MCP_POLICY_LOOKUP_URL": "MCP_TECH_LOOKUP_URL",
+    "MCP_CLAIM_REVIEW_URL": "MCP_WORK_ORDER_URL",
+    "MCP_GATEWAY_CONNECTION_POLICY_LOOKUP": "MCP_GATEWAY_CONNECTION_TECH_LOOKUP",
+    "MCP_GATEWAY_CONNECTION_CLAIM_REVIEW": "MCP_GATEWAY_CONNECTION_WORK_ORDER",
+}
+
+# Isolated insurance knowledge base published by scripts/publish-insurance-knowledge.py.
+DEFAULT_KNOWLEDGE_INDEX = "northwind-insurance-knowledge"
+DEFAULT_KNOWLEDGE_BASE = "northwind-insurance-kb"
+DEFAULT_KB_CONNECTION = "northwind-insurance-kb-mcp"
+
+
+def _alias_env(canonical: str) -> str | None:
+    """The value of a canonical variable, else of its deprecated alias; None when neither is set."""
+    for name in (canonical, ENV_ALIASES.get(canonical)):
+        value = os.environ.get(name, "").strip() if name else ""
+        if value:
+            return value
+    return None
+
 
 def _get_credential():
     """AIProjectClient in azure-ai-projects>=2.x requires a TokenCredential
@@ -116,10 +151,6 @@ def _get_credential():
     for local runs."""
     client_id = os.environ.get("AZURE_CLIENT_ID") or None
     return DefaultAzureCredential(managed_identity_client_id=client_id)
-
-# Yaml files that are NOT prompt agents (e.g., hosted agent scaffolds live
-# under agents/<name>/ folders, not top-level yamls).
-_SKIP = {"orchestrator.yaml", "connected-agents.yaml"}
 
 
 def _resolve_model() -> str:
@@ -231,7 +262,8 @@ def gateway_models_from_env(env: Mapping[str, str] | None = None) -> GatewayMode
     Raises ValueError for a malformed setting. AI_GATEWAY_REQUIRED is validated (a typo must not silently
     disable a fail-closed control) but does not make a model connection mandatory: prompt agents cannot be
     routed through the AI Gateway tier (Foundry rejects its `provider/registration` alias as a model id, see
-    docs/ai-gateway.md finding 9), so requiring one would only break `azd up` post-provision.
+    docs/ai-gateway.md finding 9), so requiring one would only break this script whenever the flag is set for the
+    hosted agents and the API.
     """
     source = os.environ if env is None else env
     _env_flag(source, "AI_GATEWAY_REQUIRED")
@@ -339,10 +371,15 @@ def _kb_mcp_entry(agent: str, kb: str, direct_connection: str, mcp: GatewayMcp |
 
 def _expand_env(v: Any) -> Any:
     """Expand ${VAR} references in string yaml values against os.environ.
-    Non-string values pass through unchanged."""
+    A canonical variable and its deprecated alias expand to the same value, the canonical
+    one winning. Non-string values pass through unchanged."""
     if not isinstance(v, str):
         return v
     out = v
+    for canonical, alias in ENV_ALIASES.items():
+        value = _alias_env(canonical)
+        if value is not None:
+            out = out.replace(f"${{{canonical}}}", value).replace(f"${{{alias}}}", value)
     for name, val in os.environ.items():
         out = out.replace(f"${{{name}}}", val)
     return out
@@ -360,9 +397,11 @@ def _is_gateway_url(url: str) -> bool:
     return host.endswith(".azure-api.net") or (custom is not None and host == custom)
 
 
+# The keys are the gateway path segments of the live insurance APIs (`/insurance/mcp/tech-lookup`,
+# `/insurance/mcp/work-order`), which keep their names.
 GATEWAY_MCP_CONNECTION_VARIABLES = {
-    "tech-lookup": "MCP_GATEWAY_CONNECTION_TECH_LOOKUP",
-    "work-order": "MCP_GATEWAY_CONNECTION_WORK_ORDER",
+    "tech-lookup": "MCP_GATEWAY_CONNECTION_POLICY_LOOKUP",
+    "work-order": "MCP_GATEWAY_CONNECTION_CLAIM_REVIEW",
 }
 
 
@@ -377,7 +416,7 @@ def _gateway_connection_for(url: str) -> tuple[str | None, str | None]:
         return None, None
     kind = segments[-1] if len(segments) >= 2 and segments[-2] == "mcp" else None
     variable = GATEWAY_MCP_CONNECTION_VARIABLES.get(kind or "")
-    return (os.environ.get(variable, "").strip() or None) if variable else None, variable
+    return (_alias_env(variable) if variable else None), variable
 
 
 def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
@@ -403,26 +442,25 @@ def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = N
         kb = _expand_env(k.get("knowledge_base"))
         conn = _expand_env(k.get("connection"))
         # If the yaml used ${FOUNDRY_KB_CONNECTION_NAME} but the env var
-        # isn't set, fall back to the well-known default that
-        # scripts/connect-knowledge-base.py provisions. Same for KB name.
+        # isn't set, fall back to the isolated insurance knowledge base and
+        # its project connection (scripts/publish-insurance-knowledge.py).
         if not kb or (isinstance(kb, str) and kb.startswith("${")):
-            kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", "northwind-kb")
+            kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", DEFAULT_KNOWLEDGE_BASE)
         if not conn or (isinstance(conn, str) and conn.startswith("${")):
-            conn = os.environ.get("FOUNDRY_KB_CONNECTION_NAME", "northwind-kb-mcp")
+            conn = os.environ.get("FOUNDRY_KB_CONNECTION_NAME", DEFAULT_KB_CONNECTION)
         if not kb or not conn:
             print(f"  ! knowledge on '{cfg['name']}' missing knowledge_base or connection - skipping.")
             continue
         out.append(_kb_mcp_entry(cfg["name"], kb, conn, mcp))
-    # Non-order-concierge departments declare a target Search index in their
-    # department.yaml (`search_index`) and their prompt agents use a
+    # A prompt agent may declare a target Search index with a
     # `type: knowledge` tool block that we translate to the same MCP shape
-    # against the per-department index. Simplified: if the yaml has a
-    # `tools: [{type: knowledge, index: nw-hr}]` entry, we emit one MCP
+    # against that index. Simplified: if the yaml has a
+    # `tools: [{type: knowledge, index: nw-claims}]` entry, we emit one MCP
     # tool per matching index against the shared Search KB service.
     #
     # Connection naming: Foundry connection names are account-scoped, so
     # every project needs its own uniquely-named connection. Convention:
-    # `<kb-name>-mcp` (e.g., `northwind-kb-mcp`, `nw-hr-kb-mcp`). This
+    # `<kb-name>-mcp` (e.g., `northwind-insurance-kb-mcp`, `nw-claims-kb-mcp`). This
     # matches what scripts/connect-knowledge-base.py creates.
     for t in cfg.get("tools") or []:
         if isinstance(t, dict) and t.get("type") == "knowledge":
@@ -430,11 +468,10 @@ def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = N
             if not idx:
                 print(f"  ! knowledge tool on '{cfg['name']}' has no index - skipping.")
                 continue
-            # Order Concierge flagship keeps the pre-existing kb/conn names
-            # for backward compat with everything that references
-            # AZURE_SEARCH_KNOWLEDGE_BASE / FOUNDRY_KB_CONNECTION_NAME.
-            if idx == os.environ.get("AZURE_SEARCH_INDEX", "northwind-knowledge"):
-                kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", "northwind-kb")
+            # The isolated insurance index keeps its published kb/conn names
+            # (AZURE_SEARCH_KNOWLEDGE_BASE / FOUNDRY_KB_CONNECTION_NAME).
+            if idx == os.environ.get("AZURE_SEARCH_INDEX", DEFAULT_KNOWLEDGE_INDEX):
+                kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", DEFAULT_KNOWLEDGE_BASE)
                 conn = os.environ.get("FOUNDRY_KB_CONNECTION_NAME", f"{kb}-mcp")
             else:
                 kb = f"{idx}-kb"
@@ -513,8 +550,10 @@ def _tools_for_agent(cfg: dict[str, Any], search_index: str | None = None,
                     print(f"  ~ {cfg['name']}: MCP server is behind the API gateway; using project connection "
                           f"'{connection}' (its target must be exactly {server_url}).")
                 else:
+                    names = (f"{variable}, or its deprecated alias {ENV_ALIASES[variable]}" if variable
+                             else "unrecognised MCP endpoint")
                     print(f"  ! {cfg['name']}: MCP server is behind the API gateway but no project connection is "
-                          f"configured ({variable or 'unrecognised MCP endpoint'}); its calls will be rejected (401).")
+                          f"configured ({names}); its calls will be rejected (401).")
             resolved.append(mcp_entry)
         elif kind == "knowledge":
             # Handled in _knowledge_tools_for_agent (below).
@@ -560,10 +599,8 @@ async def _upsert_agent(agents, cfg: dict[str, Any], model: str, search_index: s
     is upsert-friendly: it creates the agent record on first call and appends
     a new immutable version on subsequent calls.
 
-    A yaml may override the department-default model via a `model:` field —
-    used by the Ask Northwind trio (northwind-hr-assistant-{gpt-5-4,
-    gpt-5-4-mini,kimi}) so the UI dropdown can pick a specific model without
-    changing the shared HR instructions or RAG grounding."""
+    A yaml may override the department-default model via a `model:` field,
+    so one agent can use a different deployment from the shared default."""
     from azure.ai.projects.models import PromptAgentDefinition
 
     agent_model, tools = _plan_agent(cfg, model, search_index=search_index, gateway=gateway, mcp=mcp)
@@ -594,14 +631,25 @@ async def _upsert_agent(agents, cfg: dict[str, Any], model: str, search_index: s
     return cfg["name"]
 
 
+def _canonical_endpoints(raw: Mapping[str, Any]) -> dict[str, str]:
+    """Department-slug -> endpoint with deprecated slugs mapped to canonical ones.
+    A canonical key wins over its deprecated alias."""
+    canonical: dict[str, str] = {}
+    legacy: dict[str, str] = {}
+    for key, value in raw.items():
+        slug = str(key).strip().lower()
+        (legacy if slug in LEGACY_DEPARTMENT_SLUGS else canonical)[LEGACY_DEPARTMENT_SLUGS.get(slug, slug)] = str(value)
+    return {**legacy, **canonical}
+
+
 def _resolve_endpoints() -> dict[str, str]:
     """Return department-slug -> Foundry project endpoint.
 
     Prefers `FOUNDRY_PROJECT_ENDPOINTS` (JSON emitted by main.bicep). Falls
-    back to a single-project map keyed by `order-concierge` for older envs.
+    back to a single-project map keyed by `claims-concierge` for older envs.
     If neither map is set but `FOUNDRY_ENDPOINT` is available, synthesizes
     per-department endpoints from the manifest's `foundry_project` names —
-    this is what makes local `postprovision.ps1` runs succeed even when
+    this is what lets a local run succeed even when
     the azd Bicep outputs haven't been loaded into the shell.
     """
     raw = os.environ.get("FOUNDRY_PROJECT_ENDPOINTS", "").strip()
@@ -610,7 +658,7 @@ def _resolve_endpoints() -> dict[str, str]:
             endpoints = json.loads(raw)
             if not isinstance(endpoints, dict):
                 raise ValueError("must be a JSON object")
-            return {str(k): str(v) for k, v in endpoints.items()}
+            return _canonical_endpoints(endpoints)
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"WARNING: FOUNDRY_PROJECT_ENDPOINTS not valid JSON — falling back "
                   f"to synthesis. ({exc})")
@@ -635,10 +683,10 @@ def _resolve_endpoints() -> dict[str, str]:
                 d.slug: f"{base}/api/projects/{d.foundry_project}"
                 for d in company.departments
             }
-            # Order Concierge flagship keeps the exact FOUNDRY_PROJECT_ENDPOINT
+            # The claims-concierge flagship keeps the exact FOUNDRY_PROJECT_ENDPOINT
             # if it was set — preserves any preview-only quirks.
             if single:
-                synthesized["order-concierge"] = single
+                synthesized["claims-concierge"] = single
             print(f"Synthesized {len(synthesized)} project endpoints from "
                   f"FOUNDRY_ENDPOINT + manifest.")
             return synthesized
@@ -647,26 +695,21 @@ def _resolve_endpoints() -> dict[str, str]:
         raise RuntimeError(
             "Neither FOUNDRY_PROJECT_ENDPOINTS nor FOUNDRY_PROJECT_ENDPOINT is set."
         )
-    return {"order-concierge": single}
+    return {"claims-concierge": single}
 
 
 def _prompt_yamls_for_department(dept: Department) -> list[Path]:
-    """Order Concierge points at the pre-existing top-level `agents/*.yaml`
-    (backward compat). Other departments have their prompts colocated
-    under `data/northwind/departments/<slug>/prompts/*.yaml`.
-    """
-    return sorted(
-        p for p in dept.prompts_dir.glob("*.yaml")
-        if p.name not in _SKIP
-    )
+    """A department's prompt agents live under
+    `data/northwind/departments/<slug>/prompts/*.yaml`."""
+    return sorted(dept.prompts_dir.glob("*.yaml"))
 
 
 async def _create_for_department(dept: Department, endpoint: str, model: str,
                                  cred, gateway: GatewayModels | None = None,
                                  dry_run: bool = False,
                                  mcp: GatewayMcp | None = None) -> tuple[list[str], list[tuple[str, str]]]:
-    if dept.slug == "order-concierge" and os.environ.get("ORDER_AGENTS_HOSTED", "true").lower() == "true":
-        print("\n[order-concierge] Hosted agents are deployed by the five azure.yaml agent services; prompt provisioning skipped.")
+    if dept.slug in _HOSTED_DEPARTMENTS:
+        print(f"\n[{dept.slug}] Hosted agents are deployed by scripts/deploy-hosted-agents.py; prompt provisioning skipped.")
         return [], []
     yamls = _prompt_yamls_for_department(dept)
     if not yamls:

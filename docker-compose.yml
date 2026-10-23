@@ -5,7 +5,7 @@
 # Usage:
 #   docker compose up --build
 #     api        → http://localhost:8000
-#     web-tech   → http://localhost:5173
+#     web-portal → http://localhost:5173
 #     web-voice  → http://localhost:5174
 
 services:
@@ -33,13 +33,13 @@ services:
       retries: 5
       start_period: 20s
 
-  web-tech:
+  web-portal:
     build:
-      context: ./apps/web-tech
+      context: ./apps/web-portal
       dockerfile: Dockerfile.local
       args:
         VITE_API_BASE_URL: http://localhost:8000
-    image: northwind-copilot/web-tech:local
+    image: northwind-copilot/web-portal:local
     depends_on:
       - api
     ports:

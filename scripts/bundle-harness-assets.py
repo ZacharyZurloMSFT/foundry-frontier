@@ -13,13 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def bundle(root: Path = ROOT) -> dict[str, str]:
-    sources = [root / "agents" / "copilot-harness" / name
-               for name in ("instructions.prompty", "retail.instructions.prompty")]
-    contents = [source.read_text(encoding="utf-8") for source in sources]
-    for domain, content in zip(("insurance", "retail"), contents):
-        if f"business_domain: {domain}\n" not in content:
-            raise ValueError("Canonical harness prompt has an invalid business domain.")
-    support = (root / "data" / "northwind" / "departments" / "employee-help-desk"
+    harness = root / "agents" / "copilot-harness" / "instructions.prompty"
+    harness_content = harness.read_text(encoding="utf-8")
+    if "business_domain: insurance\n" not in harness_content:
+        raise ValueError("Canonical harness prompt has an invalid business domain.")
+    support = (root / "data" / "northwind" / "departments" / "adjuster-support"
                / "prompts" / "northwind-adjuster-support.yaml")
     support_content = support.read_text(encoding="utf-8")
     if "index: nw-insurance-adjuster-support\n" not in support_content:
@@ -33,13 +31,12 @@ def bundle(root: Path = ROOT) -> dict[str, str]:
         raise ValueError("Build SHA must be a commit hash.")
     stamp = {
         "git_sha": sha, "repo": os.environ.get("GITHUB_REPOSITORY", ""),
-        "prompt_sha.copilot-harness": hashlib.sha256(contents[0].encode()).hexdigest(),
-        "prompt_sha.copilot-harness-retail": hashlib.sha256(contents[1].encode()).hexdigest(),
+        "prompt_sha.copilot-harness": hashlib.sha256(harness_content.encode()).hexdigest(),
         "prompt_sha.adjuster-support": hashlib.sha256(support_content.encode()).hexdigest(),
     }
     destination = root / "apps" / "api" / "app" / "_agent_prompts"
     destination.mkdir(parents=True, exist_ok=True)
-    for source in [*sources, support]:
+    for source in (harness, support):
         shutil.copyfile(source, destination / source.name)
     (destination / "build.json").write_text(json.dumps(stamp, indent=2), encoding="utf-8")
     return stamp

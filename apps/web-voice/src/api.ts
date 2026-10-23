@@ -1,5 +1,5 @@
 export const API_BASE = ((import.meta as any).env?.VITE_API_BASE_URL ||
-  "https://ca-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io").replace(/\/$/, "");
+  "https://ca-insurance-api.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io").replace(/\/$/, "");
 
 export interface InsuranceRecords {
   business_domain: "insurance";
@@ -70,7 +70,7 @@ export function voiceProxyUrlFor(apiBase: string): string {
     throw new Error("Voice requires HTTPS (or local development).");
   }
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  // A gateway base keeps its path prefix (for example /northwind), so the proxy path is appended rather than replacing it.
+  // A gateway base keeps its path prefix (for example /insurance), so the proxy path is appended rather than replacing it.
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/voice/realtime`;
   url.search = ""; url.hash = "";
   return url.toString();

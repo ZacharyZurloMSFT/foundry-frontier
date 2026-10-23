@@ -25,9 +25,9 @@ param resourceToken string
 @minLength(5)
 param compactToken string
 @minLength(1)
-param orderProjectName string
+param insuranceProjectName string
 
-// These are azd's existing deployment outputs, not defaults for the legacy API.
+// These are azd's existing deployment outputs, not defaults for a fresh deployment.
 // Nested constraints apply only when this adoption deployment is selected.
 @sealed()
 type preservedConfiguration = {
@@ -40,11 +40,11 @@ type preservedConfiguration = {
   @minLength(1)
   FOUNDRY_PROJECT_ENDPOINTS: string
   @minLength(1)
-  ORDERS_OPENAI_ENDPOINT: string
+  AGENT_OPENAI_ENDPOINT: string
   @minLength(1)
   AZURE_OPENAI_ENDPOINT: string
   @minLength(1)
-  ORDERS_KB_CONNECTION_NAME: string
+  AGENT_KB_CONNECTION_NAME: string
   @minLength(1)
   FOUNDRY_KB_CONNECTION_NAME: string
   @minLength(1)
@@ -58,24 +58,11 @@ type preservedConfiguration = {
   @minLength(1)
   AZURE_AI_MODEL_DEPLOYMENT_NAME: string
   @minLength(1)
-  FOUNDRY_BAKEOFF_DEPLOYMENTS: string
-  @minLength(1)
-  AZURE_SEARCH_INDEX: string
-  @minLength(1)
-  AZURE_SEARCH_KNOWLEDGE_BASE: string
-  @minLength(1)
-  AZURE_SEARCH_KNOWLEDGE_SOURCE: string
-  @minLength(1)
   COSMOS_DATABASE: string
   @minLength(1)
   STORAGE_CU_CONTAINER: string
   @minLength(1)
   STORAGE_SEED_CONTAINER: string
-  FOUNDRY_AGENT_TRIAGE_ID: string
-  FOUNDRY_AGENT_TECH_LOOKUP_ID: string
-  FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID: string
-  FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID: string
-  FOUNDRY_ORCHESTRATOR_AGENT_ID: string
 }
 param preservedSettings preservedConfiguration
 
@@ -101,9 +88,9 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = {
   scope: resourceGroup(foundryResourceGroupName)
   name: '${abbrs.cognitiveServicesAccounts}${resourceToken}'
 }
-resource orderProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' existing = {
+resource insuranceProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' existing = {
   parent: foundry
-  name: orderProjectName
+  name: insuranceProjectName
 }
 resource search 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
   scope: resourceGroup(dataResourceGroupName)
@@ -140,30 +127,30 @@ resource aiGateway 'Microsoft.ApiManagement/service@2024-05-01' existing = {
 
 resource api 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-api'
+  name: 'ca-insurance-api'
 }
-resource mcpTechLookup 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
+resource mcpPolicyLookup 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-mcp-tech-lookup'
+  name: 'ca-insurance-lookup'
 }
-resource mcpWorkOrder 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
+resource mcpClaimReview 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-mcp-work-order'
+  name: 'ca-insurance-review'
 }
-resource webTech 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
+resource webPortal 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-web-tech'
+  name: 'ca-insurance-portal'
 }
 resource webVoice 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
   scope: resourceGroup(appsResourceGroupName)
-  name: 'ca-web-voice'
+  name: 'ca-insurance-voice'
 }
 // Report each app's actual attachment, even when a replacement environment is selected.
 output containerAppResources array = [
   { service: 'api', name: api.name, id: api.id, environmentId: api.properties.managedEnvironmentId }
-  { service: 'mcp-tech-lookup', name: mcpTechLookup.name, id: mcpTechLookup.id, environmentId: mcpTechLookup.properties.managedEnvironmentId }
-  { service: 'mcp-work-order', name: mcpWorkOrder.name, id: mcpWorkOrder.id, environmentId: mcpWorkOrder.properties.managedEnvironmentId }
-  { service: 'web-tech', name: webTech.name, id: webTech.id, environmentId: webTech.properties.managedEnvironmentId }
+  { service: 'mcp-policy-lookup', name: mcpPolicyLookup.name, id: mcpPolicyLookup.id, environmentId: mcpPolicyLookup.properties.managedEnvironmentId }
+  { service: 'mcp-claim-review', name: mcpClaimReview.name, id: mcpClaimReview.id, environmentId: mcpClaimReview.properties.managedEnvironmentId }
+  { service: 'web-portal', name: webPortal.name, id: webPortal.id, environmentId: webPortal.properties.managedEnvironmentId }
   { service: 'web-voice', name: webVoice.name, id: webVoice.id, environmentId: webVoice.properties.managedEnvironmentId }
 ]
 
@@ -172,19 +159,19 @@ output settings object = union(preservedSettings, {
   AZURE_MANAGED_IDENTITY_ID: identity.id
   AZURE_MANAGED_IDENTITY_PRINCIPAL_ID: identity.properties.principalId
   APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
-  AZURE_AI_PROJECT_ID: orderProject.id
-  FOUNDRY_PROJECT_PRINCIPAL_ID: orderProject.identity.principalId
-  // Report the effective account default; never PATCH it to the Orders project.
-  ORDER_DEFAULT_PROJECT: foundry.properties.defaultProject
+  AZURE_AI_PROJECT_ID: insuranceProject.id
+  FOUNDRY_PROJECT_PRINCIPAL_ID: insuranceProject.identity.principalId
+  // Report the effective account default; never PATCH it to the insurance project.
+  FOUNDRY_DEFAULT_PROJECT: foundry.properties.defaultProject
   AZURE_SEARCH_ENDPOINT: 'https://${search.name}.search.windows.net'
   COSMOS_ENDPOINT: cosmos.properties.documentEndpoint
   STORAGE_ACCOUNT: storage.name
   AZURE_CONTAINER_REGISTRY_ENDPOINT: acr.properties.loginServer
   AZURE_CONTAINER_REGISTRY_NAME: acr.name
   API_URI: 'https://${api.properties.configuration.ingress.fqdn}'
-  MCP_TECH_LOOKUP_URL: 'https://${mcpTechLookup.properties.configuration.ingress.fqdn}/mcp/'
-  MCP_WORK_ORDER_URL: 'https://${mcpWorkOrder.properties.configuration.ingress.fqdn}/mcp/'
-  WEB_TECH_URI: 'https://${webTech.properties.configuration.ingress.fqdn}'
+  MCP_POLICY_LOOKUP_URL: 'https://${mcpPolicyLookup.properties.configuration.ingress.fqdn}/mcp/'
+  MCP_CLAIM_REVIEW_URL: 'https://${mcpClaimReview.properties.configuration.ingress.fqdn}/mcp/'
+  WEB_PORTAL_URI: 'https://${webPortal.properties.configuration.ingress.fqdn}'
   WEB_VOICE_URI: 'https://${webVoice.properties.configuration.ingress.fqdn}'
   AZURE_LOG_ANALYTICS_RESOURCE_ID: logAnalytics.id
 })
@@ -193,7 +180,7 @@ output settings object = union(preservedSettings, {
 // templates are deployed, and additional Foundry projects/models are untouched.
 output resourceIds object = {
   foundry: foundry.id
-  orderProject: orderProject.id
+  insuranceProject: insuranceProject.id
   identity: identity.id
   acr: acr.id
   appInsights: appInsights.id

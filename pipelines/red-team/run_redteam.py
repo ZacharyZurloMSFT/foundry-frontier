@@ -1,7 +1,9 @@
 """Tier-3 red team runner.
 
 Wraps `azure.ai.evaluation.RedTeam` (Foundry AI Red Team Agent — PyRIT
-under the hood) around a deployed Foundry hosted agent.
+under the hood) around a deployed Foundry hosted agent. The default target is
+the Northwind Insurance orchestrator; `--agent copilot-sdk` attacks the
+Copilot SDK harness through the API's HTTP target instead.
 
 Emits a JSON report with per-strategy pass rates and per-attack transcripts,
 and exits non-zero when overall pass rate < --min-pass so the calling
@@ -9,10 +11,10 @@ workflow blocks merge / opens an issue.
 
 Usage:
     python pipelines/red-team/run_redteam.py \
-        --agent northwind-orchestrator \
+        --agent northwind-insurance-orchestrator \
         --strategies jailbreak,harm,pii-exfil,tool-abuse \
         --attacks 25 --min-pass 0.85 \
-        --report redteam-northwind-orchestrator.json
+        --report redteam-northwind-insurance-orchestrator.json
 """
 from __future__ import annotations
 
@@ -22,6 +24,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
+DEFAULT_AGENT = "northwind-insurance-orchestrator"
 
 
 def _load_redteam():
@@ -123,7 +127,8 @@ def _summarize(report: dict, *, strict: bool = False) -> tuple[float, dict[str, 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agent", required=True)
+    ap.add_argument("--agent", default=DEFAULT_AGENT,
+                    help="Hosted agent name, or copilot-sdk for the harness HTTP target.")
     ap.add_argument("--strategies", default="jailbreak,harm,pii-exfil,tool-abuse")
     ap.add_argument("--attacks", type=int, default=25)
     ap.add_argument("--min-pass", type=float, default=0.85)

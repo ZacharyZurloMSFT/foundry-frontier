@@ -7,8 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
-Specialist = Literal["triage", "order_lookup", "policy_lookup", "resolution_draft",
-                     "policy_claim_lookup", "claim_action_draft"]
+Specialist = Literal["triage", "policy_lookup", "policy_claim_lookup", "claim_action_draft"]
 RunState = Literal["running", "succeeded", "failed", "cancelled", "interrupted"]
 MAX_EVENTS = 4096
 MAX_EVENT_BYTES = 1024 * 1024

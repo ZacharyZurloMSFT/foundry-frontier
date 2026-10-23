@@ -42,22 +42,23 @@ def _make_ev() -> RubricEvaluator:
 
 def test_good_response_scores_5_and_passes(monkeypatch):
     monkeypatch.setattr(rubric_evaluator.prompty, "execute", _fake_execute)
-    good = '{"site_id":"phoenix","equipment_vendor":null,"equipment_model":null,"problem_summary":"smoke","priority":"P1"}'
-    CANNED[good] = {"score": 5, "reason": "perfect", "priority_correct": True, "json_valid": True}
+    good = ('{"claim_id":"CLM-2001","policy_id":null,"policyholder_id":null,"intent":"CLAIM_STATUS",'
+            '"sentiment":"calm","urgency":"P3","problem_summary":"Status request for claim CLM-2001."}')
+    CANNED[good] = {"score": 5, "reason": "perfect", "identifiers_correct": True, "intent_correct": True, "json_valid": True}
     ev = _make_ev()
-    out = ev(query="smoke at phoenix", response=good)
+    out = ev(query="What is the status of claim CLM-2001?", response=good)
     assert out["triage_rubric_score"] == 5
     assert out["triage_rubric_pass"] is True
     assert "perfect" in out["triage_rubric_reason"]
-    assert out["triage_rubric_raw"]["priority_correct"] is True
+    assert out["triage_rubric_raw"]["identifiers_correct"] is True
 
 
 def test_bad_response_scores_low_and_fails(monkeypatch):
     monkeypatch.setattr(rubric_evaluator.prompty, "execute", _fake_execute)
-    bad = "The AC is warm. Priority P1."
-    CANNED[bad] = {"score": 2, "reason": "not JSON and mis-prioritized", "priority_correct": False, "json_valid": False}
+    bad = "The claim is moving along. Priority P1."
+    CANNED[bad] = {"score": 2, "reason": "not JSON and mis-prioritized", "intent_correct": False, "json_valid": False}
     ev = _make_ev()
-    out = ev(query="warm conference room, not urgent", response=bad)
+    out = ev(query="Just checking in on claim CLM-2002, no rush at all", response=bad)
     assert out["triage_rubric_score"] == 2
     assert out["triage_rubric_pass"] is False
 
@@ -95,6 +96,17 @@ def test_aggregate_results():
     assert agg["triage_rubric.pass_rate"] == 0.5
     assert agg["triage_rubric.n_scored"] == 3
     assert agg["triage_rubric.n_errors"] == 1
+
+
+def test_every_shipped_rubric_resolves_by_workflow_name(monkeypatch):
+    import pytest
+
+    pytest.importorskip("prompty.azure")
+    monkeypatch.setattr(rubric_evaluator.prompty, "execute", lambda *_a, **_k: {"score": 4, "reason": "ok"})
+    config = {"azure_endpoint": "https://example", "azure_deployment": "gpt-4o", "api_version": "2024-10-21"}
+    for workflow in ("triage", "safety"):
+        out = load_agent_rubric(workflow, model_config=config)(query="q", response="r")
+        assert out[f"{workflow}_rubric_score"] == 4 and out[f"{workflow}_rubric_pass"] is True
 
 
 if __name__ == "__main__":

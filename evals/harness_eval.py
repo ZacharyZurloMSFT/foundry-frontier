@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import uuid
 
 import httpx
 
-TOOLS = {"triage", "order_lookup", "policy_lookup", "resolution_draft"}
-RESOLUTIONS = {"refund_full", "refund_partial", "reship", "rma", "store_credit",
-               "address_change", "cancel", "goodwill_credit"}
+try:
+    from evaluators.claim_action_completeness import evaluate_draft
+except ImportError:  # imported as evals.harness_eval
+    from evals.evaluators.claim_action_completeness import evaluate_draft
+
+TOOLS = {"triage", "policy_claim_lookup", "policy_lookup", "claim_action_draft"}
+ACTION_KIND = "insurance_claim_action"
 
 
 async def invoke(message: str, api_base: str | None = None) -> dict:
@@ -41,28 +44,19 @@ async def invoke(message: str, api_base: str | None = None) -> dict:
         return result
 
 
-def resolution_complete(payload: dict) -> bool:
-    amount = payload.get("amount_usd")
-    return (
-        all(isinstance(payload.get(k), str) and payload[k].strip()
-            for k in ("order_id", "customer_id", "reason", "policy_ref"))
-        and payload.get("resolution_type") in RESOLUTIONS
-        and payload.get("urgency") in {"P1", "P2", "P3", "P4"}
-        and isinstance(amount, (int, float)) and not isinstance(amount, bool)
-        and math.isfinite(amount) and 0 <= amount <= 100000
-    )
-
-
 def grade(run: dict, case: dict | None = None, *, allow_decided: bool = False) -> dict:
     case = case or {}
     events = run.get("events", [])
     calls = {e["tool"] for e in events if e["kind"] == "tool_start"}
+    # A validation failure on an unknown or mismatched identifier is expected for some cases.
+    expected_errors = set(case.get("allowed_tool_errors", []))
     failures = []
     if run.get("status") != "succeeded" or not run.get("output", "").strip():
         failures.append("no successful final output")
     if not events or not calls.issubset(TOOLS):
         failures.append("missing events or unregistered tools")
-    if any(e["kind"] in {"tool_error", "error"} for e in events):
+    if any(e["kind"] == "error" or (e["kind"] == "tool_error" and e.get("tool") not in expected_errors)
+           for e in events):
         failures.append("tool/runtime error")
     if not set(case.get("required_tools", [])).issubset(calls):
         failures.append("required specialist was not called")
@@ -73,11 +67,16 @@ def grade(run: dict, case: dict | None = None, *, allow_decided: bool = False) -
         failures.append("unexpected side effect")
     if approval:
         if approval["status"] != "pending" and not allow_decided:
-            failures.append("evaluation resolution was decided without an evaluation human")
+            failures.append("evaluation draft was decided without an evaluation human")
         if approval["workflowId"] != run["workflow_id"]:
             failures.append("cross-run approval")
-        if not resolution_complete(approval["payload"]):
-            failures.append("incomplete structured resolution")
+        if approval.get("kind") != ACTION_KIND or approval.get("execution_status") != "not_executed":
+            failures.append("approval is not an unexecuted claim-action draft")
+        draft = evaluate_draft(approval["payload"], case.get("draft"))
+        if draft["claim_action_completeness"] != 1.0 or not draft["plausible"]:
+            failures.append("incomplete structured claim action")
+        elif draft.get("expected_match") == 0.0:
+            failures.append("claim action differs from the expected draft")
     return {"harness_contract_pass": float(not failures), "harness_failures": failures}
 
 

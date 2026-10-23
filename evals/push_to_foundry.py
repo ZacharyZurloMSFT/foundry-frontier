@@ -1,9 +1,10 @@
-"""Deploy the triage rubric evaluation to Foundry.
+"""Deploy the insurance triage rubric evaluation to Foundry.
 
 End-to-end:
   1. Read triage-* rows from the golden dataset.
-  2. Call Azure OpenAI with the triage agent's system prompt to generate
-     structured JSON responses (mirrors what the deployed prompt agent does).
+  2. Call Azure OpenAI with the insurance triage agent's system prompt
+     (agents/insurance/triage.yaml) to generate structured JSON responses
+     (mirrors what the deployed prompt agent does).
   3. Write {query, response} JSONL to .foundry/datasets/triage-eval-input.jsonl.
   4. Run azure.ai.evaluation.evaluate() with our RubricEvaluator +
      CoherenceEvaluator, pushing results to the Foundry project.
@@ -46,7 +47,7 @@ def _azd_env() -> dict[str, str]:
 
 
 def load_triage_system_prompt() -> str:
-    y = yaml.safe_load((REPO / "agents" / "triage.yaml").read_text(encoding="utf-8"))
+    y = yaml.safe_load((REPO / "agents" / "insurance" / "triage.yaml").read_text(encoding="utf-8"))
     return y["instructions"]
 
 
@@ -100,7 +101,7 @@ def main() -> int:
 
     # 1. Pick triage rows.
     dataset_path = REPO / "data" / "golden" / "dataset.jsonl"
-    rows = [json.loads(l) for l in dataset_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in dataset_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     triage_rows = [r for r in rows if r["workflow"] == "triage"][: args.limit]
     print(f"Loaded {len(triage_rows)} triage rows")
 

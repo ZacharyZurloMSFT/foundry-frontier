@@ -74,7 +74,7 @@ def render(kind: str, *, audience: str = "", business_auth: bool = False) -> str
         jwt = (read("fragment-validate-jwt.xml").replace("__TENANT_ID__", GUID).replace("__AUDIENCE__", GUID)
                .replace("__SCOPE__", "access_as_user").replace("__CLIENT_ID_VALUES__", f"<value>{GUID}</value>"))
     origins = "".join(f"<origin>{o}</origin>" for o in (
-        f"https://ca-web-tech.{SUFFIX}", f"https://ca-web-voice.{SUFFIX}", "http://localhost:5173"))
+        f"https://ca-insurance-portal.{SUFFIX}", f"https://ca-insurance-voice.{SUFFIX}", "http://localhost:5173"))
     return (read("rest-api.xml").replace("__RATE_LIMIT__", "600").replace("__JWT_VALIDATION__", jwt)
             .replace("__GATEWAY_TOKEN__", token).replace("__ALLOWED_ORIGINS__", origins))
 
@@ -108,7 +108,7 @@ def test_definition_never_uses_preview_mcp_api_type_backends_or_service_scope_ob
     assert "@2025-09-01-preview" not in text, "use GA API versions only"
 
 
-def test_parameter_defaults_describe_both_live_stacks(template):
+def test_parameter_defaults_describe_the_live_insurance_stack(template):
     params = template["parameters"]
     assert params["apimName"]["defaultValue"] == "apim-northwind"
     assert params["appInsightsName"]["defaultValue"] == "appi-zurlo-northwind"
@@ -117,21 +117,21 @@ def test_parameter_defaults_describe_both_live_stacks(template):
     )
     assert params["businessAuth"]["defaultValue"] == {}
     stacks = params["stacks"]["defaultValue"]
-    assert [stack["name"] for stack in stacks] == ["northwind", "insurance"]
+    assert [stack["name"] for stack in stacks] == ["insurance"]
     keys = {"name", "apiApp", "techLookupApp", "workOrderApp", "webApp", "voiceApp"}
     assert all(set(stack) == keys for stack in stacks)
     assert all(re.fullmatch(r"[a-z][a-z0-9]{1,30}", stack["name"]) for stack in stacks)
     apps = [value for stack in stacks for key, value in stack.items() if key != "name"]
-    assert len(apps) == len(set(apps)) and all(re.fullmatch(r"ca-[a-z0-9-]+", app) for app in apps)
+    assert len(apps) == len(set(apps)) and all(re.fullmatch(r"ca-insurance-[a-z]+", app) for app in apps)
 
 
 def test_repo_managed_stack_matches_azure_yaml_resource_names():
     services = yaml.safe_load((ROOT / "azure.yaml").read_text(encoding="utf-8"))["services"]
     declared = {name: service.get("resourceName") for name, service in services.items() if service.get("resourceName")}
     text = BICEP.read_text(encoding="utf-8")
-    stack = re.search(r"name: 'northwind'(.*?)\n  }", text, re.S).group(1)
-    for service, key in (("api", "apiApp"), ("mcp-tech-lookup", "techLookupApp"), ("mcp-work-order", "workOrderApp"),
-                         ("web-tech", "webApp"), ("web-voice", "voiceApp")):
+    stack = re.search(r"name: 'insurance'(.*?)\n  }", text, re.S).group(1)
+    for service, key in (("api", "apiApp"), ("mcp-policy-lookup", "techLookupApp"), ("mcp-claim-review", "workOrderApp"),
+                         ("web-portal", "webApp"), ("web-voice", "voiceApp")):
         assert f"{key}: '{declared[service]}'" in stack
 
 

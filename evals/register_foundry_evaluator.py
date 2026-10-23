@@ -1,13 +1,14 @@
-"""Register + run a Foundry evaluator for one or all Northwind agents.
+"""Register + run a Foundry evaluator for one or all Northwind Insurance agents.
 
 For each selected agent:
   1. Register a prompt-based evaluator version in the Evaluator catalog
      via project_client.beta.evaluators.create_version() using the rubric
      from evals/foundry_rubrics.py.
   2. Generate {query, response} pairs by calling AOAI with the agent's
-     real system prompt (from agents/*.yaml). Tool-calling agents (tech_lookup,
-     manual_retrieval, work_order_draft, orchestrator) are graded on the
-     shape/content of their conversational output, not tool-call fidelity.
+     real system prompt (from agents/insurance/*.yaml). Tool-calling agents
+     (policy_claim_lookup, policy_wording, claim_action_draft, orchestrator)
+     are graded on the shape/content of their conversational output, not
+     tool-call fidelity.
   3. Create an eval definition referencing the catalog evaluator by name
      (testing_criteria type: azure_ai_evaluator) and run it.
   4. Poll to terminal and print the portal report URL.
@@ -34,7 +35,7 @@ from openai import AzureOpenAI
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "evals"))
-from eval_inputs import ORCHESTRATOR_INLINE, TECH_LOOKUP_INLINE  # noqa: E402
+from eval_inputs import ORCHESTRATOR_INLINE  # noqa: E402
 from foundry_rubrics import AGENT_RUBRICS  # noqa: E402
 
 
@@ -52,31 +53,18 @@ def azd_env() -> dict[str, str]:
 def load_agent_system_prompt(agent_yaml: str) -> str:
     path = REPO / "agents" / agent_yaml
     y = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if "instructions" in y:
-        return y["instructions"]
-    # Hosted orchestrator agent.yaml has no "instructions" — use a synthesized manager prompt
-    # derived from the agent description so the smoke eval still runs against something
-    # representative of the orchestrator's role.
-    return (
-        "You are the Northwind Order Concierge orchestrator. Coordinate 4 sub-agents "
-        "(triage, order lookup, policy lookup, resolution drafting) to handle "
-        "the customer request. Do not re-ask for details already provided. Chain the "
-        "right steps: identify intent, ground policy questions in the knowledge base, "
-        "look up the order when the customer references one, and draft a resolution "
-        "(awaiting human approval) when a refund / reship / cancel / credit action is "
-        "implied. Return a coherent final response that stitches the sub-steps "
-        "together and ends with a clear next action."
-    )
+    instructions = str((y or {}).get("instructions") or "").strip()
+    if not instructions:
+        raise ValueError(f"{path} has no instructions")
+    return instructions
 
 
 def rows_for_agent(agent: str, limit: int) -> list[dict]:
     """Return inputs [{id, input}, ...] for a given agent, capped at limit."""
-    if agent == "tech_lookup":
-        return TECH_LOOKUP_INLINE[:limit]
     if agent == "orchestrator":
         return ORCHESTRATOR_INLINE[:limit]
     dataset_path = REPO / "data" / "golden" / "dataset.jsonl"
-    rows = [json.loads(l) for l in dataset_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in dataset_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return [r for r in rows if r["workflow"] == agent][:limit]
 
 

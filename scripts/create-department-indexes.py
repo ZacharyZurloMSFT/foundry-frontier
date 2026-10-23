@@ -1,13 +1,14 @@
 """Create + seed one Azure AI Search indexer per Northwind department.
 
-The demo now has four departments — Order Concierge, Employee Help Desk,
-Claims & Warranty Ops, and Customer Contact Center. Each department
-gets its own Search index seeded from its department slice of the
-corpus (see `data/northwind/departments/<slug>/seed/`).
+Each department this script builds gets its own Search index, seeded from its
+department slice of the corpus (see `data/northwind/departments/<slug>/seed/`):
+Claims Document Intelligence (`nw-claims`) and Contact Center (`nw-contact-center`).
 
-**Order Concierge** is a special case: its corpus is generated as PDFs
-by `data/seed/generate.py` and indexed by `scripts/create-vector-indexer.py`
-into the existing `northwind-knowledge` index. We do NOT re-index it here.
+**Claims Concierge** and **Adjuster Support** are skipped: their corpora are
+published into isolated indexes by `scripts/publish-insurance-knowledge.py`
+(`northwind-insurance-knowledge`) and `scripts/publish-adjuster-support.py`
+(`nw-insurance-adjuster-support`). This script drops and recreates the index it
+builds, so running it on them would delete live content.
 
 For every other department this script:
   1. Ensures a `dept-seed` blob container exists.
@@ -46,7 +47,8 @@ from azure.storage.blob import BlobServiceClient, ContentSettings  # noqa: E402
 from app.settings import get_settings  # noqa: E402
 from data.northwind import Department, load_company  # noqa: E402
 
-_SKIP_SLUGS = {"order-concierge"}
+# Corpora published by their own scripts (see the module docstring).
+_SKIP_SLUGS = {"claims-concierge", "adjuster-support"}
 
 _SEARCH_API_VERSION = "2024-11-01-preview"
 _VECTOR_DIMS = 1536  # text-embedding-3-small
@@ -142,9 +144,7 @@ def _upload_department_markdown(svc: BlobServiceClient, dept: Department) -> int
                 metadata={
                     "title": path.stem.replace("-", " ").title(),
                     "department": dept.slug,
-                    "doc_type": ("policy"
-                                 if "policy" in path.stem or "handbook" in path.stem
-                                 else "reference"),
+                    "doc_type": "policy" if "policy" in path.stem else "reference",
                 },
             )
         count += 1
@@ -454,7 +454,7 @@ def main() -> None:
 
     print(f"\nDone — uploaded {total_blobs} blobs; "
           f"{len(company.departments) - len(_SKIP_SLUGS)} indexers submitted.")
-    print("NOTE: KBs + knowledge sources were deleted for the 3 new departments.")
+    print("NOTE: the knowledge bases + knowledge sources of the indexed departments were deleted.")
     print("Run `python scripts/create-knowledge-base.py` next to recreate them,")
     print("then `python scripts/create-prompt-agents.py` to relink the agents.")
     print("Check indexer status: Search service → Indexers.")

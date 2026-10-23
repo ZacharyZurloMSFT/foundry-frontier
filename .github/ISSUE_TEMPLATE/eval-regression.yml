@@ -12,11 +12,11 @@ body:
         the failing trace payload.
   - type: input
     id: workflow
-    attributes: { label: Workflow, description: "e.g. triage, work_order_draft, orchestrator" }
+    attributes: { label: Workflow, description: "e.g. triage, policy_wording, claim_action_draft, orchestrator" }
     validations: { required: true }
   - type: input
     id: metric
-    attributes: { label: Metric, description: "e.g. Groundedness, WorkOrderCompleteness, RedTeamPassRate" }
+    attributes: { label: Metric, description: "e.g. Groundedness, ClaimActionCompleteness, RedTeamPassRate" }
     validations: { required: true }
   - type: input
     id: trace_id

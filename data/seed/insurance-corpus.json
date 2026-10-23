@@ -6,14 +6,14 @@
     "policy_ref": "NW-AUTO-WA-2026-v1",
     "source_version": "1",
     "jurisdiction": "Fictional WA personal auto",
-    "source": "data/northwind/departments/claims-warranty/seed/warranty-carrier-30gx.md"
+    "source": "data/northwind/departments/claims-documents/seed/auto-policy-wa-2026.md"
   },
   {
     "id": "nw-claims-handling-2026-v1",
     "title": "Northwind Insurance - Endorsement and Evidence Review",
     "doc_type": "procedure",
     "policy_ref": "NW-CLAIMS-HANDLING-2026-V1",
-    "source": "data/northwind/departments/claims-warranty/seed/warranty-trane-rtac.md"
+    "source": "data/northwind/departments/claims-documents/seed/claims-handling-endorsements.md"
   },
   {
     "id": "nw-fnol-demo-2001",
@@ -21,7 +21,7 @@
     "doc_type": "fnol",
     "jurisdiction": "Fictional WA personal auto",
     "policy_ref": "NW-FNOL-DEMO-2001",
-    "source": "data/northwind/departments/claims-warranty/seed/intake-form-CL-8817.md"
+    "source": "data/northwind/departments/claims-documents/seed/fnol-demo-2001.md"
   },
   {
     "id": "nw-estimate-demo-2001",
@@ -29,14 +29,14 @@
     "doc_type": "repair_estimate",
     "jurisdiction": "Fictional WA personal auto",
     "policy_ref": "NW-ESTIMATE-DEMO-2001",
-    "source": "data/northwind/departments/claims-warranty/seed/intake-form-CL-8901-hw.md"
+    "source": "data/northwind/departments/claims-documents/seed/repair-estimate-demo-2001.md"
   },
   {
     "id": "nw-adjuster-review-2026-v1",
     "title": "Northwind Insurance - Adjuster Review and Internal Approval Boundaries",
     "doc_type": "procedure",
     "policy_ref": "NW-CLAIMS-HANDLING-2026-V1",
-    "source": "data/northwind/departments/employee-help-desk/seed/manager-approval-workflow.md",
+    "source": "data/northwind/departments/adjuster-support/seed/adjuster-review-boundaries.md",
     "section": "## Adjuster procedures and claims-review boundaries"
   },
   {

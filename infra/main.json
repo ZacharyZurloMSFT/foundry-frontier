@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "10527275629368849892"
+      "templateHash": "10481236318470448695"
     }
   },
   "parameters": {
@@ -33,14 +33,14 @@
         "description": "AI region — Foundry AI Services (Voice Live, Agent Service, models) and Azure AI Search. Private endpoints for these still land in the compute VNet, so cross-region traffic stays on the Microsoft backbone."
       }
     },
-    "orderProjectName": {
+    "insuranceProjectName": {
       "type": "string",
       "defaultValue": "northwind-orders",
       "metadata": {
-        "description": "Order Concierge project within the existing shared Foundry account."
+        "description": "Insurance project within the existing shared Foundry account. The value is bound to the live deployment; the default stays northwind-orders."
       }
     },
-    "orderAgentsHosted": {
+    "hostedAgentsEnabled": {
       "type": "string",
       "defaultValue": "true",
       "allowedValues": [
@@ -48,7 +48,7 @@
         "false"
       ],
       "metadata": {
-        "description": "Use independently hosted Order Concierge specialists after they have been deployed."
+        "description": "Use the independently hosted insurance agents after they have been deployed."
       }
     },
     "reuseExistingResources": {
@@ -122,28 +122,6 @@
         "description": "Existing Cosmos private endpoint in Networking. Defaults to the approved replacement; set an explicit override for a transitional endpoint. Selection does not move its subnet."
       }
     },
-    "enableCuIngest": {
-      "type": "string",
-      "defaultValue": "false",
-      "allowedValues": [
-        "true",
-        "false"
-      ],
-      "metadata": {
-        "description": "Explicit greenfield-only opt-in for the retired ingestion worker. Content Understanding API capability does not require this workload."
-      }
-    },
-    "businessDomain": {
-      "type": "string",
-      "defaultValue": "retail",
-      "allowedValues": [
-        "retail",
-        "insurance"
-      ],
-      "metadata": {
-        "description": "Explicit domain activation. Existing retail behavior remains the greenfield default."
-      }
-    },
     "insuranceAgentsReady": {
       "type": "string",
       "defaultValue": "false",
@@ -198,13 +176,12 @@
     },
     "gatewayStack": {
       "type": "string",
-      "defaultValue": "northwind",
+      "defaultValue": "insurance",
       "allowedValues": [
-        "northwind",
         "insurance"
       ],
       "metadata": {
-        "description": "Gateway API stack that fronts the Container Apps this environment manages."
+        "description": "Gateway API stack that fronts the Container Apps this environment manages. The insurance stack is the only one this repository manages."
       }
     },
     "existingSettings": {
@@ -281,11 +258,11 @@
       "type": "int",
       "defaultValue": 120
     },
-    "bakeoffDeployments": {
+    "additionalModelDeployments": {
       "type": "array",
       "defaultValue": [],
       "metadata": {
-        "description": "Optional: extra Azure-direct model deployments for the \"Model bake-off\" tab. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. See docs/departments.md for the `azd env set BAKEOFFDEPLOYMENTS` override pattern. Bake-off with an empty array still works — it races the always-deployed planner + worker."
+        "description": "Optional: extra Azure-direct model deployments on the shared Foundry account, for example a partner model (Kimi) offered to adjuster support. Each entry: { name, version, capacity, sku?, format? }. Default is empty because partner-model catalog availability varies per subscription + region."
       }
     },
     "harnessEnabled": {
@@ -303,26 +280,26 @@
       "type": "array",
       "defaultValue": [
         {
-          "slug": "employee-help-desk",
+          "slug": "adjuster-support",
           "projectName": "nw-employee-help-desk",
-          "displayName": "Northwind Employee Help Desk",
-          "description": "RAG-only Foundry project for HR/IT internal Q&A. Owns the nw-hr Search index and the northwind-hr-assistant prompt agent."
+          "displayName": "Northwind Adjuster Support",
+          "description": "RAG-only Foundry project for adjuster support: grounded answers about claims handling procedures, evidence handling and review boundaries. It cannot approve, deny or pay a claim."
         },
         {
-          "slug": "claims-warranty",
+          "slug": "claims-documents",
           "projectName": "nw-claims-warranty",
-          "displayName": "Northwind Claims & Warranty Ops",
-          "description": "Content Understanding project for warranty PDFs, damage photos, and intake forms. Owns the nw-claims Search index, the northwind-claim-intake CU analyzer, and the northwind-claims-triage prompt agent."
+          "displayName": "Northwind Claims Documents",
+          "description": "Content Understanding project for claim documents: FNOL reports, repair estimates, supporting invoices and damage evidence. Owns the nw-claims Search index, the northwindInsuranceClaimsV1 Content Understanding analyzer, and the northwind-claims-triage prompt agent."
         },
         {
           "slug": "contact-center",
           "projectName": "nw-contact-center",
-          "displayName": "Northwind Customer Contact Center",
-          "description": "Voice Live front door project. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the Order Concierge orchestrator."
+          "displayName": "Northwind Policyholder Contact Center",
+          "description": "Voice Live front door project for policyholder intake, claim status and adjuster handoff. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the claims concierge orchestrator."
         }
       ],
       "metadata": {
-        "description": "Additional Foundry projects — one per Northwind department beyond Order Concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`."
+        "description": "Additional Foundry projects — one per Northwind department beyond the claims concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`. The project names are bound to the live deployment and are not renamed."
       }
     }
   },
@@ -1003,7 +980,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10262746971174551545"
+              "templateHash": "8514790806188485566"
             }
           },
           "parameters": {
@@ -1119,18 +1096,6 @@
             "endpoint": {
               "type": "string",
               "value": "[format('https://{0}.search.windows.net', parameters('name'))]"
-            },
-            "indexName": {
-              "type": "string",
-              "value": "northwind-knowledge"
-            },
-            "knowledgeSourceName": {
-              "type": "string",
-              "value": "northwind-knowledge-ks"
-            },
-            "knowledgeBaseName": {
-              "type": "string",
-              "value": "northwind-kb"
             },
             "principalId": {
               "type": "string",
@@ -1499,7 +1464,7 @@
             "value": "[format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken'))]"
           },
           "projectName": {
-            "value": "[parameters('orderProjectName')]"
+            "value": "[parameters('insuranceProjectName')]"
           },
           "appPrincipalId": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'uami'), '2025-04-01').outputs.principalId.value))]",
           "devPrincipalId": {
@@ -1542,8 +1507,8 @@
           "embeddingModelCapacity": {
             "value": "[parameters('embeddingModelCapacity')]"
           },
-          "bakeoffDeployments": {
-            "value": "[parameters('bakeoffDeployments')]"
+          "additionalModelDeployments": {
+            "value": "[parameters('additionalModelDeployments')]"
           },
           "additionalProjects": {
             "value": "[parameters('additionalProjects')]"
@@ -1556,7 +1521,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2824013190717055068"
+              "templateHash": "2870671373678467865"
             }
           },
           "parameters": {
@@ -1622,18 +1587,18 @@
             "embeddingModelCapacity": {
               "type": "int"
             },
-            "bakeoffDeployments": {
+            "additionalModelDeployments": {
               "type": "array",
               "defaultValue": [],
               "metadata": {
-                "description": "Optional extra Azure-direct model deployments to enable the \"Model bake-off\" tab. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }."
+                "description": "Optional extra Azure-direct model deployments on this Foundry account, for example a partner model offered to adjuster support. Each item: { name, version, capacity, sku?, format? }."
               }
             },
             "additionalProjects": {
               "type": "array",
               "defaultValue": [],
               "metadata": {
-                "description": "Additional Foundry projects to create alongside the Order Concierge project. Each item: { slug, projectName, displayName, description }."
+                "description": "Additional Foundry projects to create alongside the claims concierge project. Each item: { slug, projectName, displayName, description }."
               }
             }
           },
@@ -1750,23 +1715,23 @@
             },
             {
               "copy": {
-                "name": "bakeoffDeps",
-                "count": "[length(parameters('bakeoffDeployments'))]",
+                "name": "additionalModelDeps",
+                "count": "[length(parameters('additionalModelDeployments'))]",
                 "mode": "serial",
                 "batchSize": 1
               },
               "type": "Microsoft.CognitiveServices/accounts/deployments",
               "apiVersion": "2025-04-01-preview",
-              "name": "[format('{0}/{1}', parameters('aiServicesName'), parameters('bakeoffDeployments')[copyIndex()].name)]",
+              "name": "[format('{0}/{1}', parameters('aiServicesName'), parameters('additionalModelDeployments')[copyIndex()].name)]",
               "sku": {
-                "name": "[coalesce(tryGet(parameters('bakeoffDeployments')[copyIndex()], 'sku'), 'GlobalStandard')]",
-                "capacity": "[parameters('bakeoffDeployments')[copyIndex()].capacity]"
+                "name": "[coalesce(tryGet(parameters('additionalModelDeployments')[copyIndex()], 'sku'), 'GlobalStandard')]",
+                "capacity": "[parameters('additionalModelDeployments')[copyIndex()].capacity]"
               },
               "properties": {
                 "model": {
-                  "format": "[coalesce(tryGet(parameters('bakeoffDeployments')[copyIndex()], 'format'), 'OpenAI')]",
-                  "name": "[parameters('bakeoffDeployments')[copyIndex()].name]",
-                  "version": "[parameters('bakeoffDeployments')[copyIndex()].version]"
+                  "format": "[coalesce(tryGet(parameters('additionalModelDeployments')[copyIndex()], 'format'), 'OpenAI')]",
+                  "name": "[parameters('additionalModelDeployments')[copyIndex()].name]",
+                  "version": "[parameters('additionalModelDeployments')[copyIndex()].version]"
                 },
                 "versionUpgradeOption": "OnceNewDefaultVersionAvailable"
               },
@@ -1786,7 +1751,7 @@
               },
               "properties": {
                 "displayName": "[parameters('projectName')]",
-                "description": "Northwind Order Concierge demo Foundry project"
+                "description": "Northwind Insurance claims concierge Foundry project"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiServicesName'))]",
@@ -1941,13 +1906,6 @@
               "type": "string",
               "value": "[format('https://{0}.openai.azure.com/', parameters('aiServicesName'))]"
             },
-            "bakeoffDeploymentNames": {
-              "type": "array",
-              "copy": {
-                "count": "[length(parameters('bakeoffDeployments'))]",
-                "input": "[parameters('bakeoffDeployments')[copyIndex()].name]"
-              }
-            },
             "additionalProjectEndpoints": {
               "type": "array",
               "copy": {
@@ -1985,7 +1943,7 @@
             "value": "[format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken'))]"
           },
           "projectName": {
-            "value": "[parameters('orderProjectName')]"
+            "value": "[parameters('insuranceProjectName')]"
           },
           "appInsightsName": {
             "value": "[format('{0}{1}', variables('abbrs').insightsComponents, variables('resourceToken'))]"
@@ -2169,33 +2127,23 @@
           "acrLoginServer": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'acr'), '2025-04-01').outputs.loginServer.value))]",
           "foundryEndpoint": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.aiServicesEndpoint.value))]",
           "foundryProjectEndpoint": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value))]",
-          "orderProjectName": {
-            "value": "[parameters('orderProjectName')]"
+          "insuranceProjectName": {
+            "value": "[parameters('insuranceProjectName')]"
           },
-          "orderAgentsHosted": {
-            "value": "[equals(parameters('orderAgentsHosted'), 'true')]"
+          "hostedAgentsEnabled": {
+            "value": "[equals(parameters('hostedAgentsEnabled'), 'true')]"
           },
-          "foundryProjectEndpoints": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', format('{{\"order-concierge\":\"{0}\",\"employee-help-desk\":\"{1}\",\"claims-warranty\":\"{2}\",\"contact-center\":\"{3}\"}}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[0].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[1].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[2].endpoint)))]",
+          "foundryProjectEndpoints": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', format('{{\"claims-concierge\":\"{0}\",\"adjuster-support\":\"{1}\",\"claims-documents\":\"{2}\",\"contact-center\":\"{3}\"}}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[0].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[1].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[2].endpoint)))]",
           "plannerDeployment": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.plannerDeploymentName.value))]",
           "workerDeployment": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.workerDeploymentName.value))]",
           "promptAgentDeployment": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.promptAgentDeploymentName.value))]",
           "embeddingDeployment": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.embeddingDeploymentName.value))]",
           "searchEndpoint": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value))]",
-          "searchIndexName": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.indexName.value))]",
-          "searchKnowledgeBase": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.knowledgeBaseName.value))]",
-          "searchKnowledgeSource": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.knowledgeSourceName.value))]",
           "cosmosEndpoint": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value))]",
           "cosmosDatabaseName": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value))]",
           "storageAccountName": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.name.value))]",
-          "bakeoffDeployments": "[if(variables('reuseExisting'), createObject('value', ''), createObject('value', join(concat(createArray(reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.plannerDeploymentName.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.workerDeploymentName.value), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.bakeoffDeploymentNames.value), ',')))]",
           "harnessEnabled": {
             "value": "[equals(parameters('harnessEnabled'), 'true')]"
-          },
-          "enableCuIngest": {
-            "value": "[equals(parameters('enableCuIngest'), 'true')]"
-          },
-          "businessDomain": {
-            "value": "[parameters('businessDomain')]"
           },
           "insuranceAgentsReady": {
             "value": "[equals(parameters('insuranceAgentsReady'), 'true')]"
@@ -2226,7 +2174,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14488735807841633820"
+              "templateHash": "16048656134058488874"
             }
           },
           "parameters": {
@@ -2263,11 +2211,11 @@
             "foundryProjectEndpoint": {
               "type": "string"
             },
-            "orderProjectName": {
+            "insuranceProjectName": {
               "type": "string",
               "defaultValue": "northwind-orders"
             },
-            "orderAgentsHosted": {
+            "hostedAgentsEnabled": {
               "type": "bool",
               "defaultValue": false
             },
@@ -2275,7 +2223,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. Order Concierge default = foundryProjectEndpoint."
+                "description": "JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. The claims-concierge entry = foundryProjectEndpoint."
               }
             },
             "plannerDeployment": {
@@ -2293,15 +2241,6 @@
             "searchEndpoint": {
               "type": "string"
             },
-            "searchIndexName": {
-              "type": "string"
-            },
-            "searchKnowledgeBase": {
-              "type": "string"
-            },
-            "searchKnowledgeSource": {
-              "type": "string"
-            },
             "cosmosEndpoint": {
               "type": "string"
             },
@@ -2311,28 +2250,9 @@
             "storageAccountName": {
               "type": "string"
             },
-            "bakeoffDeployments": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Comma-separated list of Azure-direct model deployments to expose to the /bakeoff endpoint on the API container."
-              }
-            },
             "harnessEnabled": {
               "type": "bool",
               "defaultValue": false
-            },
-            "enableCuIngest": {
-              "type": "bool",
-              "defaultValue": false
-            },
-            "businessDomain": {
-              "type": "string",
-              "defaultValue": "retail",
-              "allowedValues": [
-                "retail",
-                "insurance"
-              ]
             },
             "insuranceAgentsReady": {
               "type": "bool",
@@ -2403,7 +2323,7 @@
             {
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
-              "name": "ca-api",
+              "name": "ca-insurance-api",
               "location": "[parameters('location')]",
               "tags": "[union(parameters('tags'), createObject('azd-service-name', 'api'))]",
               "identity": {
@@ -2450,7 +2370,7 @@
                     {
                       "name": "api",
                       "image": "[variables('placeholder')]",
-                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'ORDER_PROJECT_NAME', 'value', parameters('orderProjectName')), createObject('name', 'ORDER_AGENTS_HOSTED', 'value', string(parameters('orderAgentsHosted'))), createObject('name', 'NORTHWIND_BUSINESS_DOMAIN', 'value', parameters('businessDomain')), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'AZURE_SEARCH_INDEX', 'value', parameters('searchIndexName')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_BASE', 'value', parameters('searchKnowledgeBase')), createObject('name', 'AZURE_SEARCH_KNOWLEDGE_SOURCE', 'value', parameters('searchKnowledgeSource')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName')), createObject('name', 'FOUNDRY_BAKEOFF_DEPLOYMENTS', 'value', parameters('bakeoffDeployments'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_WORK_ORDER_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
+                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'INSURANCE_PROJECT_NAME', 'value', parameters('insuranceProjectName')), createObject('name', 'HOSTED_AGENTS_ENABLED', 'value', string(parameters('hostedAgentsEnabled'))), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_CLAIM_REVIEW_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-review'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
                       "resources": {
                         "cpu": "[json('1.0')]",
                         "memory": "2Gi"
@@ -2465,15 +2385,15 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]",
-                "[resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order')]"
+                "[resourceId('Microsoft.App/containerApps', 'ca-insurance-review')]"
               ]
             },
             {
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
-              "name": "ca-web-tech",
+              "name": "ca-insurance-portal",
               "location": "[parameters('location')]",
-              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'web-tech'))]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'web-portal'))]",
               "identity": {
                 "type": "UserAssigned",
                 "userAssignedIdentities": {
@@ -2493,12 +2413,12 @@
                 "template": {
                   "containers": [
                     {
-                      "name": "web-tech",
+                      "name": "web-portal",
                       "image": "[variables('placeholder')]",
                       "env": [
                         {
                           "name": "VITE_API_BASE_URL",
-                          "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+                          "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
                         }
                       ],
                       "resources": {
@@ -2514,14 +2434,14 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'ca-api')]",
+                "[resourceId('Microsoft.App/containerApps', 'ca-insurance-api')]",
                 "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]"
               ]
             },
             {
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
-              "name": "ca-web-voice",
+              "name": "ca-insurance-voice",
               "location": "[parameters('location')]",
               "tags": "[union(parameters('tags'), createObject('azd-service-name', 'web-voice'))]",
               "identity": {
@@ -2548,7 +2468,7 @@
                       "env": [
                         {
                           "name": "VITE_API_BASE_URL",
-                          "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+                          "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
                         }
                       ],
                       "resources": {
@@ -2564,158 +2484,16 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'ca-api')]",
-                "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]"
-              ]
-            },
-            {
-              "condition": "[parameters('enableCuIngest')]",
-              "type": "Microsoft.App/containerApps",
-              "apiVersion": "2024-10-02-preview",
-              "name": "ca-cu-ingest",
-              "location": "[parameters('location')]",
-              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'cu-ingest'))]",
-              "identity": {
-                "type": "UserAssigned",
-                "userAssignedIdentities": {
-                  "[format('{0}', parameters('identityId'))]": {}
-                }
-              },
-              "properties": {
-                "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]",
-                "configuration": {
-                  "ingress": {
-                    "external": false,
-                    "targetPort": 8080,
-                    "transport": "auto"
-                  },
-                  "registries": "[variables('acrRegistry')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "cu-ingest",
-                      "image": "[variables('placeholder')]",
-                      "env": [
-                        {
-                          "name": "AZURE_CLIENT_ID",
-                          "value": "[reference(parameters('identityId'), '2023-01-31').clientId]"
-                        },
-                        {
-                          "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                          "value": "[parameters('appInsightsConnectionString')]"
-                        },
-                        {
-                          "name": "OTEL_SERVICE_NAME",
-                          "value": "northwind-copilot"
-                        },
-                        {
-                          "name": "OTEL_EXPORTER_OTLP_PROTOCOL",
-                          "value": "http/protobuf"
-                        },
-                        {
-                          "name": "FOUNDRY_ENDPOINT",
-                          "value": "[parameters('foundryEndpoint')]"
-                        },
-                        {
-                          "name": "FOUNDRY_PROJECT_ENDPOINT",
-                          "value": "[parameters('foundryProjectEndpoint')]"
-                        },
-                        {
-                          "name": "ORDER_PROJECT_NAME",
-                          "value": "[parameters('orderProjectName')]"
-                        },
-                        {
-                          "name": "ORDER_AGENTS_HOSTED",
-                          "value": "[string(parameters('orderAgentsHosted'))]"
-                        },
-                        {
-                          "name": "NORTHWIND_BUSINESS_DOMAIN",
-                          "value": "[parameters('businessDomain')]"
-                        },
-                        {
-                          "name": "NORTHWIND_INSURANCE_AGENTS_READY",
-                          "value": "[string(parameters('insuranceAgentsReady'))]"
-                        },
-                        {
-                          "name": "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID",
-                          "value": "[parameters('insuranceOrchestratorAgentId')]"
-                        },
-                        {
-                          "name": "FOUNDRY_PROJECT_ENDPOINTS",
-                          "value": "[parameters('foundryProjectEndpoints')]"
-                        },
-                        {
-                          "name": "FOUNDRY_PLANNER_DEPLOYMENT",
-                          "value": "[parameters('plannerDeployment')]"
-                        },
-                        {
-                          "name": "FOUNDRY_WORKER_DEPLOYMENT",
-                          "value": "[parameters('workerDeployment')]"
-                        },
-                        {
-                          "name": "FOUNDRY_PROMPT_AGENT_DEPLOYMENT",
-                          "value": "[parameters('promptAgentDeployment')]"
-                        },
-                        {
-                          "name": "FOUNDRY_EMBEDDING_DEPLOYMENT",
-                          "value": "[parameters('embeddingDeployment')]"
-                        },
-                        {
-                          "name": "AZURE_SEARCH_ENDPOINT",
-                          "value": "[parameters('searchEndpoint')]"
-                        },
-                        {
-                          "name": "AZURE_SEARCH_INDEX",
-                          "value": "[parameters('searchIndexName')]"
-                        },
-                        {
-                          "name": "AZURE_SEARCH_KNOWLEDGE_BASE",
-                          "value": "[parameters('searchKnowledgeBase')]"
-                        },
-                        {
-                          "name": "AZURE_SEARCH_KNOWLEDGE_SOURCE",
-                          "value": "[parameters('searchKnowledgeSource')]"
-                        },
-                        {
-                          "name": "COSMOS_ENDPOINT",
-                          "value": "[parameters('cosmosEndpoint')]"
-                        },
-                        {
-                          "name": "COSMOS_DATABASE",
-                          "value": "[parameters('cosmosDatabaseName')]"
-                        },
-                        {
-                          "name": "STORAGE_ACCOUNT",
-                          "value": "[parameters('storageAccountName')]"
-                        },
-                        {
-                          "name": "FOUNDRY_BAKEOFF_DEPLOYMENTS",
-                          "value": "[parameters('bakeoffDeployments')]"
-                        }
-                      ],
-                      "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1Gi"
-                      }
-                    }
-                  ],
-                  "scale": {
-                    "minReplicas": 0,
-                    "maxReplicas": 3
-                  }
-                }
-              },
-              "dependsOn": [
+                "[resourceId('Microsoft.App/containerApps', 'ca-insurance-api')]",
                 "[resourceId('Microsoft.App/managedEnvironments', parameters('envName'))]"
               ]
             },
             {
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
-              "name": "ca-mcp-tech-lookup",
+              "name": "ca-insurance-lookup",
               "location": "[parameters('location')]",
-              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'mcp-tech-lookup'))]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'mcp-policy-lookup'))]",
               "identity": {
                 "type": "UserAssigned",
                 "userAssignedIdentities": {
@@ -2737,7 +2515,7 @@
                 "template": {
                   "containers": [
                     {
-                      "name": "mcp-tech-lookup",
+                      "name": "mcp-policy-lookup",
                       "image": "[variables('placeholder')]",
                       "env": [
                         {
@@ -2750,15 +2528,11 @@
                         },
                         {
                           "name": "OTEL_SERVICE_NAME",
-                          "value": "northwind-mcp-tech-lookup"
+                          "value": "northwind-insurance-lookup"
                         },
                         {
                           "name": "PORT",
                           "value": "8000"
-                        },
-                        {
-                          "name": "NORTHWIND_BUSINESS_DOMAIN",
-                          "value": "[parameters('businessDomain')]"
                         },
                         {
                           "name": "NORTHWIND_INSURANCE_AGENTS_READY",
@@ -2784,9 +2558,9 @@
             {
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
-              "name": "ca-mcp-work-order",
+              "name": "ca-insurance-review",
               "location": "[parameters('location')]",
-              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'mcp-work-order'))]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'mcp-claim-review'))]",
               "identity": {
                 "type": "UserAssigned",
                 "userAssignedIdentities": {
@@ -2808,7 +2582,7 @@
                 "template": {
                   "containers": [
                     {
-                      "name": "mcp-work-order",
+                      "name": "mcp-claim-review",
                       "image": "[variables('placeholder')]",
                       "env": [
                         {
@@ -2821,15 +2595,11 @@
                         },
                         {
                           "name": "OTEL_SERVICE_NAME",
-                          "value": "northwind-mcp-work-order"
+                          "value": "northwind-insurance-review"
                         },
                         {
                           "name": "PORT",
                           "value": "8000"
-                        },
-                        {
-                          "name": "NORTHWIND_BUSINESS_DOMAIN",
-                          "value": "[parameters('businessDomain')]"
                         },
                         {
                           "name": "NORTHWIND_INSURANCE_AGENTS_READY",
@@ -2864,23 +2634,23 @@
           "outputs": {
             "apiUri": {
               "type": "string",
-              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-api'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             },
-            "webTechUri": {
+            "webPortalUri": {
               "type": "string",
-              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-web-tech'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-portal'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             },
             "webVoiceUri": {
               "type": "string",
-              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-web-voice'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-voice'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             },
-            "mcpTechLookupUrl": {
+            "mcpPolicyLookupUrl": {
               "type": "string",
-              "value": "[format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-tech-lookup'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+              "value": "[format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-lookup'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             },
-            "mcpWorkOrderUrl": {
+            "mcpClaimReviewUrl": {
               "type": "string",
-              "value": "[format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-mcp-work-order'), '2024-10-02-preview').configuration.ingress.fqdn)]"
+              "value": "[format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-review'), '2024-10-02-preview').configuration.ingress.fqdn)]"
             }
           }
         }
@@ -2945,8 +2715,8 @@
           "compactToken": {
             "value": "[variables('compactToken')]"
           },
-          "orderProjectName": {
-            "value": "[parameters('orderProjectName')]"
+          "insuranceProjectName": {
+            "value": "[parameters('insuranceProjectName')]"
           },
           "preservedSettings": {
             "value": "[parameters('existingSettings')]"
@@ -2960,7 +2730,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "6194024420623504578"
+              "templateHash": "301012842008722746"
             }
           },
           "definitions": {
@@ -2983,7 +2753,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "ORDERS_OPENAI_ENDPOINT": {
+                "AGENT_OPENAI_ENDPOINT": {
                   "type": "string",
                   "minLength": 1
                 },
@@ -2991,7 +2761,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "ORDERS_KB_CONNECTION_NAME": {
+                "AGENT_KB_CONNECTION_NAME": {
                   "type": "string",
                   "minLength": 1
                 },
@@ -3019,22 +2789,6 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "FOUNDRY_BAKEOFF_DEPLOYMENTS": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "AZURE_SEARCH_INDEX": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "AZURE_SEARCH_KNOWLEDGE_BASE": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "AZURE_SEARCH_KNOWLEDGE_SOURCE": {
-                  "type": "string",
-                  "minLength": 1
-                },
                 "COSMOS_DATABASE": {
                   "type": "string",
                   "minLength": 1
@@ -3046,21 +2800,6 @@
                 "STORAGE_SEED_CONTAINER": {
                   "type": "string",
                   "minLength": 1
-                },
-                "FOUNDRY_AGENT_TRIAGE_ID": {
-                  "type": "string"
-                },
-                "FOUNDRY_AGENT_TECH_LOOKUP_ID": {
-                  "type": "string"
-                },
-                "FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID": {
-                  "type": "string"
-                },
-                "FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID": {
-                  "type": "string"
-                },
-                "FOUNDRY_ORCHESTRATOR_AGENT_ID": {
-                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -3115,7 +2854,7 @@
               "type": "string",
               "minLength": 5
             },
-            "orderProjectName": {
+            "insuranceProjectName": {
               "type": "string",
               "minLength": 1
             },
@@ -3176,12 +2915,12 @@
               "resourceGroup": "[parameters('foundryResourceGroupName')]",
               "name": "[format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken'))]"
             },
-            "orderProject": {
+            "insuranceProject": {
               "existing": true,
               "type": "Microsoft.CognitiveServices/accounts/projects",
               "apiVersion": "2025-06-01",
               "resourceGroup": "[parameters('foundryResourceGroupName')]",
-              "name": "[format('{0}/{1}', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('orderProjectName'))]"
+              "name": "[format('{0}/{1}', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('insuranceProjectName'))]"
             },
             "search": {
               "existing": true,
@@ -3244,35 +2983,35 @@
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-api"
+              "name": "ca-insurance-api"
             },
-            "mcpTechLookup": {
+            "mcpPolicyLookup": {
               "existing": true,
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-mcp-tech-lookup"
+              "name": "ca-insurance-lookup"
             },
-            "mcpWorkOrder": {
+            "mcpClaimReview": {
               "existing": true,
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-mcp-work-order"
+              "name": "ca-insurance-review"
             },
-            "webTech": {
+            "webPortal": {
               "existing": true,
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-web-tech"
+              "name": "ca-insurance-portal"
             },
             "webVoice": {
               "existing": true,
               "type": "Microsoft.App/containerApps",
               "apiVersion": "2024-10-02-preview",
               "resourceGroup": "[parameters('appsResourceGroupName')]",
-              "name": "ca-web-voice"
+              "name": "ca-insurance-voice"
             }
           },
           "outputs": {
@@ -3281,45 +3020,45 @@
               "value": [
                 {
                   "service": "api",
-                  "name": "ca-api",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-api')]",
+                  "name": "ca-insurance-api",
+                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-insurance-api')]",
                   "environmentId": "[reference('api').managedEnvironmentId]"
                 },
                 {
-                  "service": "mcp-tech-lookup",
-                  "name": "ca-mcp-tech-lookup",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-mcp-tech-lookup')]",
-                  "environmentId": "[reference('mcpTechLookup').managedEnvironmentId]"
+                  "service": "mcp-policy-lookup",
+                  "name": "ca-insurance-lookup",
+                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-insurance-lookup')]",
+                  "environmentId": "[reference('mcpPolicyLookup').managedEnvironmentId]"
                 },
                 {
-                  "service": "mcp-work-order",
-                  "name": "ca-mcp-work-order",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-mcp-work-order')]",
-                  "environmentId": "[reference('mcpWorkOrder').managedEnvironmentId]"
+                  "service": "mcp-claim-review",
+                  "name": "ca-insurance-review",
+                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-insurance-review')]",
+                  "environmentId": "[reference('mcpClaimReview').managedEnvironmentId]"
                 },
                 {
-                  "service": "web-tech",
-                  "name": "ca-web-tech",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-web-tech')]",
-                  "environmentId": "[reference('webTech').managedEnvironmentId]"
+                  "service": "web-portal",
+                  "name": "ca-insurance-portal",
+                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-insurance-portal')]",
+                  "environmentId": "[reference('webPortal').managedEnvironmentId]"
                 },
                 {
                   "service": "web-voice",
-                  "name": "ca-web-voice",
-                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-web-voice')]",
+                  "name": "ca-insurance-voice",
+                  "id": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.App/containerApps', 'ca-insurance-voice')]",
                   "environmentId": "[reference('webVoice').managedEnvironmentId]"
                 }
               ]
             },
             "settings": {
               "type": "object",
-              "value": "[union(parameters('preservedSettings'), createObject('AZURE_CLIENT_ID', reference('identity').clientId, 'AZURE_MANAGED_IDENTITY_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}app-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), 'AZURE_MANAGED_IDENTITY_PRINCIPAL_ID', reference('identity').principalId, 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference('appInsights').ConnectionString, 'AZURE_AI_PROJECT_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('orderProjectName')), 'FOUNDRY_PROJECT_PRINCIPAL_ID', reference('orderProject', '2025-06-01', 'full').identity.principalId, 'ORDER_DEFAULT_PROJECT', reference('foundry').defaultProject, 'AZURE_SEARCH_ENDPOINT', format('https://{0}.search.windows.net', format('{0}{1}', variables('abbrs').searchSearchServices, parameters('resourceToken'))), 'COSMOS_ENDPOINT', reference('cosmos').documentEndpoint, 'STORAGE_ACCOUNT', format('{0}{1}', variables('abbrs').storageStorageAccounts, parameters('compactToken')), 'AZURE_CONTAINER_REGISTRY_ENDPOINT', reference('acr').loginServer, 'AZURE_CONTAINER_REGISTRY_NAME', format('{0}{1}', variables('abbrs').containerRegistries, parameters('compactToken')), 'API_URI', format('https://{0}', reference('api').configuration.ingress.fqdn), 'MCP_TECH_LOOKUP_URL', format('https://{0}/mcp/', reference('mcpTechLookup').configuration.ingress.fqdn), 'MCP_WORK_ORDER_URL', format('https://{0}/mcp/', reference('mcpWorkOrder').configuration.ingress.fqdn), 'WEB_TECH_URI', format('https://{0}', reference('webTech').configuration.ingress.fqdn), 'WEB_VOICE_URI', format('https://{0}', reference('webVoice').configuration.ingress.fqdn), 'AZURE_LOG_ANALYTICS_RESOURCE_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('logAnalyticsResourceGroupName')), 'Microsoft.OperationalInsights/workspaces', format('{0}{1}', variables('abbrs').operationalInsightsWorkspaces, parameters('resourceToken')))))]"
+              "value": "[union(parameters('preservedSettings'), createObject('AZURE_CLIENT_ID', reference('identity').clientId, 'AZURE_MANAGED_IDENTITY_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}app-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), 'AZURE_MANAGED_IDENTITY_PRINCIPAL_ID', reference('identity').principalId, 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference('appInsights').ConnectionString, 'AZURE_AI_PROJECT_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('insuranceProjectName')), 'FOUNDRY_PROJECT_PRINCIPAL_ID', reference('insuranceProject', '2025-06-01', 'full').identity.principalId, 'FOUNDRY_DEFAULT_PROJECT', reference('foundry').defaultProject, 'AZURE_SEARCH_ENDPOINT', format('https://{0}.search.windows.net', format('{0}{1}', variables('abbrs').searchSearchServices, parameters('resourceToken'))), 'COSMOS_ENDPOINT', reference('cosmos').documentEndpoint, 'STORAGE_ACCOUNT', format('{0}{1}', variables('abbrs').storageStorageAccounts, parameters('compactToken')), 'AZURE_CONTAINER_REGISTRY_ENDPOINT', reference('acr').loginServer, 'AZURE_CONTAINER_REGISTRY_NAME', format('{0}{1}', variables('abbrs').containerRegistries, parameters('compactToken')), 'API_URI', format('https://{0}', reference('api').configuration.ingress.fqdn), 'MCP_POLICY_LOOKUP_URL', format('https://{0}/mcp/', reference('mcpPolicyLookup').configuration.ingress.fqdn), 'MCP_CLAIM_REVIEW_URL', format('https://{0}/mcp/', reference('mcpClaimReview').configuration.ingress.fqdn), 'WEB_PORTAL_URI', format('https://{0}', reference('webPortal').configuration.ingress.fqdn), 'WEB_VOICE_URI', format('https://{0}', reference('webVoice').configuration.ingress.fqdn), 'AZURE_LOG_ANALYTICS_RESOURCE_ID', extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('logAnalyticsResourceGroupName')), 'Microsoft.OperationalInsights/workspaces', format('{0}{1}', variables('abbrs').operationalInsightsWorkspaces, parameters('resourceToken')))))]"
             },
             "resourceIds": {
               "type": "object",
               "value": {
                 "foundry": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')))]",
-                "orderProject": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('orderProjectName'))]",
+                "insuranceProject": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('foundryResourceGroupName')), 'Microsoft.CognitiveServices/accounts/projects', format('{0}{1}', variables('abbrs').cognitiveServicesAccounts, parameters('resourceToken')), parameters('insuranceProjectName'))]",
                 "identity": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}app-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken')))]",
                 "acr": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('appsResourceGroupName')), 'Microsoft.ContainerRegistry/registries', format('{0}{1}', variables('abbrs').containerRegistries, parameters('compactToken')))]",
                 "appInsights": "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('observabilityResourceGroupName')), 'Microsoft.Insights/components', format('{0}{1}', variables('abbrs').insightsComponents, parameters('resourceToken')))]",
@@ -3420,33 +3159,29 @@
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_PROJECT_ENDPOINT, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value)]"
     },
-    "ORDER_PROJECT_NAME": {
+    "INSURANCE_PROJECT_NAME": {
       "type": "string",
-      "value": "[parameters('orderProjectName')]"
+      "value": "[parameters('insuranceProjectName')]"
     },
-    "ORDER_DEFAULT_PROJECT": {
+    "FOUNDRY_DEFAULT_PROJECT": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDER_DEFAULT_PROJECT, parameters('orderProjectName'))]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_DEFAULT_PROJECT, parameters('insuranceProjectName'))]"
     },
-    "ORDER_AGENTS_HOSTED": {
+    "HOSTED_AGENTS_ENABLED": {
       "type": "string",
-      "value": "[parameters('orderAgentsHosted')]"
+      "value": "[parameters('hostedAgentsEnabled')]"
     },
-    "NORTHWIND_BUSINESS_DOMAIN": {
+    "AGENT_KB_CONNECTION_NAME": {
       "type": "string",
-      "value": "[parameters('businessDomain')]"
-    },
-    "ORDERS_KB_CONNECTION_NAME": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDERS_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('orderProjectName')))]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AGENT_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('insuranceProjectName')))]"
     },
     "FOUNDRY_KB_CONNECTION_NAME": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('orderProjectName')))]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_KB_CONNECTION_NAME, format('{0}-kb-mcp', parameters('insuranceProjectName')))]"
     },
-    "ORDERS_OPENAI_ENDPOINT": {
+    "AGENT_OPENAI_ENDPOINT": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.ORDERS_OPENAI_ENDPOINT, format('https://{0}{1}.openai.azure.com/openai/v1/', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken')))]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AGENT_OPENAI_ENDPOINT, format('https://{0}{1}.openai.azure.com/openai/v1/', variables('abbrs').cognitiveServicesAccounts, variables('resourceToken')))]"
     },
     "AZURE_AI_PROJECT_ENDPOINT": {
       "type": "string",
@@ -3458,7 +3193,7 @@
     },
     "FOUNDRY_PROJECT_ENDPOINTS": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_PROJECT_ENDPOINTS, format('{{\"order-concierge\":\"{0}\",\"employee-help-desk\":\"{1}\",\"claims-warranty\":\"{2}\",\"contact-center\":\"{3}\"}}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[0].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[1].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[2].endpoint))]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_PROJECT_ENDPOINTS, format('{{\"claims-concierge\":\"{0}\",\"adjuster-support\":\"{1}\",\"claims-documents\":\"{2}\",\"contact-center\":\"{3}\"}}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[0].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[1].endpoint, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.additionalProjectEndpoints.value[2].endpoint))]"
     },
     "FOUNDRY_PLANNER_DEPLOYMENT": {
       "type": "string",
@@ -3480,49 +3215,13 @@
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_PROJECT_PRINCIPAL_ID, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectPrincipalId.value)]"
     },
-    "FOUNDRY_AGENT_TRIAGE_ID": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_AGENT_TRIAGE_ID, '')]"
-    },
-    "FOUNDRY_AGENT_TECH_LOOKUP_ID": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_AGENT_TECH_LOOKUP_ID, '')]"
-    },
-    "FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID, '')]"
-    },
-    "FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID, '')]"
-    },
-    "FOUNDRY_ORCHESTRATOR_AGENT_ID": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_ORCHESTRATOR_AGENT_ID, '')]"
-    },
     "AZURE_AI_MODEL_DEPLOYMENT_NAME": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_AI_MODEL_DEPLOYMENT_NAME, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.plannerDeploymentName.value)]"
     },
-    "FOUNDRY_BAKEOFF_DEPLOYMENTS": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.FOUNDRY_BAKEOFF_DEPLOYMENTS, join(concat(createArray(reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.plannerDeploymentName.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.workerDeploymentName.value), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.bakeoffDeploymentNames.value), ','))]"
-    },
     "AZURE_SEARCH_ENDPOINT": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_SEARCH_ENDPOINT, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value)]"
-    },
-    "AZURE_SEARCH_INDEX": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_SEARCH_INDEX, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.indexName.value)]"
-    },
-    "AZURE_SEARCH_KNOWLEDGE_BASE": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_SEARCH_KNOWLEDGE_BASE, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.knowledgeBaseName.value)]"
-    },
-    "AZURE_SEARCH_KNOWLEDGE_SOURCE": {
-      "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.AZURE_SEARCH_KNOWLEDGE_SOURCE, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.knowledgeSourceName.value)]"
     },
     "AZURE_OPENAI_ENDPOINT": {
       "type": "string",
@@ -3568,21 +3267,21 @@
       "type": "string",
       "value": "[if(not(empty(variables('gatewayBase'))), variables('gatewayBase'), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.API_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.apiUri.value))]"
     },
-    "WEB_TECH_URI": {
+    "WEB_PORTAL_URI": {
       "type": "string",
-      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_TECH_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webTechUri.value)]"
+      "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_PORTAL_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webPortalUri.value)]"
     },
     "WEB_VOICE_URI": {
       "type": "string",
       "value": "[if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.WEB_VOICE_URI, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.webVoiceUri.value)]"
     },
-    "MCP_TECH_LOOKUP_URL": {
+    "MCP_POLICY_LOOKUP_URL": {
       "type": "string",
-      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/tech-lookup', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_TECH_LOOKUP_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpTechLookupUrl.value))]"
+      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/tech-lookup', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_POLICY_LOOKUP_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpPolicyLookupUrl.value))]"
     },
-    "MCP_WORK_ORDER_URL": {
+    "MCP_CLAIM_REVIEW_URL": {
       "type": "string",
-      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/work-order', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_WORK_ORDER_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpWorkOrderUrl.value))]"
+      "value": "[if(not(empty(variables('gatewayBase'))), format('{0}/mcp/work-order', variables('gatewayBase')), if(variables('reuseExisting'), reference(subscriptionResourceId('Microsoft.Resources/deployments', 'reuse-existing'), '2025-04-01').outputs.settings.value.MCP_CLAIM_REVIEW_URL, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.mcpClaimReviewUrl.value))]"
     },
     "AZURE_LOG_ANALYTICS_RESOURCE_ID": {
       "type": "string",

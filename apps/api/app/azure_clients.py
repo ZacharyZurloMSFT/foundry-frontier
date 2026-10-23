@@ -13,7 +13,6 @@ from typing import Union
 from azure.core.credentials import AzureKeyCredential, TokenCredential
 from azure.cosmos.aio import CosmosClient
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
-from azure.search.documents.aio import SearchClient
 from azure.storage.blob.aio import BlobServiceClient
 
 from .settings import get_settings
@@ -35,14 +34,6 @@ def get_foundry_credential() -> Union[AzureKeyCredential, TokenCredential]:
     if s.foundry_api_key:
         return AzureKeyCredential(s.foundry_api_key)
     return get_credential()
-
-
-@lru_cache
-def get_search_client() -> SearchClient:
-    s = get_settings()
-    cred: Union[AzureKeyCredential, TokenCredential]
-    cred = AzureKeyCredential(s.azure_search_key) if s.azure_search_key else get_credential()
-    return SearchClient(endpoint=s.search_endpoint, index_name=s.search_index, credential=cred)
 
 
 @lru_cache

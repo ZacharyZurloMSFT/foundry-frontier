@@ -1,7 +1,7 @@
 """Route the API app's model inference through the Azure API Management AI Gateway.
 
-When ``AI_GATEWAY_MODEL_ENDPOINT`` is set, the safety check, the model bake-off,
-grounded adjuster support and the Copilot harness send their model calls to the
+When ``AI_GATEWAY_MODEL_ENDPOINT`` is set, grounded adjuster support and the
+Copilot harness send their model calls to the
 gateway's OpenAI-compatible ``/openai/v1`` surface with an Entra bearer token
 instead of calling the Foundry project directly. The gateway routes on
 ``<provider>/<registration>`` aliases (``aisvc-zurlo-northwind/gpt-5-4``), not on
@@ -32,7 +32,7 @@ from openai import AsyncOpenAI
 from .settings import AI_GATEWAY_DEFAULT_SCOPE as DEFAULT_SCOPE
 from .settings import get_settings
 
-FEATURES = ("safety", "bakeoff", "adjuster_support", "harness")
+FEATURES = ("adjuster_support", "harness")
 _ENDPOINT_SUFFIX = "/openai/v1"
 _HOST = re.compile(r"[A-Za-z0-9._-]+")
 _ALIAS = re.compile(r"[^\s/]+/[^\s/]+")

@@ -4,8 +4,8 @@
 **Effective:** 2026-01-01. **Jurisdiction:** fictional Washington/Colorado auto demo.
 No live staffing, callback guarantee or coverage determination is implied.
 
-1. Verify converted insurance runtime readiness before opening a voice session.
-   If unavailable, show the explanation; never open a retail session.
+1. Verify insurance runtime readiness before opening a voice session.
+   If unavailable, show the explanation and do not open a session.
 2. Ask whether the caller is safe. Immediate danger → emergency guidance.
 3. Capture free-form intent using NW-VOICE-INTENTS-2026-V1. Caller ID alone
    is not identity verification; do not expose records without authorisation.

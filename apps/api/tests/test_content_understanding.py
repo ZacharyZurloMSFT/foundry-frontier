@@ -185,7 +185,7 @@ async def test_bad_operation_host_is_never_contacted():
     ({"completion_model": "unsupported-model"}, "cu_model_not_configured"),
     ({"endpoint": "https://localhost"}, "invalid_cu_endpoint"),
     ({"endpoint": ENDPOINT + "/api/projects/project"}, "invalid_cu_endpoint"),
-    ({"analyzer_id": "retail-analyzer"}, "invalid_insurance_analyzer"),
+    ({"analyzer_id": "unrecognised-analyzer"}, "invalid_insurance_analyzer"),
 ])
 def test_configuration_fails_closed(change, code):
     with pytest.raises(HTTPException) as error:
@@ -198,7 +198,7 @@ def test_configuration_fails_closed(change, code):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [
     {"status": "creating"}, {"tags": {"owner": "foreign"}},
-    {"fieldSchema": {"fields": {"retail": {"type": "string"}}}},
+    {"fieldSchema": {"fields": {"unexpected_field": {"type": "string"}}}},
     {"models": {"completion": "gpt-4o"}},
     {"fieldSchema": None}, {"tags": None}, {"models": None},
 ])
@@ -252,10 +252,10 @@ def test_existing_allowlisted_samples_are_real_pdf_bytes_not_extraction_fixtures
 @pytest.fixture
 def container_sources(monkeypatch):
     root = next(parent for parent in Path(__file__).resolve().parents if (parent / "data" / "seed" / "generated").is_dir())
-    manifest = root / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
+    manifest = root / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
     rows = json.loads(manifest.read_text(encoding="utf-8"))["items"]
     container_file = "/app/app/content_understanding.py"
-    files = {"/app/app/_northwind/departments/claims-warranty/claims-documents.json": manifest}
+    files = {"/app/app/_northwind/departments/claims-documents/claims-documents.json": manifest}
     files.update({
         "/app/app/_northwind/claims-documents/" + row["source_file"]: root / "data" / "seed" / "generated" / row["source_file"]
         for row in rows

@@ -10,16 +10,8 @@ param apimName string = 'apim-northwind'
 @description('Existing Application Insights component that receives gateway telemetry.')
 param appInsightsName string = 'appi-zurlo-northwind'
 
-@description('Container App stacks to publish. name is the immutable first APIM path segment of every API in the stack.')
+@description('Container App stacks to publish. name is the immutable first APIM path segment of every API in the stack. Only the insurance stack is managed here; techLookupApp and workOrderApp host the policy/claim lookup and the claim-action review MCP servers, published under the live tech-lookup and work-order API names.')
 param stacks array = [
-  {
-    name: 'northwind'
-    apiApp: 'ca-api'
-    techLookupApp: 'ca-mcp-tech-lookup'
-    workOrderApp: 'ca-mcp-work-order'
-    webApp: 'ca-web-tech'
-    voiceApp: 'ca-web-voice'
-  }
   {
     name: 'insurance'
     apiApp: 'ca-insurance-api'
@@ -78,7 +70,7 @@ resource voiceApps 'Microsoft.App/containerApps@2024-03-01' existing = [for stac
   name: stack.voiceApp
 }]
 
-// One committed OpenAPI document (scripts/export-openapi.py) describes both stacks: they run the same code.
+// One committed OpenAPI document (scripts/export-openapi.py) describes the REST API of the stack.
 var restSpec = loadTextContent('apim/specs/northwind-api.openapi.json')
 var restPolicyTemplate = loadTextContent('apim/policies/rest-api.xml')
 var voicePolicyTemplate = loadTextContent('apim/policies/voice-api.xml')
@@ -123,7 +115,8 @@ var restPolicyBase = replace(
   gatewayTokenXml
 )
 
-// Each stack publishes one MCP API per FastMCP backend; they are flattened so one loop creates them all.
+// Each stack publishes one MCP API per FastMCP backend; they are flattened so one loop creates them all. The kind
+// names are the live API identifiers (insurance-mcp-tech-lookup, insurance-mcp-work-order) and are never renamed.
 var mcpKinds = [
   'tech-lookup'
   'work-order'

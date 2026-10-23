@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: Existing app to release
+        description: Live insurance app to release, by service name (api, mcp-policy-lookup, mcp-claim-review, web-portal, web-voice map to ca-insurance-api, -lookup, -review, -portal, -voice)
         type: choice
-        options: [all, api, mcp-tech-lookup, mcp-work-order, web-tech, web-voice]
+        options: [all, api, mcp-policy-lookup, mcp-claim-review, web-portal, web-voice]
         default: all
         required: true
       expected_sha:
@@ -134,10 +134,11 @@ jobs:
       ACR_NAME: ${{ vars.ACR_NAME }}
       NORTHWIND_GATEWAY_URL: ${{ vars.NORTHWIND_GATEWAY_URL }}
       VITE_INSURANCE_BUSINESS_ENABLED: ${{ vars.VITE_INSURANCE_BUSINESS_ENABLED || 'true' }}
-      VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID }}
-      VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
-      VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE }}
-      VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID }}
+      # Defaults for the live insurance sign-in app registration (identifiers, not secrets); repository variables override them.
+      VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID || vars.AZURE_TENANT_ID }}
+      VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID || '0d7bda00-80e1-4004-a78d-9072bc8f836d' }}
+      VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE || 'api://02f5b350-4ab2-4297-af8d-672034fa81b0/access_as_user' }}
+      VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID || 'northwind-demo' }}
     steps:
       - name: Recheck source after environment approval and validate exact Azure scope
         shell: bash
@@ -176,16 +177,18 @@ jobs:
           export GITHUB_SHA="$SOURCE_SHA"
           if [[ -n "${NORTHWIND_GATEWAY_URL:-}" ]]; then
             [[ "$NORTHWIND_GATEWAY_URL" =~ ^https://[a-z0-9-]+\.azure-api\.net$ ]]
-            export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/northwind"
+            export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/insurance"
           else
+            api_app="$(python scripts/release-app.py app-name --service api)"
             api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
-              --name ca-api --query properties.configuration.ingress.fqdn -o tsv)"
+              --name "$api_app" --query properties.configuration.ingress.fqdn -o tsv)"
             [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
             export VITE_API_BASE_URL="https://$api_fqdn"
           fi
           while IFS= read -r service; do
-            case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech|web-voice) ;; *) exit 1 ;; esac
-            az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-$service" \
+            case "$service" in api|mcp-policy-lookup|mcp-claim-review|web-portal|web-voice) ;; *) exit 1 ;; esac
+            app="$(python scripts/release-app.py app-name --service "$service")"
+            az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "$app" \
               --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
               -o json > ".release-state/before-$service.json"
             jq -e '.revision and .image' ".release-state/before-$service.json" > /dev/null
@@ -200,20 +203,11 @@ jobs:
                 python scripts/bundle-insurance-assets.py --service "$service"
                 ;;
               web-*)
-                if [[ "$service" == web-tech ]]; then python scripts/release-app.py check-frontend; fi
+                if [[ "$service" == web-portal ]]; then python scripts/release-app.py check-frontend; fi
                 (cd "apps/$service" && npm ci --no-audit --no-fund && npm run build)
                 ;;
             esac
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          # The insurance-branded apps ship from the same api/web sources.
-          for pair in web-tech:insurance-portal web-voice:insurance-voice; do
-            if jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null; then
-              az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-${pair##*:}" \
-                --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
-                -o json > ".release-state/before-${pair##*:}.json"
-              jq -e '.revision and .image' ".release-state/before-${pair##*:}.json" > /dev/null
-            fi
-          done
       - name: Build and push immutable images on the runner (never ACR admin credentials)
         shell: bash
         run: |
@@ -223,7 +217,7 @@ jobs:
           echo "DEPLOYED_AT=$deployed_at" >> "$GITHUB_ENV"
           while IFS= read -r service; do
             tag="$ACR_NAME.azurecr.io/$service:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-            # No Vite build args: web-tech's default preserves the validated prebuilt dist.
+            # No Vite build args: web-portal's default preserves the validated prebuilt dist.
             docker buildx build --platform linux/amd64 --push --tag "$tag" \
               --label "org.opencontainers.image.revision=$SOURCE_SHA" \
               --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
@@ -233,51 +227,6 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s' "$ACR_NAME.azurecr.io/$service@$digest" > ".release-state/image-$service"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          if jq -e 'index("web-tech") or index("web-voice")' <<< "$SERVICES_JSON" > /dev/null; then
-            # Insurance-branded SPAs: same sources, built against the insurance API, through the gateway when configured.
-            if [[ -n "${NORTHWIND_GATEWAY_URL:-}" ]]; then
-              [[ "$NORTHWIND_GATEWAY_URL" =~ ^https://[a-z0-9-]+\.azure-api\.net$ ]]
-              insurance_base="$NORTHWIND_GATEWAY_URL/insurance"
-            else
-              insurance_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
-                --name ca-insurance-api --query properties.configuration.ingress.fqdn -o tsv)"
-              [[ "$insurance_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
-              insurance_base="https://$insurance_fqdn"
-            fi
-          fi
-          if jq -e 'index("web-tech")' <<< "$SERVICES_JSON" > /dev/null; then
-            # Insurance portal, with its Entra sign-in settings.
-            (cd apps/web-tech \
-              && VITE_API_BASE_URL="$insurance_base" \
-                 VITE_INSURANCE_BUSINESS_ENABLED=true \
-                 VITE_INSURANCE_AUTH_TENANT_ID="${VITE_INSURANCE_AUTH_TENANT_ID:-$AZURE_TENANT_ID}" \
-                 VITE_INSURANCE_AUTH_CLIENT_ID="${VITE_INSURANCE_AUTH_CLIENT_ID:-0d7bda00-80e1-4004-a78d-9072bc8f836d}" \
-                 VITE_INSURANCE_AUTH_SCOPE="${VITE_INSURANCE_AUTH_SCOPE:-api://02f5b350-4ab2-4297-af8d-672034fa81b0/access_as_user}" \
-                 VITE_INSURANCE_RUN_ID="${VITE_INSURANCE_RUN_ID:-northwind-demo}" \
-                 npm run build)
-            tag="$ACR_NAME.azurecr.io/web-tech:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-insurance"
-            docker buildx build --platform linux/amd64 --push --tag "$tag" \
-              --label "org.opencontainers.image.revision=$SOURCE_SHA" \
-              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-              --label "org.opencontainers.image.created=$deployed_at" \
-              --metadata-file ".release-state/build-insurance-portal.json" apps/web-tech
-            digest="$(jq -er '."containerimage.digest"' ".release-state/build-insurance-portal.json")"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            printf '%s' "$ACR_NAME.azurecr.io/web-tech@$digest" > ".release-state/image-insurance-portal"
-          fi
-          if jq -e 'index("web-voice")' <<< "$SERVICES_JSON" > /dev/null; then
-            # Insurance voice client: the same bundle, pointed at the insurance API.
-            (cd apps/web-voice && VITE_API_BASE_URL="$insurance_base" npm run build)
-            tag="$ACR_NAME.azurecr.io/web-voice:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-insurance"
-            docker buildx build --platform linux/amd64 --push --tag "$tag" \
-              --label "org.opencontainers.image.revision=$SOURCE_SHA" \
-              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-              --label "org.opencontainers.image.created=$deployed_at" \
-              --metadata-file ".release-state/build-insurance-voice.json" apps/web-voice
-            digest="$(jq -er '."containerimage.digest"' ".release-state/build-insurance-voice.json")"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            printf '%s' "$ACR_NAME.azurecr.io/web-voice@$digest" > ".release-state/image-insurance-voice"
-          fi
       - name: Release digest-pinned images, preserving all configuration and opt-in flags
         shell: bash
         run: |
@@ -285,8 +234,9 @@ jobs:
           revision="gha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${SOURCE_SHA:0:12}"
           while IFS= read -r service; do
             test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
+            app="$(python scripts/release-app.py app-name --service "$service")"
             args=(release --subscription "$AZURE_SUBSCRIPTION_ID" --tenant "$AZURE_TENANT_ID"
-              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "ca-$service"
+              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "$app"
               --image "$(cat ".release-state/image-$service")" --revision "$revision"
               --expected-revision "$(jq -er .revision ".release-state/before-$service.json")"
               --rollback-file ".release-state/rollback-$service.json" --apply)
@@ -295,17 +245,6 @@ jobs:
             fi
             python scripts/release-app.py "${args[@]}"
           done < <(jq -r '.[]' <<< "$SERVICES_JSON")
-          for pair in web-tech:insurance-portal web-voice:insurance-voice; do
-            target="${pair##*:}"
-            jq -e --arg s "${pair%%:*}" 'index($s)' <<< "$SERVICES_JSON" > /dev/null || continue
-            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
-            args=(release --subscription "$AZURE_SUBSCRIPTION_ID" --tenant "$AZURE_TENANT_ID"
-              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "ca-$target"
-              --image "$(cat ".release-state/image-$target")" --revision "$revision"
-              --expected-revision "$(jq -er .revision ".release-state/before-$target.json")"
-              --rollback-file ".release-state/rollback-$target.json" --apply)
-            python scripts/release-app.py "${args[@]}"
-          done
       - name: Preserve secret-free rollback records even when readiness is unknown
         if: always()
         uses: actions/upload-artifact@v7

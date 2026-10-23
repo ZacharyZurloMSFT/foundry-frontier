@@ -796,11 +796,11 @@ async def test_api_app_registers_the_guard_outermost_and_exempts_only_health(mon
     assert registered.kwargs == {"exempt_paths": frozenset({"/health"})}
     async with deployed_stack(main.app, monkeypatch) as client:
         assert (await client.get("/health")).status_code == 200
-        blocked = await client.get("/safety/attacks")
+        blocked = await client.get("/departments")
         assert blocked.status_code == 401 and blocked.json() == REJECTED
         assert (await client.post("/hitl/decide", json={})).status_code == 401
-        allowed = await client.get("/safety/attacks", headers={HEADER: token()})
-        assert allowed.status_code == 200 and "attacks" in allowed.json()
+        allowed = await client.get("/departments", headers={HEADER: token()})
+        assert allowed.status_code == 200 and "departments" in allowed.json()
 
 
 @pytest.mark.asyncio
@@ -810,11 +810,11 @@ async def test_api_app_is_unchanged_while_the_guard_is_not_enabled(monkeypatch):
     monkeypatch.delenv(FLAG, raising=False)
     transport = httpx.ASGITransport(app=main.app.build_middleware_stack())
     async with httpx.AsyncClient(transport=transport, base_url="http://unit.test") as client:
-        assert (await client.get("/safety/attacks")).status_code == 200
+        assert (await client.get("/departments")).status_code == 200
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("service", ["mcp-tech-lookup", "mcp-work-order"])
+@pytest.mark.parametrize("service", ["mcp-policy-lookup", "mcp-claim-review"])
 async def test_mcp_apps_guard_the_mounted_transport_and_exempt_only_healthz(service, monkeypatch):
     module = load_mcp(service)
     registered = module.app.user_middleware[0]

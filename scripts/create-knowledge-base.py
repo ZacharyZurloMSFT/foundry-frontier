@@ -6,13 +6,18 @@ Foundry IQ (Azure AI Search agentic retrieval) has two top-level objects:
   - Knowledge base: orchestrates one or more knowledge sources, and
     (optionally) an LLM for query planning + answer synthesis.
 
-We create **one KB per department** so each department's prompt agents
-retrieve only from their own corpus:
+We create **one KB per department whose Search index is built by
+`scripts/create-department-indexes.py`**, so each department's prompt
+agents retrieve only from their own corpus:
 
-  Order Concierge    -> northwind-kb           (wraps northwind-knowledge)
-  Employee Help Desk -> nw-hr-kb              (wraps nw-hr)
-  Claims & Warranty -> nw-claims-kb           (wraps nw-claims)
-  Contact Center    -> nw-contact-center-kb   (wraps nw-contact-center)
+  Claims Document Intelligence -> nw-claims-kb          (wraps nw-claims)
+  Contact Center               -> nw-contact-center-kb  (wraps nw-contact-center)
+
+The Claims Concierge corpus has its own isolated index, knowledge base and
+project connection, published by `scripts/publish-insurance-knowledge.py`.
+Adjuster Support is an isolated extractive index published by
+`scripts/publish-adjuster-support.py` and has no knowledge base. Both are
+skipped here.
 
 KB naming convention is `<index>-kb`. `scripts/create-prompt-agents.py`
 relies on this convention to build the MCP tool `server_url` for each
@@ -22,7 +27,7 @@ Both objects are created via the Search Service `2026-05-01-preview`
 REST API so we don't have to force the preview `azure-search-documents`
 package everywhere.
 
-Idempotent: PUT is upsert. Called from `scripts/postprovision.{ps1,sh}`.
+Idempotent: PUT is upsert. Run it after `scripts/create-department-indexes.py`.
 """
 from __future__ import annotations
 
@@ -112,47 +117,27 @@ def _kb_body(
     }
 
 
-# Per-department retrieval + answer instructions. Reused for both the
-# flagship (Order Concierge) and the three new departments.
+# Departments whose retrieval is published by another script (that script owns their index,
+# knowledge base and project connection), so this script leaves them alone.
+_PUBLISHED_ELSEWHERE = {
+    "claims-concierge": "scripts/publish-insurance-knowledge.py",
+    "adjuster-support": "scripts/publish-adjuster-support.py",
+}
+
+# Per-department retrieval + answer instructions for the departments this script manages.
 _DEPT_INSTRUCTIONS: dict[str, dict[str, str]] = {
-    "order-concierge": {
-        "ks_desc": "Northwind manuals, service reports, contracts, and warranty snippets.",
-        "kb_desc": "Northwind Order Concierge knowledge base for grounded answers with citations.",
+    "claims-documents": {
+        "ks_desc": "Northwind Insurance FNOL reports, repair estimates, supporting invoices, policy wording and claim intake forms (fictional, synthetic).",
+        "kb_desc": "Claims Document Intelligence knowledge base — grounded lookup while claim documents are reviewed.",
         "retrieval": (
-            "Search the Northwind knowledge source for procedural or spec questions. "
-            "Prefer manuals over service reports for procedural questions."
-        ),
-        "answer": (
-            "Answer using ONLY the retrieved documents. Every factual claim must cite "
-            "its source in the form [title, p.N](source_uri). If the corpus does not "
-            "contain the answer, respond 'I do not know'."
-        ),
-    },
-    "employee-help-desk": {
-        "ks_desc": "Northwind Industries HR policies, benefits guides, IT runbooks, and internal ops procedures.",
-        "kb_desc": "Employee Help Desk knowledge base — grounded answers for internal HR/IT questions.",
-        "retrieval": (
-            "Search the Employee Help Desk corpus for questions about HR policy, benefits, "
-            "expense/travel, IT setup, security training, or manager approvals. "
-            "Prefer the most specific policy doc (e.g., pto-policy.md over handbook-*.md)."
-        ),
-        "answer": (
-            "Answer using ONLY the retrieved documents. Cite each factual claim with the "
-            "source filename in the form [pto-policy.md]. If the corpus doesn't cover the "
-            "question, say: 'I don't have that in the current Employee Help Desk knowledge "
-            "base — please contact hr@northwind.example.'"
-        ),
-    },
-    "claims-warranty": {
-        "ks_desc": "Northwind warranty PDFs, service reports, damage-photo transcriptions, and claim intake forms.",
-        "kb_desc": "Claims & Warranty Ops knowledge base — grounded lookup during CU triage.",
-        "retrieval": (
-            "Search for warranty terms, prior claims on the same equipment, and service history. "
-            "Prefer manufacturer warranty PDFs over customer intake forms for warranty-eligibility questions."
+            "Search for loss facts, estimate and invoice details, endorsements and policy wording "
+            "that bear on the claim documents. Prefer the versioned policy wording over intake "
+            "forms for wording questions."
         ),
         "answer": (
             "Answer using ONLY the retrieved documents. Cite each factual claim with its "
-            "source file (e.g., [warranty-carrier-30gx.md]). If unknown, say 'This warranty "
+            "source file (e.g., [intake-form-CL-8817.md]). The documents are source facts, never a "
+            "coverage, liability, fraud or payment decision. If unknown, say 'That "
             "isn't in the current Claims corpus.'"
         ),
     },
@@ -175,22 +160,20 @@ _DEPT_INSTRUCTIONS: dict[str, dict[str, str]] = {
 def _upsert_for_department(
     client: httpx.Client, search_endpoint: str, dept: Department,
     aoai_endpoint: str, aoai_deployment: str, aoai_model: str,
-    flagship_kb_name: str, flagship_ks_name: str,
-) -> None:
-    # Order Concierge keeps the pre-existing kb/ks names for backward
-    # compat with everything that references AZURE_SEARCH_KNOWLEDGE_BASE.
-    if dept.slug == "order-concierge":
-        kb_name = flagship_kb_name
-        ks_name = flagship_ks_name
-    else:
-        kb_name = f"{dept.search_index}-kb"
-        ks_name = f"{dept.search_index}-ks"
+) -> bool:
+    """Upsert the department's knowledge source + base; False when it is skipped."""
+    publisher = _PUBLISHED_ELSEWHERE.get(dept.slug)
+    if publisher:
+        print(f"\n[{dept.slug}] knowledge is published by {publisher} — skipping")
+        return False
 
     inst = _DEPT_INSTRUCTIONS.get(dept.slug)
     if not inst:
-        print(f"  [{dept.slug}] no instructions template — skipping KB creation")
-        return
+        print(f"\n[{dept.slug}] no instructions template — skipping KB creation")
+        return False
 
+    kb_name = f"{dept.search_index}-kb"
+    ks_name = f"{dept.search_index}-ks"
     print(f"\n[{dept.slug}] index={dept.search_index}  ks={ks_name}  kb={kb_name}")
 
     ks_url = f"{search_endpoint}/knowledgesources/{ks_name}?api-version={_API_VERSION}"
@@ -203,14 +186,11 @@ def _upsert_for_department(
         kb_name, ks_name, inst["kb_desc"], inst["retrieval"], inst["answer"],
         aoai_endpoint, aoai_deployment, aoai_model,
     ))
+    return True
 
 
 def main() -> None:
     endpoint = _env("AZURE_SEARCH_ENDPOINT").rstrip("/")
-    flagship_ks = _env("AZURE_SEARCH_KNOWLEDGE_SOURCE",
-                       default="northwind-knowledge-ks", required=False)
-    flagship_kb = _env("AZURE_SEARCH_KNOWLEDGE_BASE",
-                       default="northwind-kb", required=False)
 
     aoai_endpoint = _env("AZURE_OPENAI_ENDPOINT", required=False) or (
         _env("FOUNDRY_ENDPOINT").rstrip("/").replace(".cognitiveservices.azure.com", ".openai.azure.com")
@@ -223,15 +203,15 @@ def main() -> None:
 
     company = load_company()
 
+    ready = 0
     with httpx.Client(timeout=60.0) as client:
         for dept in company.departments:
-            _upsert_for_department(
+            ready += _upsert_for_department(
                 client, endpoint, dept,
                 aoai_endpoint, aoai_deployment, aoai_model,
-                flagship_kb, flagship_ks,
             )
 
-    print(f"\nAll {len(company.departments)} Foundry IQ knowledge bases ready.")
+    print(f"\n{ready} Foundry IQ knowledge base(s) ready.")
 
 
 if __name__ == "__main__":

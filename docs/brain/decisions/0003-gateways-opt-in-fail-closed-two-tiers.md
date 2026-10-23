@@ -9,7 +9,8 @@
 Governance (CORS, rate limits, keys, token-based access) was wanted in front of the apps' REST, WebSocket and
 MCP surfaces and in front of model inference, but a fresh `azd up` has to stay unchanged. API Management
 Standard v2 has no dedicated outbound IP, so IP rules cannot identify the gateway. The AI Gateway tier drops
-client headers before the MCP backend, while the work-order MCP binds an application-owned workflow header.
+client headers before the MCP backend, while the claim-review MCP binds an application-owned workflow header
+(`x-workflow-id`).
 
 ## Decision
 
@@ -26,8 +27,9 @@ client headers before the MCP backend, while the work-order MCP binds an applica
 
 ## Consequences
 
-- The work-order MCP goes through `apim-northwind`, never the AI Gateway. It can stay direct only while its
-  app is not locked behind the gateway guard.
+- The claim-review MCP goes through `apim-northwind`, never usefully through the AI Gateway: the gateway drops the
+  workflow header, so the app rejects the call by design. It can stay direct only while its app is not locked behind
+  the gateway guard.
 - Changing the REST surface means regenerating the OpenAPI export
   ([gotchas](../gotchas/api-and-gateways.md)).
 - RBAC alone cannot force gateway-only inference: enforcement is code that fails closed, removing redundant

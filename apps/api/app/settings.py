@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AI_GATEWAY_DEFAULT_SCOPE = "https://azure-api.net/aigateway/.default"
@@ -42,25 +42,16 @@ class Settings(BaseSettings):
     # Foundry
     foundry_endpoint: str = Field(default="", alias="FOUNDRY_ENDPOINT")
     foundry_project_endpoint: str = Field(default="", alias="FOUNDRY_PROJECT_ENDPOINT")
-    order_project_name: str = Field(default="northwind-orders", alias="ORDER_PROJECT_NAME")
-    order_agents_hosted: bool = Field(default=False, alias="ORDER_AGENTS_HOSTED")
-    business_domain: Literal["retail", "insurance"] = Field(default="retail", alias="NORTHWIND_BUSINESS_DOMAIN")
+    # Canonical names first; the legacy ORDER_* names stay accepted so deployed configuration keeps working.
+    insurance_project_name: str = Field(
+        default="northwind-orders",
+        validation_alias=AliasChoices("INSURANCE_PROJECT_NAME", "ORDER_PROJECT_NAME"))
+    hosted_agents_enabled: bool = Field(
+        default=False, validation_alias=AliasChoices("HOSTED_AGENTS_ENABLED", "ORDER_AGENTS_HOSTED"))
     insurance_agents_ready: bool = Field(default=False, alias="NORTHWIND_INSURANCE_AGENTS_READY")
     insurance_orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID")
     planner_deployment: str = Field(default="gpt-5.4", alias="FOUNDRY_PLANNER_DEPLOYMENT")
     worker_deployment: str = Field(default="gpt-5.4-mini", alias="FOUNDRY_WORKER_DEPLOYMENT")
-    # Hosted orchestrator agent id. In Foundry the id equals the agent name;
-    # set this to override the default of "northwind-orchestrator".
-    orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_ORCHESTRATOR_AGENT_ID")
-    # Prompt agent for policy/KB lookup ("Policy Lookup" tab / policy_lookup).
-    # Env var is legacy — the agent is northwind-policy-lookup.
-    manual_agent_id: str = Field(default="northwind-policy-lookup", alias="FOUNDRY_MANUAL_AGENT_ID")
-    # Prompt agent that looks up customer + order + shipment ("Order Lookup"
-    # tab). Env var is legacy — the agent is northwind-order-lookup.
-    tech_agent_id: str = Field(default="northwind-order-lookup", alias="FOUNDRY_TECH_AGENT_ID")
-    # Prompt agent that drafts structured customer resolutions ("Resolution
-    # Draft" tab). Env var is legacy — the agent is northwind-resolution-draft.
-    work_order_agent_id: str = Field(default="northwind-resolution-draft", alias="FOUNDRY_WORK_ORDER_AGENT_ID")
 
     # AI Gateway (Azure API Management AI Gateway tier). Every value is optional and
     # empty means unset: with no endpoint, model calls keep going straight to Foundry.
@@ -72,11 +63,8 @@ class Settings(BaseSettings):
     # JSON object: deployment name -> full "<provider>/<registration>" gateway alias.
     ai_gateway_model_aliases: str = Field(default="", alias="AI_GATEWAY_MODEL_ALIASES")
 
-    # Search
+    # Search (endpoint only: the insurance corpora are addressed by their own index/KB names)
     search_endpoint: str = Field(default="", alias="AZURE_SEARCH_ENDPOINT")
-    search_index: str = Field(default="northwind-knowledge", alias="AZURE_SEARCH_INDEX")
-    search_knowledge_base: str = Field(default="northwind-kb", alias="AZURE_SEARCH_KNOWLEDGE_BASE")
-    search_knowledge_source: str = Field(default="northwind-knowledge-ks", alias="AZURE_SEARCH_KNOWLEDGE_SOURCE")
 
     # Cosmos
     cosmos_endpoint: str = Field(default="", alias="COSMOS_ENDPOINT")
@@ -129,7 +117,7 @@ class Settings(BaseSettings):
     voice_live_api_version: str = Field(default="", alias="VOICE_LIVE_API_VERSION")
     voice_live_transcription_enabled: bool = Field(default=True, alias="VOICE_LIVE_TRANSCRIPTION_ENABLED")
     voice_live_allowed_origins: str = Field(
-        default="https://ca-web-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,http://localhost:5173,http://localhost:5174",
+        default="https://ca-insurance-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,https://ca-insurance-portal.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,http://localhost:5173,http://localhost:5174",
         alias="VOICE_LIVE_ALLOWED_ORIGINS",
     )
 
@@ -139,7 +127,8 @@ class Settings(BaseSettings):
     harness_model: str = Field(default="", alias="COPILOT_HARNESS_MODEL")
     harness_prompt_path: str = Field(default="", alias="COPILOT_HARNESS_PROMPT_PATH")
     harness_runtime_dir: str = Field(default="", alias="COPILOT_HARNESS_RUNTIME_DIR")
-    harness_resolution_mcp: str = Field(default="", alias="MCP_WORK_ORDER_URL")
+    harness_claim_review_mcp: str = Field(
+        default="", validation_alias=AliasChoices("MCP_CLAIM_REVIEW_URL", "MCP_WORK_ORDER_URL"))
     harness_gateway_key: SecretStr = Field(default=SecretStr(""), alias="MCP_GATEWAY_SUBSCRIPTION_KEY")
     harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
     harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")

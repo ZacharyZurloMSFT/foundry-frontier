@@ -11,7 +11,7 @@ from azure.ai.projects.models import FileDatasetVersion, FolderDatasetVersion, M
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "pipelines" / "orders-learning"))
+sys.path.insert(0, str(ROOT / "pipelines" / "insurance-learning"))
 from insurance_learning import prepare
 from evals.insurance_native import PREFIX, build_plan, config_template, digest, execute_sdk
 from evals.insurance_review import (
@@ -99,7 +99,7 @@ def test_user_receipt_is_hash_bound_scope_bound_and_not_assistant_approval(pack,
 def test_insurance_training_fails_closed_even_with_evaluation_consent(pack):
     with pytest.raises(ValueError, match="separate reviewed training release"):
         require_training_approval(read_json(pack / "manifest.json"), approved(pack))
-    require_training_approval({"business_domain": "retail"})
+    require_training_approval({"business_domain": "other"})
 
 
 def test_dry_native_plan_needs_no_credentials_and_no_real_approval(pack, monkeypatch):
@@ -282,6 +282,40 @@ def test_native_sdk_success_retains_actual_results_and_incomplete_cases_never_pa
         assert receipt["preflight"]["targets"]["triage"]["dataset_kind"] == "uri_file"
 
 
+@pytest.mark.parametrize("environment,reaches_submission", [
+    ({"NORTHWIND_BUSINESS_DOMAIN": "insurance"}, True),
+    ({}, True),
+    ({"NORTHWIND_BUSINESS_DOMAIN": "other"}, False),
+])
+def test_hosted_agent_preflight_rejects_only_an_explicit_non_insurance_domain(pack, environment, reaches_submission):
+    config = verified_config(pack)
+    config["datasets"] = {"triage": config["datasets"]["triage"]}
+    plan = build_plan(pack, config, approved(pack))
+    receipt = {"jobs": {}, "plan_sha256": digest(plan)}
+    submitted = []
+
+    def create_eval(**_kwargs):
+        submitted.append(True)
+        raise TimeoutError("preflight passed; stop before any native work")
+
+    project = SimpleNamespace(
+        deployments=SimpleNamespace(get=lambda _: ModelDeployment(
+            name="gpt-4o", model_name="gpt-4o", model_version="unit-test-version", model_publisher="OpenAI",
+            capabilities={}, sku=ModelDeploymentSku(name="GlobalStandard"))),
+        agents=SimpleNamespace(get_version=lambda _name, version: {
+            "version": version, "status": "active",
+            "metadata": {"source_sha256": "a" * 64, "config_sha256": "b" * 64},
+            "definition": {"kind": "hosted", "model": "gpt-4o", "environment_variables": environment}}),
+        datasets=SimpleNamespace(get=lambda name, version: FileDatasetVersion(
+            id=PREFIX + name + "/versions/" + version, name=name, version=version,
+            data_uri="https://unit-test.invalid/smoke.jsonl")),
+    )
+    client = SimpleNamespace(evals=SimpleNamespace(create=create_eval))
+    with pytest.raises(TimeoutError if reaches_submission else ValueError):
+        execute_sdk(project, client, plan, receipt, lambda: None)
+    assert bool(submitted) is reaches_submission
+
+
 def test_real_sdk_serialization_matches_documented_fields_without_invented_dataset_flags():
     deployment = ModelDeployment(
         name="gpt-4o", model_name="gpt-4o", model_version="unit-test-version",
@@ -295,7 +329,7 @@ def test_real_sdk_serialization_matches_documented_fields_without_invented_datas
 
 
 def test_approved_insurance_v2_manifest_and_artifact_bytes_are_unchanged():
-    pack = ROOT / "pipelines" / "orders-learning" / "insurance-upload-pack" / "insurance-2026-10-14-v2"
+    pack = ROOT / "pipelines" / "insurance-learning" / "insurance-upload-pack" / "insurance-2026-10-14-v2"
     assert sha256(pack / "manifest.json") == "a528a43c451ef3d2ec5357978b0fefd8a2f3fb3d9d10e26c275f99da6b6f618e"
     manifest = read_json(pack / "manifest.json")
     assert all(sha256(pack / name) == expected for name, expected in manifest["files_sha256"].items())

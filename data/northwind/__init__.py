@@ -1,20 +1,18 @@
-"""Northwind Industries manifest loader.
+"""Northwind Insurance manifest loader.
 
-The demo is organized around one company (Northwind Industries) with four
+The demo is organized around one company (Northwind Insurance) with four
 departments, each backed by its own Foundry project inside the shared
 AI Services account. This module is the single Python entry point for
-resolving that structure — every script that used to hard-code
-`data/seed` or `agents/triage.yaml` should route through here so the same
-code works for Order Concierge today and the other three departments once
-they land.
+resolving that structure — every script that needs a department's seed
+data, prompts or Foundry project should route through here.
 
 Usage:
 
     from data.northwind import load_company, load_department, list_departments
 
     company = load_company()
-    fs = load_department("order-concierge")
-    print(fs.seed_dir, fs.foundry_project)
+    claims = load_department("claims-concierge")
+    print(claims.seed_dir, claims.foundry_project)
 
 All paths on the returned dataclasses are absolute — the loader anchors
 them at the repo root regardless of the caller's cwd.

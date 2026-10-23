@@ -45,8 +45,8 @@ async def seed(run_id: str, path: Path, *, apply: bool = False) -> dict:
     if not apply:
         return summary
     settings = get_settings()
-    if settings.business_domain != "insurance" or not settings.cosmos_endpoint:
-        raise BusinessError("not_configured", "Explicit insurance domain and Cosmos configuration are required.")
+    if not settings.cosmos_endpoint:
+        raise BusinessError("not_configured", "Cosmos configuration is required.")
     tenant = str(uuid.UUID(settings.business_auth_tenant_id))
     if any(subject.split(":")[0] != tenant for subject in mappings):
         raise BusinessError("tenant_mismatch", "All mapped identities must belong to the configured insurance tenant.")

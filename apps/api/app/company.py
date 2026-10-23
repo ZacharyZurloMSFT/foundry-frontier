@@ -1,11 +1,13 @@
-"""FastAPI helpers for the Northwind Industries company manifest.
+"""FastAPI helpers for the Northwind Insurance company manifest.
 
 Loads `data/northwind/company.yaml` at startup and exposes:
 
 - `get_company()` — cached `Company` dataclass.
 - `serialize_company()` — JSON-serializable view for `GET /company`.
-- `resolve_department(header_value, default_slug="order-concierge")` —
+- `resolve_department(header_value, default_slug="claims-concierge")` —
   maps an `X-Department` header value to the matching `Department`.
+  Legacy slugs from older clients (`order-concierge`, `employee-help-desk`,
+  `claims-warranty`) are accepted and mapped to their canonical slug.
 - `foundry_project_endpoint_for(slug)` — reads
   `FOUNDRY_PROJECT_ENDPOINTS` (JSON string emitted by main.bicep) and
   returns the right project endpoint. Falls back to
@@ -65,7 +67,21 @@ except ImportError:
     _load_company = None  # type: ignore[assignment]
 
 
-DEFAULT_DEPARTMENT_SLUG = "order-concierge"
+DEFAULT_DEPARTMENT_SLUG = "claims-concierge"
+
+# Deprecated slugs still sent by already-deployed clients and still present in
+# already-deployed `FOUNDRY_PROJECT_ENDPOINTS` values. Canonical names win.
+LEGACY_DEPARTMENT_SLUGS = {
+    "order-concierge": "claims-concierge",
+    "employee-help-desk": "adjuster-support",
+    "claims-warranty": "claims-documents",
+}
+
+
+def canonical_department_slug(slug: str | None) -> str:
+    """Normalize a department slug: trim, lowercase, and map deprecated aliases."""
+    value = (slug or "").strip().lower()
+    return LEGACY_DEPARTMENT_SLUGS.get(value, value)
 
 
 def _load_from_yaml(path: Path) -> dict[str, Any]:
@@ -149,11 +165,12 @@ def serialize_company() -> dict[str, Any]:
 
 def resolve_department(header_value: str | None,
                        default_slug: str = DEFAULT_DEPARTMENT_SLUG) -> dict[str, Any]:
-    """Normalize + look up an `X-Department` header. Unknown / missing slugs
-    fall back to the Order Concierge default. Returns the department dict from
-    the serialized manifest (works with or without the package loader)."""
+    """Normalize + look up an `X-Department` header. Deprecated slugs are mapped
+    to their canonical slug; unknown / missing slugs fall back to the Claims
+    Concierge default. Returns the department dict from the serialized manifest
+    (works with or without the package loader)."""
     company = get_company_dict()
-    slug = (header_value or "").strip().lower() or default_slug
+    slug = canonical_department_slug(header_value) or default_slug
     for d in company["departments"]:
         if d["slug"] == slug:
             return d
@@ -171,7 +188,8 @@ def _foundry_project_endpoints() -> dict[str, str]:
     if raw:
         parsed = _try_parse_endpoints_json(raw)
         if parsed is not None:
-            return parsed
+            # Deployed values may still be keyed by a deprecated slug.
+            return {canonical_department_slug(k): v for k, v in parsed.items()}
     single = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "").strip()
     account = os.environ.get("FOUNDRY_ENDPOINT", "").strip()
     # Synthesis fallback: if we have FOUNDRY_ENDPOINT + manifest, derive
@@ -191,7 +209,7 @@ def _foundry_project_endpoints() -> dict[str, str]:
 def _try_parse_endpoints_json(raw: str) -> dict[str, str] | None:
     """Parse the FOUNDRY_PROJECT_ENDPOINTS env var, tolerating the
     double-encoded quote patterns azd's `.env` writer sometimes emits
-    (e.g., `"{\\"order-concierge\\":\\"...\\"}"`)."""
+    (e.g., `"{\\"claims-concierge\\":\\"...\\"}"`)."""
     for pass_raw in (raw, raw.strip('"'), raw.replace('\\"', '"')):
         try:
             parsed = json.loads(pass_raw)
@@ -211,11 +229,12 @@ def _try_parse_endpoints_json(raw: str) -> dict[str, str] | None:
 
 
 def foundry_project_endpoint_for(slug: str) -> str:
-    """Return the Foundry project endpoint for the given department slug,
-    falling back to Order Concierge / the single-project env var."""
+    """Return the Foundry project endpoint for the given department slug
+    (deprecated slugs accepted), falling back to Claims Concierge / the
+    single-project env var."""
     endpoints = _foundry_project_endpoints()
     return (
-        endpoints.get(slug)
+        endpoints.get(canonical_department_slug(slug))
         or endpoints.get(DEFAULT_DEPARTMENT_SLUG)
         or os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "")
     )

@@ -1,10 +1,12 @@
-"""Preview or apply gateway configuration on the six Northwind API Container Apps; only --apply changes anything.
+"""Preview or apply gateway configuration on the three Northwind Insurance Container Apps; only --apply changes anything.
 
 release-app.py intentionally changes nothing but the image and build metadata, so the gateway settings need their
-own guarded path. Allow-listed per app: the NORTHWIND_GATEWAY_* guard variables on every API/MCP app, and on the two
-API apps also MCP_TECH_LOOKUP_URL / MCP_WORK_ORDER_URL (re-pointed at the gateway) plus the gateway subscription key
-as a Container App secret referenced by MCP_GATEWAY_SUBSCRIPTION_KEY. Secret values are read from the environment
-and never printed or recorded. The rollback record contains previous non-secret values only. No automatic rollback.
+own guarded path. Allow-listed per app: the NORTHWIND_GATEWAY_* guard variables on the API and both MCP apps, and on
+the API app also MCP_POLICY_LOOKUP_URL / MCP_CLAIM_REVIEW_URL (re-pointed at the gateway) plus the gateway subscription
+key as a Container App secret referenced by MCP_GATEWAY_SUBSCRIPTION_KEY. The deprecated MCP_TECH_LOOKUP_URL /
+MCP_WORK_ORDER_URL names are never written; they are accepted only when restoring an older rollback record. Secret
+values are read from the environment and never printed or recorded. The rollback record contains previous non-secret
+values only. No automatic rollback.
 """
 from __future__ import annotations
 
@@ -25,14 +27,17 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 GROUP = "rg-northwind-apps"
 API_VERSION = {"api-version": "2024-03-01"}
 APPS = {
-    "ca-api": ("northwind", "api"), "ca-mcp-tech-lookup": ("northwind", "tech-lookup"),
-    "ca-mcp-work-order": ("northwind", "work-order"), "ca-insurance-api": ("insurance", "api"),
-    "ca-insurance-lookup": ("insurance", "tech-lookup"), "ca-insurance-review": ("insurance", "work-order"),
+    "ca-insurance-api": ("insurance", "api"),
+    "ca-insurance-lookup": ("insurance", "tech-lookup"),
+    "ca-insurance-review": ("insurance", "work-order"),
 }
+# The MCP kinds are the live API Management identifiers (insurance-mcp-tech-lookup, /insurance/mcp/work-order).
 HEALTH = {"api": "/health", "tech-lookup": "/healthz", "work-order": "/healthz"}
 GUARD = ("NORTHWIND_GATEWAY_AUTH_REQUIRED", "NORTHWIND_GATEWAY_TENANT_ID", "NORTHWIND_GATEWAY_AUDIENCE",
          "NORTHWIND_GATEWAY_ALLOWED_OIDS")
-API_ONLY = ("MCP_TECH_LOOKUP_URL", "MCP_WORK_ORDER_URL", "MCP_GATEWAY_SUBSCRIPTION_KEY")
+API_ONLY = ("MCP_POLICY_LOOKUP_URL", "MCP_CLAIM_REVIEW_URL", "MCP_GATEWAY_SUBSCRIPTION_KEY")
+# Deprecated aliases that older images and rollback records still use: restore-only, never written.
+LEGACY_API_ONLY = ("MCP_TECH_LOOKUP_URL", "MCP_WORK_ORDER_URL")
 SECRET_NAME = "mcp-gateway-key"
 GUID = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
 
@@ -46,8 +51,10 @@ class SecretRef:
     name: str
 
 
-def allowed_names(app: str) -> tuple[str, ...]:
-    return GUARD + (API_ONLY if APPS[app][1] == "api" else ())
+def allowed_names(app: str, *, restoring: bool = False) -> tuple[str, ...]:
+    if APPS[app][1] != "api":
+        return GUARD
+    return GUARD + API_ONLY + (LEGACY_API_ONLY if restoring else ())
 
 
 def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
@@ -55,7 +62,7 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
         raise ConfigError("Unknown Container App")
     stack, kind = APPS[app]
     for name, value in changes.items():
-        if name not in allowed_names(app):
+        if name not in allowed_names(app, restoring=restoring):
             raise ConfigError(f"{name} may not be changed on {app}")
         if value is None or isinstance(value, SecretRef):
             continue
@@ -68,8 +75,8 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
             "NORTHWIND_GATEWAY_TENANT_ID": lambda v: re.fullmatch(GUID, v),
             "NORTHWIND_GATEWAY_AUDIENCE": lambda v: re.fullmatch(rf"(?:api://)?{GUID}", v),
             "NORTHWIND_GATEWAY_ALLOWED_OIDS": lambda v: re.fullmatch(rf"{GUID}(?:,{GUID})*", v),
-            "MCP_TECH_LOOKUP_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/tech-lookup", v),
-            "MCP_WORK_ORDER_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/work-order", v),
+            "MCP_POLICY_LOOKUP_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/tech-lookup", v),
+            "MCP_CLAIM_REVIEW_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/work-order", v),
         }.get(name)
         if ok is None or not ok(value):
             raise ConfigError(f"Invalid value for {name}")
@@ -77,7 +84,7 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
         missing = [n for n in GUARD[1:] if not changes.get(n)]
         if missing:
             raise ConfigError("Enabling the guard also requires " + ", ".join(missing))
-    if kind != "api" and any(name in API_ONLY for name in changes):
+    if kind != "api" and any(name in API_ONLY + LEGACY_API_ONLY for name in changes):
         raise ConfigError("MCP settings apply to the API apps only")
 
 
@@ -94,7 +101,7 @@ def build_changes(args: argparse.Namespace, app: str, environ=os.environ) -> dic
         base = args.mcp_gateway_base.rstrip("/")
         if not base.endswith(f"/{stack}"):
             raise ConfigError(f"--mcp-gateway-base must end with /{stack} for {app}")
-        changes.update(MCP_TECH_LOOKUP_URL=f"{base}/mcp/tech-lookup", MCP_WORK_ORDER_URL=f"{base}/mcp/work-order")
+        changes.update(MCP_POLICY_LOOKUP_URL=f"{base}/mcp/tech-lookup", MCP_CLAIM_REVIEW_URL=f"{base}/mcp/work-order")
         if not environ.get(args.mcp_key_env):
             raise ConfigError(f"Set {args.mcp_key_env} to the {stack} agents subscription key (it is never printed)")
         changes["MCP_GATEWAY_SUBSCRIPTION_KEY"] = SecretRef(SECRET_NAME)
@@ -225,7 +232,7 @@ def targets(args: argparse.Namespace) -> list[str]:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--app", action="append", choices=sorted(APPS))
-    result.add_argument("--stack", choices=("northwind", "insurance", "all"))
+    result.add_argument("--stack", choices=("insurance", "all"), help="every managed app (insurance is the only stack)")
     result.add_argument("--guard", choices=("enable", "disable"))
     result.add_argument("--tenant-id", default=TENANT)
     result.add_argument("--gateway-audience", help="the northwind-gateway application (client) ID")

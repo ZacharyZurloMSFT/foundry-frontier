@@ -1,7 +1,7 @@
 # Import every value azd knows about into the current PowerShell session.
 # Useful before running any of the scripts under scripts/ that expect
 # post-provision env vars (create-prompt-agents.py, connect-knowledge-base.py,
-# create-vector-indexer.py, publish-prompts.py).
+# create-department-indexes.py, publish-prompts.py).
 #
 # Usage:
 #   . .\scripts\load-azd-env.ps1            # note the leading dot — dot-source

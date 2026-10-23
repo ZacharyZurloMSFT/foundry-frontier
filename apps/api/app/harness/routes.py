@@ -80,7 +80,7 @@ async def run(request: Request, body: RunRequest) -> StreamingResponse:
         failure: str | None = None
         acquired = False
         events = None
-        set_request_department("order-concierge", settings.order_project_name)
+        set_request_department("claims-concierge", settings.insurance_project_name)
 
         async def encode(event: Event) -> bytes:
             nonlocal seq, byte_count
@@ -150,8 +150,8 @@ async def run(request: Request, body: RunRequest) -> StreamingResponse:
                             final_state = saved["status"]
                             await store.append(run_id, Finished(run_id=run_id, seq=seq + 1, status=final_state))
                             logger.info("AI-conversation", extra={
-                                "harness": "copilot-sdk", "department": "order-concierge",
-                                "foundry_project": settings.order_project_name, "session_id": run_id,
+                                "harness": "copilot-sdk", "department": "claims-concierge",
+                                "foundry_project": settings.insurance_project_name, "session_id": run_id,
                                 "workflow": "harness", "execution_status": final_state,
                                 "prompt_sha": prompt_sha,
                             })

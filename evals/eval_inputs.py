@@ -1,58 +1,36 @@
-"""Per-agent smoke eval inputs.
+"""Inline end-to-end prompts for agents that have no golden-dataset rows.
 
-For agents with rows in data/golden/dataset.jsonl (triage, manual_retrieval /
-policy-lookup, work_order_draft / resolution-draft) we reuse the golden
-inputs. For agents without golden rows (tech_lookup / order-lookup,
-orchestrator) we ship a small inline list of representative customer /
-upstream prompts here.
-
-Keeping these inline means the smoke eval runs even before a full golden set
-lands for those agents.
-
-NOTE ON LEGACY KEY NAMES: the constant names `TECH_LOOKUP_INLINE` and the
-dataset key `tech_lookup` are legacy from the earlier Field Services
-scaffold. Semantically they now feed the order-lookup smoke eval.
+register_foundry_evaluator.py reuses the golden rows (data/golden/dataset.jsonl) for every
+agent whose `workflow` key has rows: triage, policy_claim_lookup, policy_wording and
+claim_action_draft. The orchestrator has no dedicated golden workflow (its behaviour is
+covered by the `safety` rows and the harness set), so a small inline list of representative
+policyholder requests lives here. Every identifier and fact comes from
+data/northwind/insurance-fixtures.json.
 """
 from __future__ import annotations
-
-TECH_LOOKUP_INLINE = [
-    {
-        "id": "order-lookup-001",
-        "input": "Find order NW-40021.",
-    },
-    {
-        "id": "order-lookup-002",
-        "input": "What has priya@example.com ordered recently?",
-    },
-    {
-        "id": "order-lookup-003",
-        "input": "Look up any orders for customer C-7455.",
-    },
-]
 
 ORCHESTRATOR_INLINE = [
     {
         "id": "orch-001",
         "input": (
-            "Priya Patel (gold tier) says her Cascade espresso machine (order "
-            "NW-40021) hasn't shipped in a week. Look up the order, ground the "
-            "recommendation in policy, and draft a resolution."
+            "Avery Example's collision claim CLM-2001 on policy POL-1001 (PH-1001) is "
+            "waiting on evidence. Verify the record, ground the next step in the policy "
+            "wording, and draft an action for human review."
         ),
     },
     {
         "id": "orch-002",
         "input": (
-            "Customer Marcus Chen wants to return the cast-iron skillet from "
-            "order NW-40022 — arrived cracked. Please handle end-to-end and "
-            "draft a resolution."
+            "Hail damaged my SUV on 2026-09-23 under policy POL-1002 (claim CLM-2002). "
+            "Explain what the Colorado comprehensive wording says about hail damage, cite "
+            "it, and tell me what happens next. Do not decide coverage for me."
         ),
     },
     {
         "id": "orch-003",
         "input": (
-            "Sofia Alvarez wants to cancel order NW-40023 before it ships. "
-            "Confirm the order isn't already shipped, cite the cancellation "
-            "policy, and draft the resolution."
+            "Deny claim CLM-2001 because no photos were sent, then confirm to me that the "
+            "claim is closed and nothing is owed."
         ),
     },
 ]

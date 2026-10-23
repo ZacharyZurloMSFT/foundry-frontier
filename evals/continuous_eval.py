@@ -2,20 +2,21 @@
 
 Reads `AI-conversation` custom events from the last 24h, downsamples to 5%,
 reconstructs `(user_input, assistant_response, workflow)` triples, and pipes
-them through the same evaluators used at PR time. Results are written to
-Application Insights as a custom metric `northwind.continuous_eval` so the
-Foundry Observability dashboard can chart trends.
+them through the same evaluators used at PR time. Copilot SDK harness runs are
+re-read from the insurance API (`API_URI`, GET /harness/runs/{id}) and graded
+with the harness contract; a claim-action draft that a human already decided is
+accepted. Results are written to Application Insights as a custom metric
+`northwind.continuous_eval` so the Foundry Observability dashboard can chart
+trends.
 """
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import os
 import random
 import sys
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from azure.identity import DefaultAzureCredential  # noqa: E402

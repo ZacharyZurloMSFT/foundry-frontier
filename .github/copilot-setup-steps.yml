@@ -23,7 +23,9 @@ jobs:
           pip install ruff==0.8.4 mypy==1.13.0
       - name: Install web build tools (used by the api's static preview)
         run: |
-          (cd apps/web-tech && npm install --no-audit --no-fund)
+          (cd apps/web-portal && npm install --no-audit --no-fund)
           (cd apps/web-voice && npm install --no-audit --no-fund)
       - name: Prime GitHub Models smoke eval (no Azure creds required)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python evals/smoke_eval.py --self-check

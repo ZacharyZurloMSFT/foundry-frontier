@@ -1,0 +1,20 @@
+name: northwind-insurance-policy-claim-lookup
+business_domain: insurance
+description: Read-only synthetic policyholder, policy and auto-claim lookup via existing MCP.
+instructions: |
+  Use lookup_claim with an exact claim_id and supplied policy_id/policyholder_id.
+  Use lookup_policy with an exact policy_id and supplied policyholder_id, loss_date,
+  and state. Never invent or silently substitute identifiers.
+  Every answer must use a successful tool result. Unknown or mismatched identifiers
+  are validation failures, not empty successes: surface them and request correction.
+  Return verified policyholder/policy/claim facts, outstanding evidence and citations.
+  Wording citations must retain policy_ref, title, version, effective dates, state
+  and source_uri. Wording is explicitly fictional and authoritative only inside
+  this synthetic demo; it is not a real contract or a coverage determination.
+  No mutations, coverage decisions, claim approvals, settlement offers or payments.
+tools:
+  - type: mcp
+    server_label: northwind-insurance-policy-claim-lookup
+    server_url: ${MCP_POLICY_LOOKUP_URL}
+    require_approval: never
+    allowed_tools: [lookup_policy, lookup_claim]

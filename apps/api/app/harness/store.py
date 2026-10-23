@@ -30,13 +30,13 @@ class RunStore:
         fingerprint = hashlib.sha256(request.message.encode()).hexdigest()
         item = {
             "id": wid, "workflowId": wid, "sessionId": run_id, "record_kind": "harness_run",
-            "harness": "copilot-sdk", "department": "order-concierge",
-            "foundry_project": get_settings().order_project_name, "status": "running", "model": model,
+            "harness": "copilot-sdk", "department": "claims-concierge",
+            "foundry_project": get_settings().insurance_project_name, "status": "running", "model": model,
             "prompt_sha": prompt_sha, "request_hash": fingerprint,
             "input": redact(request.message), "output": "", "error": None,
             "createdAt": now(), "updatedAt": now(), "deadline": time.time() + timeout,
             "ttl": TTL_SECONDS,
-            "business_domain": get_settings().business_domain,
+            "business_domain": "insurance",
         }
         container = await _container("workflow_state")
         try:
@@ -44,7 +44,7 @@ class RunStore:
         except CosmosResourceExistsError:
             existing = await container.read_item(wid, partition_key=wid)
             if (existing["request_hash"] != fingerprint
-                    or existing.get("business_domain", "retail") != get_settings().business_domain):
+                    or existing.get("business_domain") != "insurance"):
                 raise HarnessError("idempotency_conflict", "Request ID was already used for different input.")
             return existing, False
 
@@ -82,11 +82,11 @@ class RunStore:
         return {k: item[k] for k in ("id", "workflowId", "status", "payload", "kind",
                                     "business_domain", "synthetic", "execution_status", "review_scope") if k in item}
 
-    async def require_active(self, wid: str, domain: str) -> None:
+    async def require_active(self, wid: str) -> None:
         container = await _container("workflow_state")
         item = await container.read_item(wid, partition_key=wid)
         if (item.get("record_kind") != "harness_run" or item.get("status") != "running"
-                or item.get("business_domain", "retail") != domain
+                or item.get("business_domain") != "insurance"
                 or item.get("deadline", 0) <= time.time()):
             raise HarnessError("workflow_inactive", "The application-owned harness workflow is not active.")
 
@@ -96,8 +96,8 @@ class RunStore:
         item = await container.read_item(wid, partition_key=wid)
         if item.get("record_kind") != "harness_run":
             raise CosmosResourceNotFoundError(message="Harness run not found")
-        if item.get("business_domain", "retail") != get_settings().business_domain:
-            raise CosmosResourceNotFoundError(message="Harness run belongs to a different business domain")
+        if item.get("business_domain") != "insurance":
+            raise CosmosResourceNotFoundError(message="Harness run is not an insurance run")
         events_container = await _container("conversations")
         events = [
             doc["event"] async for doc in events_container.query_items(
@@ -114,6 +114,6 @@ class RunStore:
             "input": item["input"], "output": item["output"], "error": item["error"],
             "model": item["model"], "prompt_sha": item["prompt_sha"],
             "created_at": item["createdAt"], "events": events,
-            "business_domain": item.get("business_domain", "retail"),
+            "business_domain": "insurance",
             "approval": await self.approval(wid),
         }

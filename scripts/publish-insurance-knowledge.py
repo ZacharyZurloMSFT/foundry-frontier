@@ -1,7 +1,7 @@
 """Publish only synthetic insurance knowledge; dry-run unless --apply is explicit.
 
 Uses push indexing and minimal/extractive KB retrieval: no blob/indexer cascade,
-embeddings, model deployment, role grant, network change, or retail bootstrap.
+embeddings, model deployment, role grant, network change, or any other bootstrap step.
 """
 
 from __future__ import annotations

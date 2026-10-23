@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -17,18 +16,6 @@ class InsuranceValidationError(ValueError):
     def __init__(self, message: str, status_code: int = 422):
         super().__init__(message)
         self.status_code = status_code
-
-
-def business_domain() -> str:
-    domain = os.environ.get("NORTHWIND_BUSINESS_DOMAIN", "retail")
-    if domain not in {"retail", "insurance"}:
-        raise ValueError("NORTHWIND_BUSINESS_DOMAIN must be retail or insurance")
-    return domain
-
-
-def require_insurance_domain() -> None:
-    if business_domain() != "insurance":
-        raise InsuranceValidationError("Insurance actions require NORTHWIND_BUSINESS_DOMAIN=insurance.", 409)
 
 
 def fixtures() -> dict:

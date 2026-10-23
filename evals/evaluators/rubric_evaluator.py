@@ -13,7 +13,7 @@ Usage:
         prompty_path="evaluators/rubrics/triage_rubric.prompty",
         name="triage_rubric",
     )
-    result = ev(query="chiller alarm at seattle", response='{"site_id":...}')
+    result = ev(query="What is the status of claim CLM-2001?", response='{"claim_id":"CLM-2001",...}')
     # -> {"triage_rubric_score": 5, "triage_rubric_reason": "...", "triage_rubric_pass": True}
 """
 from __future__ import annotations

@@ -12,8 +12,10 @@ HTTP API. The backends here are FastMCP servers (stateless streamable HTTP) moun
 
 ## Decision
 
-- The four MCP APIs (`<stack>-mcp-tech-lookup`, `<stack>-mcp-work-order`) are GA plain HTTP passthrough APIs whose
-  policy rewrites the backend URI to `/mcp/`, so clients never append `/mcp`.
+- The MCP APIs are GA plain HTTP passthrough APIs whose policy rewrites the backend URI to `/mcp/`, so clients
+  never append `/mcp`. This repository manages two, `insurance-mcp-tech-lookup` and `insurance-mcp-work-order`
+  (live API ids kept for the policy and claim lookup and the claim-review servers); the earlier `northwind` stack
+  had two more.
 - The native `type: mcp` API is not used: it is a preview, APIM-hosted tool server with a different ARM contract
   than documented (found on scratch APIs). Initialize, `tools/list` and `tools/call` work through the passthrough
   APIs, and subscription-key enforcement behaved as intended.

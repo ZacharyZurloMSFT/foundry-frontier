@@ -17,7 +17,7 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 DEPLOYMENT = "4a734aae-a0fc-488c-b0b3-3f364a95813d"
 PERSON = "dbe3b91b-cb1d-4421-8d7b-f06aad032380"
 OTHER_PERSON = "db1ddbbc-f413-4fa7-9d91-69860ab6143e"
-REDIRECT = "https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/"
+REDIRECT = "https://ca-insurance-portal.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/"
 SECRET = "sensitive-fake-credential-never-print"
 
 

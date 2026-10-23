@@ -19,8 +19,7 @@ from ..settings import Settings, get_settings
 from .diagnostics import log_failure
 from .models import MAX_RESULT_CHARS, Event, HarnessError, Text, Usage, redact
 from .store import RunStore
-from .tools import NAMES, SpecialistTools
-from .insurance_tools import InsuranceTools, NAMES as INSURANCE_NAMES
+from .insurance_tools import InsuranceTools, NAMES
 
 if TYPE_CHECKING:
     from copilot import CopilotClient
@@ -66,7 +65,7 @@ def instructions(settings: Settings) -> tuple[str, str]:
     if settings.harness_prompt_path:
         path = Path(settings.harness_prompt_path)
     else:
-        filename = "instructions.prompty" if settings.business_domain == "insurance" else "retail.instructions.prompty"
+        filename = "instructions.prompty"
         bundled = Path(__file__).resolve().parents[1] / "_agent_prompts" / filename
         canonical = next((parent / "agents" / "copilot-harness" / filename
                           for parent in Path(__file__).resolve().parents
@@ -76,8 +75,8 @@ def instructions(settings: Settings) -> tuple[str, str]:
     _, metadata, body = content.split("---", 2)
     if not metadata.strip() or not body.lstrip().startswith("system:"):
         raise ValueError("Invalid harness prompt; expected Prompty metadata and a system section.")
-    if f"business_domain: {settings.business_domain}" not in metadata.splitlines():
-        raise ValueError("Harness prompt business domain does not match runtime configuration.")
+    if "business_domain: insurance" not in metadata.splitlines():
+        raise ValueError("Harness prompt must declare business_domain: insurance.")
     return body.lstrip()[len("system:"):].strip(), hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -109,34 +108,33 @@ class HarnessRuntime:
 
     @staticmethod
     def configuration(settings: Settings, prompt_sha: str) -> tuple:
-        return (settings.business_domain, settings.foundry_project_endpoint, settings.cosmos_endpoint,
+        return (settings.foundry_project_endpoint, settings.cosmos_endpoint,
                 settings.harness_model or settings.planner_deployment, settings.azure_client_id,
-                settings.harness_resolution_mcp, settings.order_agents_hosted,
+                settings.harness_claim_review_mcp, settings.hosted_agents_enabled,
                 settings.insurance_orchestrator_agent_id, prompt_sha,
                 *model_gateway.configuration_key(settings))
 
     def status(self) -> dict:
         settings = get_settings()
         reasons = []
-        if settings.business_domain == "insurance":
-            from ..insurance import insurance_runtime_ready
-            from ..insurance_domain import fixtures
-            if not insurance_runtime_ready():
-                reasons.append("Verified insurance agent configuration is required; retail agents are never a fallback.")
-            try:
-                mcp = urlsplit(settings.harness_resolution_mcp)
-                valid_mcp = (mcp.scheme == "https" and mcp.hostname and not mcp.username
-                             and not mcp.password and not mcp.query and not mcp.fragment
-                             and mcp.path.rstrip("/").endswith(("/mcp", "/mcp/work-order")))
-            except ValueError:
-                valid_mcp = False
-            if not valid_mcp:
-                reasons.append("MCP_WORK_ORDER_URL must identify the HTTPS insurance draft MCP endpoint.")
-            try:
-                if fixtures().get("dataset_version") != "insurance-synthetic-v2":
-                    reasons.append("Canonical insurance v2 records and wording must be packaged.")
-            except (OSError, ValueError):
-                reasons.append("Canonical insurance records are unavailable.")
+        from ..insurance import insurance_runtime_ready
+        from ..insurance_domain import fixtures
+        if not insurance_runtime_ready():
+            reasons.append("Verified insurance agent configuration is required.")
+        try:
+            mcp = urlsplit(settings.harness_claim_review_mcp)
+            valid_mcp = (mcp.scheme == "https" and mcp.hostname and not mcp.username
+                         and not mcp.password and not mcp.query and not mcp.fragment
+                         and mcp.path.rstrip("/").endswith(("/mcp", "/mcp/work-order")))
+        except ValueError:
+            valid_mcp = False
+        if not valid_mcp:
+            reasons.append("MCP_CLAIM_REVIEW_URL must identify the HTTPS claim-review MCP endpoint.")
+        try:
+            if fixtures().get("dataset_version") != "insurance-synthetic-v2":
+                reasons.append("Canonical insurance v2 records and wording must be packaged.")
+        except (OSError, ValueError):
+            reasons.append("Canonical insurance records are unavailable.")
         version = None
         prompt_sha = ""
         try:
@@ -171,8 +169,8 @@ class HarnessRuntime:
             "max_concurrent_runs": settings.harness_concurrency,
             "timeout_seconds": settings.harness_timeout,
             "auth_scope": "Synthetic public demo; not tenant-isolated.",
-            "business_domain": settings.business_domain,
-            "tools": list(INSURANCE_NAMES if settings.business_domain == "insurance" else NAMES),
+            "business_domain": "insurance",
+            "tools": list(NAMES),
             "review_scope": "draft_only",
         }
 
@@ -252,18 +250,14 @@ class HarnessRuntime:
 
         def on_event(event) -> None:
             kind = event.type.value
-            if kind == "assistant.message_delta" and settings.business_domain != "insurance":
-                emit(Text(kind="assistant_delta", text=redact(event.data.delta_content)))
-            elif kind == "assistant.usage":
+            if kind == "assistant.usage":
                 emit(Usage(source="manager", model=getattr(event.data, "model", None),
                            input_tokens=event.data.input_tokens, output_tokens=event.data.output_tokens))
             elif kind == "session.error":
                 log_failure(logger, "harness", "sdk_session_error_event", event.data, run_id)
 
-        insurance = settings.business_domain == "insurance"
-        tools = (InsuranceTools(settings, run_id, wid, emit, store, message=message) if insurance else
-                 SpecialistTools(settings, run_id, wid, emit, store))
-        names = INSURANCE_NAMES if insurance else NAMES
+        tools = InsuranceTools(settings, run_id, wid, emit, store, message=message)
+        names = NAMES
         session = await sdk_call("session_create", lambda: self.client.create_session(
             session_id=run_id, model=settings.harness_model or settings.planner_deployment,
             provider=provider,
@@ -311,7 +305,7 @@ class HarnessRuntime:
             if len(response.data.content) > MAX_RESULT_CHARS:
                 raise HarnessError("output_limit", "The assistant output exceeded the run limit.")
             stage = "response_grounding"
-            text = tools.final_text(response.data.content) if insurance else response.data.content
+            text = tools.final_text(response.data.content)
             if len(text) > MAX_RESULT_CHARS:
                 raise HarnessError("output_limit", "The grounded assistant output exceeded the run limit.")
             yield Text(kind="assistant_message", text=redact(text))

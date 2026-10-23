@@ -55,8 +55,8 @@ MODELS = {
 }
 API_VERSIONS = {"2025-10-01", "2026-04-10", "2026-07-15"}
 DEFAULT_ORIGINS = (
-    "https://ca-web-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io",
-    "https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io",
+    "https://ca-insurance-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io",
+    "https://ca-insurance-portal.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io",
     "http://localhost:5173", "http://localhost:5174",
 )
 INSURANCE_INSTRUCTIONS = """You are the warm, concise intake assistant for fictional
@@ -121,7 +121,7 @@ class VoiceConfig:
 
 def voice_config() -> VoiceConfig:
     s = get_settings()
-    if (s.business_domain != "insurance" or not s.insurance_agents_ready
+    if (not s.insurance_agents_ready
             or not getattr(s, "voice_live_enabled", False)
             or not getattr(s, "voice_live_ready", False)):
         raise HTTPException(503, "Insurance Voice Live is disabled or has not passed its transport smoke test. Text intake remains available.")

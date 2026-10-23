@@ -100,8 +100,9 @@ def records(tmp_path, app):
 
 
 def test_preview_changes_nothing_and_reports_previous_values(tmp_path):
-    fake = FakeArm({"ca-api": make_app("ca-api", env=[{"name": "NORTHWIND_GATEWAY_AUTH_REQUIRED", "value": "false"}])})
-    result = run(fake, "ca-api", enable("ca-api"), tmp_path, apply=False)
+    fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api", env=[
+        {"name": "NORTHWIND_GATEWAY_AUTH_REQUIRED", "value": "false"}])})
+    result = run(fake, "ca-insurance-api", enable("ca-insurance-api"), tmp_path, apply=False)
     assert result["state"] == "dry-run" and not patches(fake) and not list(tmp_path.iterdir())
     assert result["previous"]["NORTHWIND_GATEWAY_AUTH_REQUIRED"] == "false"
     assert result["changes"]["NORTHWIND_GATEWAY_ALLOWED_OIDS"] == OID
@@ -121,23 +122,25 @@ def test_enabling_the_guard_sets_the_four_variables_and_confirms_the_state(tmp_p
 
 
 def test_an_image_without_the_guard_is_detected(tmp_path):
-    fake = FakeArm({"ca-api": make_app("ca-api")}, guard_effective=False)
+    fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api")}, guard_effective=False)
     with pytest.raises(module.ConfigError, match="Guard state not confirmed"):
-        run(fake, "ca-api", enable("ca-api"), tmp_path)
-    assert records(tmp_path, "ca-api")
+        run(fake, "ca-insurance-api", enable("ca-insurance-api"), tmp_path)
+    assert records(tmp_path, "ca-insurance-api")
 
 
 def test_disabling_is_confirmed_by_a_non_401(tmp_path):
-    fake = FakeArm({"ca-mcp-work-order": make_app("ca-mcp-work-order", env=[
+    fake = FakeArm({"ca-insurance-review": make_app("ca-insurance-review", env=[
         {"name": "NORTHWIND_GATEWAY_AUTH_REQUIRED", "value": "true"}])})
-    result = run(fake, "ca-mcp-work-order", module.build_changes(args(guard="disable"), "ca-mcp-work-order"), tmp_path)
+    result = run(fake, "ca-insurance-review", module.build_changes(args(guard="disable"), "ca-insurance-review"), tmp_path)
     assert result["state"] == "ready" and result["previous"]["NORTHWIND_GATEWAY_AUTH_REQUIRED"] == "true"
 
 
 def test_api_apps_can_be_pointed_at_the_gateway_with_the_key_stored_as_a_secret(tmp_path):
     changes = module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/insurance/"), "ca-insurance-api",
                                    {"NORTHWIND_MCP_KEY": SECRET})
-    assert changes["MCP_WORK_ORDER_URL"] == f"{GATEWAY}/insurance/mcp/work-order"
+    assert changes["MCP_CLAIM_REVIEW_URL"] == f"{GATEWAY}/insurance/mcp/work-order"
+    assert changes["MCP_POLICY_LOOKUP_URL"] == f"{GATEWAY}/insurance/mcp/tech-lookup"
+    assert not {"MCP_WORK_ORDER_URL", "MCP_TECH_LOOKUP_URL"} & set(changes), "deprecated names are never written"
     fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api", env=[
         {"name": "MCP_WORK_ORDER_URL", "value": "https://ca-insurance-review.example/mcp/"}])})
     result = run(fake, "ca-insurance-api", changes, tmp_path, secret_value=SECRET)
@@ -145,37 +148,48 @@ def test_api_apps_can_be_pointed_at_the_gateway_with_the_key_stored_as_a_secret(
     assert body["configuration"] == {"secrets": [{"name": "mcp-gateway-key", "value": SECRET}]}
     env = {e["name"]: e for e in body["template"]["containers"][0]["env"]}
     assert env["MCP_GATEWAY_SUBSCRIPTION_KEY"] == {"name": "MCP_GATEWAY_SUBSCRIPTION_KEY", "secretRef": "mcp-gateway-key"}
-    assert env["MCP_TECH_LOOKUP_URL"]["value"] == f"{GATEWAY}/insurance/mcp/tech-lookup"
+    assert env["MCP_POLICY_LOOKUP_URL"]["value"] == f"{GATEWAY}/insurance/mcp/tech-lookup"
+    assert env["MCP_CLAIM_REVIEW_URL"]["value"] == f"{GATEWAY}/insurance/mcp/work-order"
+    assert env["MCP_WORK_ORDER_URL"]["value"] == "https://ca-insurance-review.example/mcp/", "the old name is left for older images"
     for artifact in (json.dumps(result), records(tmp_path, "ca-insurance-api")[0].read_text()):
         assert SECRET not in artifact
-    assert result["previous"]["MCP_WORK_ORDER_URL"] == "https://ca-insurance-review.example/mcp/"
+    assert result["previous"]["MCP_CLAIM_REVIEW_URL"] is None
 
 
 def test_mcp_changes_require_the_key_the_matching_stack_and_api_apps(monkeypatch):
     with pytest.raises(module.ConfigError, match="Set NORTHWIND_MCP_KEY"):
-        module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/northwind"), "ca-api", {})
-    with pytest.raises(module.ConfigError, match="must end with /northwind"):
-        module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/insurance"), "ca-api", {"NORTHWIND_MCP_KEY": "k"})
-    assert "MCP_WORK_ORDER_URL" not in module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/northwind"), "ca-mcp-work-order", {})
+        module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/insurance"), "ca-insurance-api", {})
+    with pytest.raises(module.ConfigError, match="must end with /insurance"):
+        module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/northwind"), "ca-insurance-api", {"NORTHWIND_MCP_KEY": "k"})
+    assert "MCP_CLAIM_REVIEW_URL" not in module.build_changes(
+        args(mcp_gateway_base=f"{GATEWAY}/insurance"), "ca-insurance-review", {})
 
 
 def test_other_secrets_are_never_replaced(tmp_path):
-    fake = FakeArm({"ca-api": make_app("ca-api", secrets=[{"name": "unrelated"}])})
-    changes = module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/northwind"), "ca-api", {"NORTHWIND_MCP_KEY": "k"})
+    fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api", secrets=[{"name": "unrelated"}])})
+    changes = module.build_changes(args(mcp_gateway_base=f"{GATEWAY}/insurance"), "ca-insurance-api", {"NORTHWIND_MCP_KEY": "k"})
     with pytest.raises(module.ConfigError, match="other secrets"):
-        run(fake, "ca-api", changes, tmp_path, secret_value="k")
+        run(fake, "ca-insurance-api", changes, tmp_path, secret_value="k")
     assert not patches(fake)
 
 
 @pytest.mark.parametrize("app,changes,message", [
-    ("ca-api", {"AZURE_CLIENT_ID": "x"}, "may not be changed"),
-    ("ca-api", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "yes"}, "Invalid value"),
-    ("ca-api", {"NORTHWIND_GATEWAY_AUDIENCE": "not-a-guid"}, "Invalid value"),
-    ("ca-api", {"NORTHWIND_GATEWAY_ALLOWED_OIDS": f"{OID},bad"}, "Invalid value"),
-    ("ca-api", {"MCP_WORK_ORDER_URL": "https://evil.example/mcp/work-order"}, "Invalid value"),
-    ("ca-api", {"MCP_WORK_ORDER_URL": f"{GATEWAY}/insurance/mcp/work-order"}, "Invalid value"),
-    ("ca-api", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "true"}, "also requires"),
-    ("ca-mcp-tech-lookup", {"MCP_TECH_LOOKUP_URL": f"{GATEWAY}/northwind/mcp/tech-lookup"}, "may not be changed"),
+    ("ca-insurance-api", {"AZURE_CLIENT_ID": "x"}, "may not be changed"),
+    ("ca-insurance-api", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "yes"}, "Invalid value"),
+    ("ca-insurance-api", {"NORTHWIND_GATEWAY_AUDIENCE": "not-a-guid"}, "Invalid value"),
+    ("ca-insurance-api", {"NORTHWIND_GATEWAY_ALLOWED_OIDS": f"{OID},bad"}, "Invalid value"),
+    ("ca-insurance-api", {"MCP_CLAIM_REVIEW_URL": "https://evil.example/mcp/work-order"}, "Invalid value"),
+    ("ca-insurance-api", {"MCP_CLAIM_REVIEW_URL": f"{GATEWAY}/northwind/mcp/work-order"}, "Invalid value"),
+    ("ca-insurance-api", {"MCP_POLICY_LOOKUP_URL": f"{GATEWAY}/insurance/mcp/work-order"}, "Invalid value"),
+    ("ca-insurance-api", {"MCP_WORK_ORDER_URL": f"{GATEWAY}/insurance/mcp/work-order"}, "may not be changed"),
+    ("ca-insurance-api", {"MCP_TECH_LOOKUP_URL": f"{GATEWAY}/insurance/mcp/tech-lookup"}, "may not be changed"),
+    ("ca-insurance-api", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "true"}, "also requires"),
+    ("ca-insurance-lookup", {"MCP_POLICY_LOOKUP_URL": f"{GATEWAY}/insurance/mcp/tech-lookup"}, "may not be changed"),
+    ("ca-insurance-portal", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "true"}, "Unknown Container App"),
+    # The northwind stack is no longer managed by this repository.
+    ("ca-api", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "false"}, "Unknown Container App"),
+    ("ca-mcp-tech-lookup", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "false"}, "Unknown Container App"),
+    ("ca-mcp-work-order", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "false"}, "Unknown Container App"),
     ("ca-web-tech", {"NORTHWIND_GATEWAY_AUTH_REQUIRED": "true"}, "Unknown Container App"),
 ])
 def test_only_allowlisted_names_and_values_are_accepted(tmp_path, app, changes, message):
@@ -183,34 +197,42 @@ def test_only_allowlisted_names_and_values_are_accepted(tmp_path, app, changes, 
         module.validate(app, changes)
 
 
-def test_revert_restores_previous_values_including_direct_urls(tmp_path):
-    direct = "https://ca-mcp-work-order.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"
-    fake = FakeArm({"ca-api": make_app("ca-api", env=[{"name": "MCP_WORK_ORDER_URL", "value": f"{GATEWAY}/northwind/mcp/work-order"},
-                                                      {"name": "NORTHWIND_GATEWAY_AUTH_REQUIRED", "value": "true"}])})
-    restore = {"MCP_WORK_ORDER_URL": direct, "NORTHWIND_GATEWAY_AUTH_REQUIRED": None}
+@pytest.mark.parametrize("names", [
+    ("MCP_WORK_ORDER_URL", "MCP_TECH_LOOKUP_URL"),
+    ("MCP_CLAIM_REVIEW_URL", "MCP_POLICY_LOOKUP_URL"),
+])
+def test_revert_restores_previous_values_including_direct_urls_and_deprecated_names(tmp_path, names):
+    review, lookup = names
+    direct = "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"
+    fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api", env=[
+        {"name": review, "value": f"{GATEWAY}/insurance/mcp/work-order"},
+        {"name": "NORTHWIND_GATEWAY_AUTH_REQUIRED", "value": "true"}])})
+    restore = {review: direct, lookup: None, "NORTHWIND_GATEWAY_AUTH_REQUIRED": None}
     with pytest.raises(module.ConfigError):
-        module.validate("ca-api", restore)
-    result = run(fake, "ca-api", restore, tmp_path, restoring=True)
+        module.validate("ca-insurance-api", restore)
+    result = run(fake, "ca-insurance-api", restore, tmp_path, restoring=True)
     env = {e["name"]: e["value"] for e in patches(fake)[0]["properties"]["template"]["containers"][0]["env"]}
-    assert env == {"MCP_WORK_ORDER_URL": direct} and result["state"] == "ready"
+    assert env == {review: direct} and result["state"] == "ready"
 
 
 def test_drift_unstable_and_multi_container_apps_are_refused(tmp_path):
     for overrides, message in (({"provisioningState": "Updating"}, "not in a stable state"),
-                               ({"latestRevisionName": "ca-api--pending"}, "deployment in progress")):
+                               ({"latestRevisionName": "ca-insurance-api--pending"}, "deployment in progress")):
         with pytest.raises(module.ConfigError, match=message):
-            run(FakeArm({"ca-api": make_app("ca-api", **overrides)}), "ca-api", enable("ca-api"), tmp_path)
-    multi = make_app("ca-api")
+            run(FakeArm({"ca-insurance-api": make_app("ca-insurance-api", **overrides)}), "ca-insurance-api",
+                enable("ca-insurance-api"), tmp_path)
+    multi = make_app("ca-insurance-api")
     multi["properties"]["template"]["containers"].append({"name": "sidecar"})
     with pytest.raises(module.ConfigError, match="multi-container"):
-        run(FakeArm({"ca-api": multi}), "ca-api", enable("ca-api"), tmp_path)
+        run(FakeArm({"ca-insurance-api": multi}), "ca-insurance-api", enable("ca-insurance-api"), tmp_path)
     with pytest.raises(module.ConfigError, match="HTTP 412"):
-        run(FakeArm({"ca-api": make_app("ca-api")}, patch_status=412), "ca-api", enable("ca-api"), tmp_path)
+        run(FakeArm({"ca-insurance-api": make_app("ca-insurance-api")}, patch_status=412), "ca-insurance-api",
+            enable("ca-insurance-api"), tmp_path)
 
 
 def test_the_etag_is_sent_so_concurrent_changes_are_not_overwritten(tmp_path):
     seen = {}
-    fake = FakeArm({"ca-api": make_app("ca-api")})
+    fake = FakeArm({"ca-insurance-api": make_app("ca-insurance-api")})
 
     def spy(request):
         if request.method == "PATCH":
@@ -218,18 +240,29 @@ def test_the_etag_is_sent_so_concurrent_changes_are_not_overwritten(tmp_path):
         return fake(request)
 
     with httpx.Client(transport=httpx.MockTransport(spy)) as http:
-        module.configure_app("ca-api", enable("ca-api"), http, lambda: "t", apply=True, rollback_dir=tmp_path, sleep=lambda _: None)
+        module.configure_app("ca-insurance-api", enable("ca-insurance-api"), http, lambda: "t", apply=True,
+                             rollback_dir=tmp_path, sleep=lambda _: None)
     assert seen["if-match"] == '"1"'
 
 
 def test_target_selection():
-    assert module.targets(args(stack="insurance")) == ["ca-insurance-api", "ca-insurance-lookup", "ca-insurance-review"]
-    assert len(module.targets(args(stack="all"))) == 6
-    assert module.targets(args(app=["ca-api", "ca-api"])) == ["ca-api"]
+    everything = ["ca-insurance-api", "ca-insurance-lookup", "ca-insurance-review"]
+    assert module.targets(args(stack="insurance")) == everything
+    assert module.targets(args(stack="all")) == everything
+    assert module.targets(args(app=["ca-insurance-api", "ca-insurance-api"])) == ["ca-insurance-api"]
     with pytest.raises(module.ConfigError):
         module.targets(args())
 
 
-def test_every_target_has_a_health_probe_and_the_six_apps_cover_both_stacks():
-    assert {stack for stack, _ in module.APPS.values()} == {"northwind", "insurance"}
+def test_the_retired_northwind_stack_cannot_be_selected():
+    for legacy in ("ca-api", "ca-mcp-tech-lookup", "ca-mcp-work-order", "ca-web-tech", "ca-web-voice"):
+        with pytest.raises(SystemExit):
+            module.parser().parse_args(["--app", legacy])
+    with pytest.raises(SystemExit):
+        module.parser().parse_args(["--stack", "northwind"])
+
+
+def test_every_target_has_a_health_probe_and_the_three_apps_cover_the_insurance_stack():
+    assert {stack for stack, _ in module.APPS.values()} == {"insurance"}
     assert {kind for _, kind in module.APPS.values()} == set(module.HEALTH)
+    assert set(module.APPS) <= {"ca-insurance-api", "ca-insurance-lookup", "ca-insurance-review"}

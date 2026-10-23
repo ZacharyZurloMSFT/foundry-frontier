@@ -17,7 +17,7 @@ classification can use this corpus after authorised rollout and indexing into
 
 The **Claims Concierge / adjuster handoff** on the Contact Center console
 posts the running call summary to `POST /handoff` on the API. The API
-starts a converted `northwind-orchestrator` run in the stable `order-concierge`
+starts a converted `northwind-insurance-orchestrator` run in the stable `claims-concierge`
 department (see `department.yaml` handoff_target). The web UI never starts
 voice or sends a handoff until `/insurance/fixtures` reports agent readiness.
 No claim approval/denial, real assignment, payment or external communication

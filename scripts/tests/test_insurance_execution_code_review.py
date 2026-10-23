@@ -18,7 +18,7 @@ from evals.insurance_review import (
     lineage_record, read_json, sha256, verify_code_lineage,
 )
 
-APPROVED_PACK = ROOT / "pipelines" / "orders-learning" / "insurance-upload-pack" / "insurance-2026-10-14-v2"
+APPROVED_PACK = ROOT / "pipelines" / "insurance-learning" / "insurance-upload-pack" / "insurance-2026-10-14-v2"
 
 
 def current_sources(manifest):
