@@ -63,6 +63,12 @@ The `northwind` stack is the repository-managed deployment. The `insurance` stac
 created out of band (manual image deploys); it is included because it is an API in the
 resource group. Both are listed in `infra/live/apim-apis.bicep` (`stacks` parameter).
 
+The MCP images are shared too. `ca-mcp-tech-lookup` and `ca-mcp-work-order` run in the
+insurance domain and serve every tool; `ca-insurance-lookup` and `ca-insurance-review`
+additionally set `NORTHWIND_MCP_INSURANCE_ONLY=true`, so the insurance project exposes only
+`lookup_policy`, `lookup_claim` and `draft_claim_action`, and the retail `lookup_order` and
+`propose_resolution` tools are neither registered nor callable there.
+
 Deliberately **not** published: the two SPAs per stack (they are clients, not APIs),
 Foundry hosted-agent endpoints (served by Foundry), the model gateway
 `ai-gateway-northwind` (separate instance in `rg-northwind-ai`), and data planes

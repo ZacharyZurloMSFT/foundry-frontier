@@ -90,6 +90,31 @@ async def test_lookup_mcp_schema_and_validation(insurance_config):
     assert json.loads(module.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
 
 
+@pytest.mark.parametrize("flag,only", [("true", True), (" TRUE ", True), ("", False), ("false", False), ("1", False)])
+@pytest.mark.asyncio
+async def test_insurance_only_mcp_apps_expose_no_retail_tools(insurance_config, monkeypatch, flag, only):
+    monkeypatch.setenv("NORTHWIND_MCP_INSURANCE_ONLY", flag)
+    lookup = load_mcp("mcp-tech-lookup")
+    draft = load_mcp("mcp-work-order")
+    lookup_tools = {t.name for t in await lookup.mcp.list_tools()}
+    draft_tools = {t.name for t in await draft.mcp.list_tools()}
+    if only:
+        assert lookup_tools == {"lookup_policy", "lookup_claim"}
+        assert draft_tools == {"draft_claim_action"}
+        assert lookup.mcp.name == "northwind-insurance-policy-claim-lookup"
+        assert draft.mcp.name == "northwind-insurance-claim-action-draft"
+        with pytest.raises(ValueError, match="unavailable in insurance"):
+            lookup.lookup_order("NW-40021")
+        with pytest.raises(ValueError, match="unavailable in insurance"):
+            await draft.propose_resolution("wf-retail", {}, None)
+    else:
+        # The northwind apps run in the insurance domain too and keep serving the retail tools.
+        assert lookup_tools == {"lookup_order", "lookup_policy", "lookup_claim"}
+        assert draft_tools == {"propose_resolution", "draft_claim_action"}
+        assert lookup.mcp.name == "northwind-order-lookup"
+        assert json.loads(lookup.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
+
+
 @pytest.mark.asyncio
 async def test_mcp_persistence_binding_and_approval_only(insurance_config, database, monkeypatch):
     module = load_mcp("mcp-work-order")
