@@ -57,9 +57,10 @@ Each department's paths, Foundry project and search index are in
 - **Hosted agent.** A container-hosted Foundry agent deployed by azd (`host: azure.ai.agent`), Responses
   protocol on port 8088. Five are defined: `northwind-orchestrator` (the manager), `northwind-triage`,
   `northwind-order-lookup`, `northwind-policy-lookup`, `northwind-resolution-draft`; `ORDER_AGENT_ROLE` selects
-  the role. The live insurance project runs `northwind-insurance-*` counterparts
-  ([`azure.yaml`](../../azure.yaml), [architecture.md](../architecture.md#order-concierge-hosted-runtime),
-  [ai-gateway.md](../ai-gateway.md#live-inventory)).
+  the role. The live insurance project runs `northwind-insurance-*` counterparts. Versions are immutable and a
+  selector routes traffic to one ([`azure.yaml`](../../azure.yaml),
+  [architecture.md](../architecture.md#order-concierge-hosted-runtime),
+  [ai-gateway.md](../ai-gateway.md#live-inventory), [gotchas](gotchas.md#hosted-agent-versions)).
 - **Copilot SDK harness (Agent Harness).** An optional, application-hosted orchestration loop inside FastAPI
   (`/harness/runs`), enabled by `COPILOT_HARNESS_ENABLED`. It is **not** a Foundry hosted agent and **not** a
   fifth department ([architecture.md](../architecture.md#copilot-sdk-agent-harness),
@@ -103,6 +104,10 @@ Each department's paths, Foundry project and search index are in
   rejects requests without a valid gateway token; `/health` and `/healthz` stay open
   ([api-management.md](../api-management.md#security-model),
   [ADR 0003](decisions/0003-gateways-opt-in-fail-closed-two-tiers.md)).
+- **Agents product and key (`<stack>-agents`).** The API Management product whose subscription key MCP callers
+  send as `Ocp-Apim-Subscription-Key`, one per stack (`northwind-agents`, `insurance-agents`); browser calls to
+  the REST API need no key. Keys never appear in the repository
+  ([api-management.md](../api-management.md#security-model), [gotchas](gotchas.md#api-and-gateways)).
 
 ## Evals and delivery
 

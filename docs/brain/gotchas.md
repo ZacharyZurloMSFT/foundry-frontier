@@ -107,6 +107,11 @@ top-level notes. Keep each entry short and cite a source.
   align one side as a drive-by fix; re-check this entry when that work lands. Sources:
   [ai-gateway.md](../ai-gateway.md#live-inventory),
   [api-management.md](../api-management.md#insurance-stack-cut-over-2026-10-23).
+- **Insurance apps are released by hand, canary-first.** A CI `api` image once made `/health` report
+  `insurance_agent_runtime_ready: false` (`main` hard-coded `northwind-orders`), and a CI MCP image exposes the
+  retail tools unless `NORTHWIND_MCP_INSURANCE_ONLY=true`. That switch is not derived from the business domain:
+  `ca-mcp-*` run in it too and must keep every tool. Canary on a throwaway copy of the live app and keep the
+  previous digest. Source: [api-management.md](../api-management.md#insurance-stack-cut-over-2026-10-23).
 
 ## API and gateways
 
@@ -135,6 +140,35 @@ top-level notes. Keep each entry short and cite a source.
   (Foundry rejects them as model ids), so their model calls stay direct and `AI_GATEWAY_MODEL_CONNECTION` should
   stay unset. Sources: [architecture.md](../architecture.md#order-concierge-hosted-runtime),
   [ai-gateway.md](../ai-gateway.md#findings-to-act-on) (finding 9).
+- **Lock an app last, and prove the lock.** Move every caller first, then release a guard-capable image, then enable
+  the guard. An image without `gateway_guard.py` silently ignores the guard variables, and a full-Bicep provision
+  drops them, so run `apim-smoke.py --stack <stack> --expect-lockdown` after any change. Sources:
+  [runbook step 8](../api-management.md#rollout-runbook), [operations](../api-management.md#operations).
+- **Foundry calls a connection's *target*.** Prompt agents need one connection per MCP endpoint with the exact URL
+  (a base URL gets a 404); hosted agents read the key themselves, so one connection on the gateway base URL covers
+  both (`connection_covers` in [`runtime.py`](../../agents/hosted/runtime.py)). Connection names are
+  account-wide. Source: [runbook step 6](../api-management.md#rollout-runbook).
+- **One key, several copies.** The `insurance-agents` key sits in a Foundry connection, an API secret and the AI
+  Gateway credentials, and hosted agents read it at start-up: rotate every copy, then restart or re-version the
+  agents. Never commit or print a key. Source: [operations](../api-management.md#operations).
+
+## Hosted agent versions
+
+- **Versions are immutable; the selector controls traffic.** A new version of a pinned agent takes no traffic until
+  `update_details` switches it, and switching back is the rollback; the runtime principal belongs to the agent, so
+  no new role assignments are needed. [`deploy-orders-hosted.py`](../../scripts/deploy-orders-hosted.py) switches
+  immediately and accepts only the standard agent names. The two insurance roles that call MCP servers must keep
+  `MCP_GATEWAY_CONNECTION` and the gateway URLs on every new version, or the locked apps answer 401. Source:
+  [insurance cut-over](../api-management.md#insurance-stack-cut-over-2026-10-23).
+
+## Releases and merging
+
+- **Some paths release every app, and a release aborts when `main` moves.** `scripts/`, `.github/workflows/`,
+  `agents/copilot-harness/`, `azure.yaml` and `.dockerignore` release all five services; docs-only changes release
+  none. The release re-checks that `main` still equals its source SHA, so merging while `Scoped App Release` runs
+  aborts it part-way; an abort does not advance the baseline, so the next release covers it (check that it
+  passed). It never touches `ca-insurance-api`, `-lookup` or `-review`. Sources:
+  [`release-app.py`](../../scripts/release-app.py), [`deploy-apps.yml`](../../.github/workflows/deploy-apps.yml).
 
 ## Local development
 
@@ -147,3 +181,8 @@ top-level notes. Keep each entry short and cite a source.
   `FOUNDRY_BAKEOFF_DEPLOYMENTS` to deployments that exist in your project; catalog availability varies by
   subscription and region. Sources: [local-dev.md](../local-dev.md#common-gotchas),
   [departments.md](../departments.md#adding-partner-models-to-the-bake-off-tab).
+- **Line endings are mixed and there is no `.gitattributes`.** The index has CRLF (`README.md`,
+  `docs/api-management.md`, `apps/api/app/insurance.py`) and LF (`docs/brain/`, `docs/ai-gateway.md`,
+  `apps/mcp-*/app/main.py`). New or edited files can come out CRLF on Windows and show as a whole-file diff: check
+  `git ls-files --eol <file>` and `git diff --stat`, and fix with `git -c core.autocrlf=input add <file>`, delete
+  the file, then `git checkout -- <file>`. Source: `git ls-files --eol`; the repository has no `.gitattributes`.

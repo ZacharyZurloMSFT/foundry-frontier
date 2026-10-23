@@ -10,6 +10,8 @@ not rewrite an accepted record: add a new one that supersedes it and update the 
 | [0001](0001-prompt-files-are-source-of-truth.md) | Prompt files are the source of truth | Accepted |
 | [0002](0002-four-eval-tiers-and-department-baselines.md) | Four eval tiers, cheapest first, with per-department baselines | Accepted |
 | [0003](0003-gateways-opt-in-fail-closed-two-tiers.md) | Gateways are opt-in, fail closed, and split by header handling | Accepted |
+| [0004](0004-oidc-trust-on-a-public-repository-is-an-explicit-opt-in.md) | OIDC trust on the public repository is an explicit opt-in | Accepted |
+| [0005](0005-mcp-servers-are-plain-http-passthrough-apis.md) | MCP servers are published as plain HTTP passthrough APIs | Accepted |
 
 ## When to write one
 
