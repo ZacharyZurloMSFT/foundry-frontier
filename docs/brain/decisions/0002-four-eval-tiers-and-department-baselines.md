@@ -30,4 +30,4 @@ Departments share one account, so one department's numbers must not mask another
   ([departments.md](../../departments.md#adding-a-new-department)).
 - A new agent rubric needs a `{agent}_rubric.prompty`, an entry in the workflow set in `evals/run_evals.py`,
   and a first-run baseline refresh ([evals/README.md](../../../evals/README.md#custom-rubric-evaluators-llm-as-judge)).
-- See [gotchas](../gotchas.md#evals-and-prompts) for the traps that follow from this.
+- See [gotchas](../gotchas/evals-and-prompts.md) for the traps that follow from this.
