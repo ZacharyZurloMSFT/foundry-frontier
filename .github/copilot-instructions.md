@@ -37,6 +37,7 @@ work order dispatched. One `azd up` deploys everything.
 - Code wins: if a brain page or doc disagrees with the code, trust the code and fix the page in the same PR.
 - Names changed over time (Field Services → Order Concierge → Northwind Insurance); check
   `docs/brain/glossary.md` before assuming what a name means.
-- Learned something non-obvious (a trap, a "why")? Add it to `docs/brain/gotchas.md` or a
-  `docs/brain/decisions/` record. Do not create new top-level notes.
+- Learned something non-obvious (a trap, a "why")? Add it to the matching page under `docs/brain/gotchas/`
+  (index: `docs/brain/gotchas/README.md`) or to a `docs/brain/decisions/` record. Do not create new top-level
+  notes.
 - Never put secrets, customer data, or internal-only data in the brain; this repo is public.

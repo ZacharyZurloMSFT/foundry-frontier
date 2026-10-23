@@ -29,6 +29,6 @@ client headers before the MCP backend, while the work-order MCP binds an applica
 - The work-order MCP goes through `apim-northwind`, never the AI Gateway. It can stay direct only while its
   app is not locked behind the gateway guard.
 - Changing the REST surface means regenerating the OpenAPI export
-  ([gotchas](../gotchas.md#api-and-gateways)).
+  ([gotchas](../gotchas/api-and-gateways.md)).
 - RBAC alone cannot force gateway-only inference: enforcement is code that fails closed, removing redundant
   role assignments, and detecting bypass ([ai-gateway.md](../../ai-gateway.md#findings-to-act-on)).

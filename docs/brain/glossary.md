@@ -31,12 +31,12 @@ Each department's paths, Foundry project and search index are in
 
 - **Business domain (`retail` or `insurance`).** Set by `businessDomain` in `infra/main.bicep` (default
   `retail`) and the `NORTHWIND_BUSINESS_DOMAIN` variable. It changes what `postprovision` does and which
-  agents are active ([gotchas](gotchas.md#azd-up-and-deployment)).
+  agents are active ([gotchas](gotchas/deployment-and-releases.md#azd-up-and-deployment)).
 - **Foundry projects `northwind` and `northwind-orders`.** Distinct. `northwind` is the retained legacy web
   project (its manager lives in `agents/legacyorchestrator`); `northwind-orders` is the native flagship
   project that hosts the five hosted agents. Neither was renamed or merged
   ([departments.md](../departments.md#the-four-departments), [architecture.md](../architecture.md#foundry-projects)).
-  The live insurance projects use different names, see [gotchas](gotchas.md#retail-vs-insurance).
+  The live insurance projects use different names, see [gotchas](gotchas/retail-vs-insurance.md).
 - **Container Apps stacks `northwind` and `insurance`.** Two stacks run the same code and are published side
   by side. The `northwind` stack (`ca-api`, `ca-mcp-*`, `ca-web-*`) is the repository-managed deployment; the
   `insurance` stack (`ca-insurance-*`) was created out of band. The release workflow builds only its two SPAs;
@@ -60,7 +60,8 @@ Each department's paths, Foundry project and search index are in
   the role. The live insurance project runs `northwind-insurance-*` counterparts. Versions are immutable and a
   selector routes traffic to one ([`azure.yaml`](../../azure.yaml),
   [architecture.md](../architecture.md#order-concierge-hosted-runtime),
-  [ai-gateway.md](../ai-gateway.md#live-inventory), [gotchas](gotchas.md#hosted-agent-versions)).
+  [ai-gateway.md](../ai-gateway.md#live-inventory),
+  [gotchas](gotchas/agents-and-approvals.md#hosted-agent-versions)).
 - **Copilot SDK harness (Agent Harness).** An optional, application-hosted orchestration loop inside FastAPI
   (`/harness/runs`), enabled by `COPILOT_HARNESS_ENABLED`. It is **not** a Foundry hosted agent and **not** a
   fifth department ([architecture.md](../architecture.md#copilot-sdk-agent-harness),
@@ -107,7 +108,7 @@ Each department's paths, Foundry project and search index are in
 - **Agents product and key (`<stack>-agents`).** The API Management product whose subscription key MCP callers
   send as `Ocp-Apim-Subscription-Key`, one per stack (`northwind-agents`, `insurance-agents`); browser calls to
   the REST API need no key. Keys never appear in the repository
-  ([api-management.md](../api-management.md#security-model), [gotchas](gotchas.md#api-and-gateways)).
+  ([api-management.md](../api-management.md#security-model), [gotchas](gotchas/api-and-gateways.md)).
 
 ## Evals and delivery
 
