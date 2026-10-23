@@ -21,6 +21,10 @@ from .settings import get_settings
 
 router = APIRouter(prefix="/insurance", tags=["synthetic-insurance"])
 
+# The converted insurance agents live in the original orders project and in the retained nw-insurance-claims
+# project. The endpoint path must still name the configured project, and the legacy web project is never accepted.
+INSURANCE_PROJECTS = frozenset({"northwind-orders", "nw-insurance-claims"})
+
 
 def insurance_runtime_ready() -> bool:
     settings = get_settings()
@@ -30,7 +34,7 @@ def insurance_runtime_ready() -> bool:
         return False
     return (
         settings.business_domain == "insurance" and settings.insurance_agents_ready
-        and settings.order_project_name == "northwind-orders"
+        and settings.order_project_name in INSURANCE_PROJECTS
         and settings.order_agents_hosted and project.scheme == "https" and bool(project.hostname)
         and not project.username and not project.password and not project.query and not project.fragment
         and project.path.rstrip("/") == f"/api/projects/{settings.order_project_name}"
@@ -42,10 +46,10 @@ def require_insurance_runtime() -> None:
     if not insurance_runtime_ready():
         raise HTTPException(
             503, "Insurance agent inference is unavailable. Deploy and verify the converted insurance "
-            "agents in the existing project, then configure NORTHWIND_BUSINESS_DOMAIN=insurance, "
+            "agents in the configured insurance project, then configure NORTHWIND_BUSINESS_DOMAIN=insurance, "
             "NORTHWIND_INSURANCE_AGENTS_READY=true, ORDER_AGENTS_HOSTED=true and "
             "FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID, with FOUNDRY_PROJECT_ENDPOINT pointing to "
-            "the existing ORDER_PROJECT_NAME=northwind-orders, not the legacy web project. "
+            "ORDER_PROJECT_NAME=northwind-orders or nw-insurance-claims, not the legacy web project. "
             "Existing retail agents are not insurance-ready.",
         )
 

@@ -27,6 +27,11 @@ NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py) makes it accept only
 calls relayed by the API gateway. Cosmos writes go through the shared UAMI
 (`AZURE_CLIENT_ID`) which has the Cosmos DB Built-in Data Contributor role from
 the containerapps bicep module.
+
+With NORTHWIND_MCP_INSURANCE_ONLY=true (the ca-insurance-review app) the server exposes
+only `draft_claim_action`; the retail `propose_resolution` tool is neither registered nor
+callable, so the insurance project never persists a retail draft. Without it (the
+ca-mcp-work-order app, which runs in the insurance domain too) every tool is served.
 """
 from __future__ import annotations
 
@@ -66,7 +71,9 @@ else:
             raise
         from apps.api.app.gateway_guard import GatewayGuardMiddleware
 
-logger = logging.getLogger("mcp-resolution-draft")
+INSURANCE_ONLY = os.environ.get("NORTHWIND_MCP_INSURANCE_ONLY", "").strip().lower() == "true"
+
+logger = logging.getLogger("mcp-insurance-review" if INSURANCE_ONLY else "mcp-resolution-draft")
 
 if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
@@ -101,7 +108,7 @@ def _cosmos_container():
 # transport, which rejects the Host header ACA ingress passes through and
 # returns 421. We're a public no-auth demo endpoint, so disable it.
 mcp = FastMCP(
-    name="northwind-resolution-draft",
+    name="northwind-insurance-claim-action-draft" if INSURANCE_ONLY else "northwind-resolution-draft",
     stateless_http=True,
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
@@ -120,7 +127,6 @@ class HarnessDraft(BaseModel):
     urgency: Literal["P1", "P2", "P3", "P4"]
 
 
-@mcp.tool()
 async def propose_resolution(workflow_id: str, draft: dict[str, Any], ctx: Context) -> str:
     """Save a draft customer resolution and enqueue it for human approval.
 
@@ -134,6 +140,8 @@ async def propose_resolution(workflow_id: str, draft: dict[str, Any], ctx: Conte
         hitl_id is the Cosmos document id — approve/reject at
         POST /hitl/decide on the api service.
     """
+    if INSURANCE_ONLY:
+        raise ValueError("Retail resolution drafts are unavailable in insurance mode.")
     request = ctx.request_context.request
     bound_workflow = request.headers.get("x-harness-workflow") if request is not None else None
     harness = workflow_id.startswith("wf-harness-") or bound_workflow is not None
@@ -201,6 +209,10 @@ async def propose_resolution(workflow_id: str, draft: dict[str, Any], ctx: Conte
     })
 
 
+if not INSURANCE_ONLY:
+    mcp.tool()(propose_resolution)
+
+
 @mcp.tool()
 async def draft_claim_action(workflow_id: str, draft: ClaimActionDraft, ctx: Context) -> str:
     """Persist a synthetic claim-action draft for HUMAN review only.
@@ -251,8 +263,11 @@ async def _lifespan(_app: FastAPI):
 
 
 # Legacy title kept to match the Container App name — the service is the
-# Resolution Draft MCP for the Order Concierge demo.
-app = FastAPI(title="northwind-resolution-draft-mcp", lifespan=_lifespan)
+# Resolution Draft MCP for the Order Concierge demo (the insurance review when insurance-only).
+app = FastAPI(
+    title="northwind-insurance-review-mcp" if INSURANCE_ONLY else "northwind-resolution-draft-mcp",
+    lifespan=_lifespan,
+)
 
 
 @app.get("/healthz")

@@ -123,3 +123,38 @@ def test_spa_builds_use_the_gateway_only_when_configured():
     assert run.index('[[ "$NORTHWIND_GATEWAY_URL" =~') < run.index('export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/northwind"')
     assert 'export VITE_API_BASE_URL="https://$api_fqdn"' in run, "the direct Container App URL remains the default"
     assert run.index("NORTHWIND_GATEWAY_URL") < run.index("api_fqdn")
+
+
+def _insurance_spa_build(workflow):
+    return next(step["run"] for step in workflow["jobs"]["deploy"]["steps"]
+                if step.get("name", "").startswith("Build and push immutable images"))
+
+
+def test_insurance_spas_are_built_against_the_gateway_only_when_configured():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8"))
+    run = _insurance_spa_build(workflow)
+    assert "${{" not in run
+    gateway = run.index('[[ "$NORTHWIND_GATEWAY_URL" =~')
+    assert r"^https://[a-z0-9-]+\.azure-api\.net$" in run, "the gateway origin is validated before it is baked in"
+    assert gateway < run.index('insurance_base="$NORTHWIND_GATEWAY_URL/insurance"')
+    assert 'insurance_base="https://$insurance_fqdn"' in run, "the direct insurance API URL remains the default"
+    assert run.index("NORTHWIND_GATEWAY_URL") < run.index("insurance_fqdn=")
+    # Both SPAs take the same base URL, and neither is built against the northwind stack.
+    assert run.count('VITE_API_BASE_URL="$insurance_base"') == 2
+    assert 'VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/northwind"' not in run
+    assert "VITE_API_BASE_URL=\"https://$api_fqdn\"" not in run
+
+
+def test_every_insurance_spa_is_snapshotted_built_and_released_by_the_same_pairs():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8"))
+    steps = {step.get("name", ""): step["run"] for step in workflow["jobs"]["deploy"]["steps"] if "run" in step}
+    snapshot = next(run for name, run in steps.items() if name.startswith("Snapshot"))
+    release = next(run for name, run in steps.items() if name.startswith("Release digest-pinned"))
+    pairs = "web-tech:insurance-portal web-voice:insurance-voice"
+    assert f"for pair in {pairs}; do" in snapshot and f"for pair in {pairs}; do" in release
+    build = _insurance_spa_build(workflow)
+    for app in ("insurance-portal", "insurance-voice"):
+        assert f'".release-state/build-{app}.json"' in build and f'".release-state/image-{app}"' in build
+    # The release loop keeps the current-main guard before every mutation.
+    loop = release[release.index(f"for pair in {pairs}"):]
+    assert loop.index("|| continue") < loop.index('commits/main') < loop.index("release-app.py")

@@ -90,6 +90,31 @@ async def test_lookup_mcp_schema_and_validation(insurance_config):
     assert json.loads(module.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
 
 
+@pytest.mark.parametrize("flag,only", [("true", True), (" TRUE ", True), ("", False), ("false", False), ("1", False)])
+@pytest.mark.asyncio
+async def test_insurance_only_mcp_apps_expose_no_retail_tools(insurance_config, monkeypatch, flag, only):
+    monkeypatch.setenv("NORTHWIND_MCP_INSURANCE_ONLY", flag)
+    lookup = load_mcp("mcp-tech-lookup")
+    draft = load_mcp("mcp-work-order")
+    lookup_tools = {t.name for t in await lookup.mcp.list_tools()}
+    draft_tools = {t.name for t in await draft.mcp.list_tools()}
+    if only:
+        assert lookup_tools == {"lookup_policy", "lookup_claim"}
+        assert draft_tools == {"draft_claim_action"}
+        assert lookup.mcp.name == "northwind-insurance-policy-claim-lookup"
+        assert draft.mcp.name == "northwind-insurance-claim-action-draft"
+        with pytest.raises(ValueError, match="unavailable in insurance"):
+            lookup.lookup_order("NW-40021")
+        with pytest.raises(ValueError, match="unavailable in insurance"):
+            await draft.propose_resolution("wf-retail", {}, None)
+    else:
+        # The northwind apps run in the insurance domain too and keep serving the retail tools.
+        assert lookup_tools == {"lookup_order", "lookup_policy", "lookup_claim"}
+        assert draft_tools == {"propose_resolution", "draft_claim_action"}
+        assert lookup.mcp.name == "northwind-order-lookup"
+        assert json.loads(lookup.lookup_order("NW-40021"))[0]["order_id"] == "NW-40021"
+
+
 @pytest.mark.asyncio
 async def test_mcp_persistence_binding_and_approval_only(insurance_config, database, monkeypatch):
     module = load_mcp("mcp-work-order")
@@ -197,6 +222,27 @@ def test_ready_requires_separate_agent_config_and_never_retail(insurance_config)
     assert not insurance.insurance_runtime_ready()
     insurance_config.order_project_name = "northwind"
     assert not insurance.insurance_runtime_ready()
+
+
+def test_ready_accepts_the_retained_insurance_project_only_with_a_matching_endpoint(insurance_config):
+    insurance_config.insurance_agents_ready = True
+    insurance_config.order_agents_hosted = True
+    insurance_config.insurance_orchestrator_agent_id = "northwind-insurance-orchestrator"
+    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
+    assert insurance.insurance_runtime_ready()
+    assert insurance.INSURANCE_PROJECTS == {"northwind-orders", "nw-insurance-claims"}
+    # The endpoint must name the configured project, and neither the legacy web project nor a look-alike is accepted.
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/northwind-orders"
+    assert not insurance.insurance_runtime_ready()
+    for other in ("northwind", "nw-insurance-claims-old", "NW-INSURANCE-CLAIMS", ""):
+        insurance_config.order_project_name = other
+        insurance_config.foundry_project_endpoint = f"https://existing.invalid/api/projects/{other}"
+        assert not insurance.insurance_runtime_ready()
+    insurance_config.order_project_name = "nw-insurance-claims"
+    insurance_config.foundry_project_endpoint = "https://existing.invalid/api/projects/nw-insurance-claims"
+    insurance_config.insurance_agents_ready = False
+    assert not insurance.insurance_runtime_ready(), "readiness still needs the explicit flag"
 
 
 @pytest.mark.asyncio

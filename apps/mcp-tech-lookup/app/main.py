@@ -18,6 +18,11 @@ Lookup MCP; keep the legacy infra name.
 No auth by default — this is a demo server behind a public Container Apps ingress.
 Setting NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py) makes it accept
 only calls relayed by the API gateway.
+
+With NORTHWIND_MCP_INSURANCE_ONLY=true (the ca-insurance-lookup app) the server exposes
+only `lookup_policy` and `lookup_claim`; the retail `lookup_order` tool is neither
+registered nor callable, so the insurance project never serves retail data. Without it
+(the ca-mcp-tech-lookup app, which runs in the insurance domain too) every tool is served.
 """
 from __future__ import annotations
 
@@ -47,6 +52,8 @@ else:
         if exc.name != f"{__package__}.gateway_guard":
             raise
         from apps.api.app.gateway_guard import GatewayGuardMiddleware
+
+INSURANCE_ONLY = os.environ.get("NORTHWIND_MCP_INSURANCE_ONLY", "").strip().lower() == "true"
 
 # Optional App Insights wiring — mirrors apps/api. Configured only when the
 # usual OTEL env vars are present so local `uvicorn` runs stay quiet.
@@ -111,14 +118,13 @@ _ORDERS: list[dict[str, Any]] = [
 # transport, which rejects the Host header ACA ingress passes through and
 # returns 421. We're a public no-auth demo endpoint, so disable it.
 mcp = FastMCP(
-    name="northwind-order-lookup",
+    name="northwind-insurance-policy-claim-lookup" if INSURANCE_ONLY else "northwind-order-lookup",
     stateless_http=True,
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
 
-@mcp.tool()
 def lookup_order(query: str) -> str:
     """Look up Northwind customer + order + shipment by id or free-text.
 
@@ -131,6 +137,8 @@ def lookup_order(query: str) -> str:
         JSON-encoded list of matching orders. Each row includes the full
         customer, order line items, and shipment status.
     """
+    if INSURANCE_ONLY:
+        raise ValueError("Retail order lookup is unavailable in insurance mode.")
     q = (query or "").strip().lower()
     if not q:
         return json.dumps([])
@@ -145,6 +153,10 @@ def lookup_order(query: str) -> str:
         )
     ]
     return json.dumps(hits[:5])
+
+
+if not INSURANCE_ONLY:
+    mcp.tool()(lookup_order)
 
 
 @mcp.tool()
@@ -184,8 +196,11 @@ async def _lifespan(_app: FastAPI):
 
 
 # Legacy title kept to match the Container App name — the service is the
-# Order Lookup MCP for the Order Concierge demo.
-app = FastAPI(title="northwind-order-lookup-mcp", lifespan=_lifespan)
+# Order Lookup MCP for the Order Concierge demo (the insurance lookup when insurance-only).
+app = FastAPI(
+    title="northwind-insurance-lookup-mcp" if INSURANCE_ONLY else "northwind-order-lookup-mcp",
+    lifespan=_lifespan,
+)
 
 
 @app.get("/healthz")
