@@ -6,7 +6,7 @@ param environmentName = readEnvironmentVariable('AZURE_ENV_NAME')
 param location = readEnvironmentVariable('AZURE_LOCATION', 'canadacentral')
 param aiLocation = readEnvironmentVariable('AZURE_AI_LOCATION', 'eastus2')
 // Canonical names first; the deprecated ORDER_* / ORDERS_* names are still read so existing azd environments keep working.
-param insuranceProjectName = readEnvironmentVariable('INSURANCE_PROJECT_NAME', readEnvironmentVariable('ORDER_PROJECT_NAME', 'northwind-orders'))
+param insuranceProjectName = readEnvironmentVariable('INSURANCE_PROJECT_NAME', readEnvironmentVariable('ORDER_PROJECT_NAME', 'nw-insurance-claims'))
 param hostedAgentsEnabled = readEnvironmentVariable('HOSTED_AGENTS_ENABLED', readEnvironmentVariable('ORDER_AGENTS_HOSTED', 'true'))
 param reuseExistingResources = readEnvironmentVariable('NORTHWIND_REUSE_EXISTING_RESOURCES', 'false')
 param appsResourceGroupName = readEnvironmentVariable('AZURE_APPS_RESOURCE_GROUP', '')

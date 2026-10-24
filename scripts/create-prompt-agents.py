@@ -129,7 +129,7 @@ ENV_ALIASES = {
 # Isolated insurance knowledge base published by scripts/publish-insurance-knowledge.py.
 DEFAULT_KNOWLEDGE_INDEX = "northwind-insurance-knowledge"
 DEFAULT_KNOWLEDGE_BASE = "northwind-insurance-kb"
-DEFAULT_KB_CONNECTION = "northwind-insurance-kb-mcp"
+DEFAULT_KB_CONNECTION = "nw-insurance-claims-kb-mcp"
 
 
 def _alias_env(canonical: str) -> str | None:
@@ -460,8 +460,8 @@ def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = N
     #
     # Connection naming: Foundry connection names are account-scoped, so
     # every project needs its own uniquely-named connection. Convention:
-    # `<kb-name>-mcp` (e.g., `northwind-insurance-kb-mcp`, `nw-claims-kb-mcp`). This
-    # matches what scripts/connect-knowledge-base.py creates.
+    # `<kb-name>-mcp` or, for the flagship, `<project>-kb-mcp` (e.g., `nw-insurance-claims-kb-mcp`,
+    # `nw-claims-kb-mcp`). This matches what scripts/connect-knowledge-base.py creates.
     for t in cfg.get("tools") or []:
         if isinstance(t, dict) and t.get("type") == "knowledge":
             idx = _expand_env(t.get("index")) or search_index
@@ -469,10 +469,12 @@ def _knowledge_tools_for_agent(cfg: dict[str, Any], search_index: str | None = N
                 print(f"  ! knowledge tool on '{cfg['name']}' has no index - skipping.")
                 continue
             # The isolated insurance index keeps its published kb/conn names
-            # (AZURE_SEARCH_KNOWLEDGE_BASE / FOUNDRY_KB_CONNECTION_NAME).
+            # (AZURE_SEARCH_KNOWLEDGE_BASE / FOUNDRY_KB_CONNECTION_NAME); the default KB's
+            # published connection is project-derived, so it is not computed from the KB name.
             if idx == os.environ.get("AZURE_SEARCH_INDEX", DEFAULT_KNOWLEDGE_INDEX):
                 kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", DEFAULT_KNOWLEDGE_BASE)
-                conn = os.environ.get("FOUNDRY_KB_CONNECTION_NAME", f"{kb}-mcp")
+                conn = os.environ.get("FOUNDRY_KB_CONNECTION_NAME") or (
+                    DEFAULT_KB_CONNECTION if kb == DEFAULT_KNOWLEDGE_BASE else f"{kb}-mcp")
             else:
                 kb = f"{idx}-kb"
                 conn = f"{kb}-mcp"

@@ -9,7 +9,7 @@ ENV = {
     "FOUNDRY_PROJECT_ENDPOINT": "https://existing.services.ai.azure.com/api/projects/nw-insurance-claims",
     "MODEL_DEPLOYMENT_NAME": "existing-baseline",
     "AGENT_ROLE": "policy-wording",
-    "AGENT_KB_CONNECTION": "northwind-insurance-kb-mcp",
+    "AGENT_KB_CONNECTION": "nw-insurance-claims-kb-mcp",
     "AZURE_SEARCH_ENDPOINT": "https://existing.search.windows.net",
     "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
     "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
@@ -21,11 +21,22 @@ VERIFIED = {"NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED": "true"}
 
 def test_knowledge_uses_project_connection_without_search_credentials():
     spec = Settings.from_env(ENV).knowledge_spec()
-    assert spec["project_connection_id"] == "northwind-insurance-kb-mcp"
+    assert spec["project_connection_id"] == "nw-insurance-claims-kb-mcp"
     assert spec["allowed_tools"] == ["knowledge_base_retrieve"]
     assert spec["url"] == ("https://existing.search.windows.net/knowledgebases/"
                            "northwind-insurance-kb/mcp?api-version=2026-05-01-preview")
     assert "headers" not in spec
+
+
+@pytest.mark.parametrize("connection", ["nw-insurance-claims-kb-mcp", "northwind-insurance-kb-mcp"])
+def test_both_insurance_knowledge_connection_names_are_accepted(connection):
+    spec = Settings.from_env({**ENV, "AGENT_KB_CONNECTION": connection}).knowledge_spec()
+    assert spec["project_connection_id"] == connection
+
+
+def test_another_departments_knowledge_connection_is_not_accepted():
+    with pytest.raises(ValueError, match="other knowledge cannot be substituted"):
+        Settings.from_env({**ENV, "AGENT_KB_CONNECTION": "nw-claims-kb-mcp"}).knowledge_spec()
 
 
 @pytest.mark.parametrize("role", list(PROMPTS))

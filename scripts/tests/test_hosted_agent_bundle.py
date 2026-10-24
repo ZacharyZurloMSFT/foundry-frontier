@@ -105,12 +105,13 @@ def test_insurance_dry_run_uses_canonical_bundle_and_never_sets_readiness_or_rol
         assert b"def lookup_claim_record" in archive.read("agents/insurance/domain.py")
 
 
+@pytest.mark.parametrize("connection", ["nw-insurance-claims-kb-mcp", "northwind-insurance-kb-mcp"])
 @pytest.mark.parametrize("role", list(module.ROLES))
-def test_every_role_deploys_under_its_insurance_agent_name(tmp_path, role):
+def test_every_role_deploys_under_its_insurance_agent_name(tmp_path, role, connection):
     config = write_config(tmp_path, {"common": {"AGENT_MODEL_DEPLOYMENT": "baseline",
                                                 "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
                                                 "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
-                                                "AGENT_KB_CONNECTION": "northwind-insurance-kb-mcp"}})
+                                                "AGENT_KB_CONNECTION": connection}})
     arguments = deploy_arguments(tmp_path, config)
     arguments.role = role
     module.deploy(arguments)

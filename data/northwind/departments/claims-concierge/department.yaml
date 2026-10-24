@@ -5,7 +5,7 @@ tagline: "Auto claims and policy records with safe, human-reviewed action drafts
 pillar: multi_agent
 icon: "🚘"
 brand_color: "#0b6bcb"
-foundry_project: northwind-orders
+foundry_project: nw-insurance-claims
 search_index: northwind-insurance-knowledge
 cu_inbox_prefix: claims-concierge
 enabled_tabs: [insurance_records, agent_chat, reviewed_drafts, hitl]

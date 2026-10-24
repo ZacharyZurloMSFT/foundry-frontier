@@ -151,9 +151,9 @@ sequenceDiagram
 
 - `NORTHWIND_INSURANCE_AGENTS_READY=true` and `HOSTED_AGENTS_ENABLED=true`, set by an
   operator after the fleet is deployed and verified, never inferred from packaged files;
-- `INSURANCE_PROJECT_NAME` is `northwind-orders` or `nw-insurance-claims` (the two flagship
-  project names the code accepts; they are bound to the live deployment, and which one exists
-  in a tenant is an operator fact this repository cannot verify);
+- `INSURANCE_PROJECT_NAME` is `nw-insurance-claims` (the live flagship project) or `northwind-orders` (the
+  original native project, and the API's fallback when the variable is unset); both are accepted, and which one
+  exists in a tenant is an operator fact this repository cannot verify;
 - `FOUNDRY_PROJECT_ENDPOINT` is `https://<host>/api/projects/<INSURANCE_PROJECT_NAME>`;
 - `FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID` starts with `northwind-insurance-`.
 
@@ -196,7 +196,8 @@ persisted, workflow-bound `pending_approval` with `execution_status: not_execute
 
 **Knowledge.** `policy-wording` accepts only the explicit insurance settings
 `AZURE_SEARCH_KNOWLEDGE_BASE=northwind-insurance-kb`, `AZURE_SEARCH_INDEX=northwind-insurance-knowledge`
-and the project connection `northwind-insurance-kb-mcp` (`AGENT_KB_CONNECTION` or
+and the project connection `nw-insurance-claims-kb-mcp` (or its original name
+`northwind-insurance-kb-mcp`; set with `AGENT_KB_CONNECTION` or
 `AGENT_KB_CONNECTION_NAME`); any other knowledge base is rejected at startup. That
 knowledge base is published with `scripts/publish-insurance-knowledge.py` (dry run unless
 `--apply`) and is configured for minimal, extractive retrieval (no query-planning model),
@@ -371,13 +372,14 @@ shell), which receives the portal's access token.
 
 The four departments are four Foundry projects in one shared AI Services account.
 `infra/modules/foundry.bicep` creates the flagship project (`insuranceProjectName` in
-`infra/main.bicep`, default `northwind-orders`) and one project per entry of the
+`infra/main.bicep`, default `nw-insurance-claims`) and one project per entry of the
 `additionalProjects` parameter; the manifest values are in `data/northwind/company.yaml`
 (`foundry_project`). Account-scoped roles (Azure AI User, Cognitive Services OpenAI User)
 inherit to every project, so the shared identity needs no per-project role plumbing.
 The department-to-endpoint map is the JSON app setting `FOUNDRY_PROJECT_ENDPOINTS`, which
-`apps/api/app/company.py` uses to resolve the `X-Department` header. Project names are
-bound to the live deployment and are not renamed. The department layout, indexes and how
+`apps/api/app/company.py` uses to resolve the `X-Department` header. Project names match
+the live deployment (the manifest derives an endpoint from them when that setting is
+absent). The department layout, indexes and how
 to add one are in [`docs/departments.md`](./departments.md).
 
 ## Data stores

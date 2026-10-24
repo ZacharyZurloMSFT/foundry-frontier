@@ -82,23 +82,18 @@ ALLOWED: dict[str, set[str]] = {
     "apps/api/app/harness/insurance_tools.py": {"orders project"},
     "apps/api/app/harness/runtime.py": {"work order"},
     "apps/api/app/insurance.py": {"orders project"},
-    "data/northwind/company.yaml": {"help desk", "orders project", "warranty"},
-    "data/northwind/departments/adjuster-support/department.yaml": {"help desk"},
-    "data/northwind/departments/claims-concierge/department.yaml": {"orders project"},
-    "data/northwind/departments/claims-documents/department.yaml": {"warranty"},
-    "evals/insurance_native.py": {"orders project", "orders setting"},
+    "evals/insurance_native.py": {"orders setting"},
     "infra/live/ai-gateway.json": {"orders project", "tech lookup", "work order"},
     "infra/live/apim-apis.bicep": {"tech lookup", "work order"},
     "infra/live/apim/policies/mcp-api.xml": {"tech lookup", "work order"},
     "infra/main.bicep": {"help desk", "order concierge", "orders project", "tech lookup", "warranty", "work order"},
-    "infra/main.bicepparam": {"orders project", "orders setting"},
-    "infra/modules/containerapps.bicep": {"orders project", "tech lookup", "work order"},
+    "infra/main.bicepparam": {"orders setting"},
+    "infra/modules/containerapps.bicep": {"tech lookup", "work order"},
     "pipelines/insurance-learning/insurance_learning.py": {"orders project"},
     "scripts/ai-gateway-enforce.py": {"orders project"},
     "scripts/apim-release.py": {"tech lookup", "work order"},
     "scripts/apim-smoke.py": {"tech lookup", "work order"},
     "scripts/configure-gateway-apps.py": {"tech lookup", "work order"},
-    "scripts/publish-insurance-knowledge.py": {"orders project"},
     ".gitignore": {"orders project"},  # keeps local state of checkouts that predate the pipelines rename out of git
 
     # Tests that prove the deprecated names still resolve, or that the retired names are rejected.
@@ -148,8 +143,10 @@ ALLOWED: dict[str, set[str]] = {
     # Documentation that names live Azure identifiers (Foundry project names, APIM API ids and gateway paths)
     # or describes the deprecated aliases and the legacy stack that docs/legacy-decommission.md retires.
     "docs/architecture.md": {"orders project"},
-    "docs/departments.md": {"help desk", "orders project", "warranty"},
+    "docs/departments.md": {"orders project"},
     "docs/local-dev.md": {"orders project"},
+    "README.md": {"orders project"},
+    "docs/brain/gotchas/names-and-retired-vocabulary.md": {"orders project"},
     "docs/api-management.md": {"tech lookup", "work order"},
     "docs/brain/decisions/0005-mcp-servers-are-plain-http-passthrough-apis.md": {"tech lookup", "work order"},
     "docs/ai-gateway.md": {"order lookup", "orders project", "orders setting", "tech lookup", "work order", "bake-off"},

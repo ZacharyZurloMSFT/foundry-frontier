@@ -31,9 +31,12 @@ GREENFIELD_MODULES = {
 }
 
 
-def valid_environment():
+LIVE_PROJECT = "nw-insurance-claims"
+
+
+def valid_environment(project=LIVE_PROJECT):
     env = {key: "preserved" for key in module.PRESERVED_KEYS}
-    endpoint = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/northwind-orders"
+    endpoint = f"https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/{project}"
     env.update({
         "NORTHWIND_REUSE_EXISTING_RESOURCES": "true",
         "AZURE_RESOURCE_GROUP": "rg-northwind-ai",
@@ -47,17 +50,17 @@ def valid_environment():
         "AZURE_AI_PROJECT_ID": (
             "/subscriptions/137c905b-7734-479e-acc5-ab8222462936"
             "/resourceGroups/rg-northwind-ai/providers/Microsoft.CognitiveServices"
-            "/accounts/aisvc-zurlo-northwind/projects/northwind-orders"
+            f"/accounts/aisvc-zurlo-northwind/projects/{project}"
         ),
-        "INSURANCE_PROJECT_NAME": "northwind-orders",
+        "INSURANCE_PROJECT_NAME": project,
         "HOSTED_AGENTS_ENABLED": "true",
         "FOUNDRY_PROJECT_ENDPOINT": endpoint,
         "AZURE_AI_PROJECT_ENDPOINT": endpoint,
         "FOUNDRY_PROJECT_ENDPOINTS": json.dumps({
             "claims-concierge": endpoint,
-            "adjuster-support": endpoint.replace("northwind-orders", "nw-employee-help-desk"),
-            "claims-documents": endpoint.replace("northwind-orders", "nw-claims-warranty"),
-            "contact-center": endpoint.replace("northwind-orders", "nw-contact-center"),
+            "adjuster-support": endpoint.replace(project, "nw-insurance-support"),
+            "claims-documents": endpoint.replace(project, "nw-insurance-documents"),
+            "contact-center": endpoint.replace(project, "nw-insurance-contact-center"),
         }),
     })
     return env
@@ -262,7 +265,7 @@ def test_agent_target_cannot_remain_in_legacy_after_foundry_moved():
         ("rg-northwind-ai", "rg-northwind-dev"),
         ("137c905b-7734-479e-acc5-ab8222462936", "00000000-0000-0000-0000-000000000000"),
         ("aisvc-zurlo-northwind", "aisvc-other"),
-        ("northwind-orders", "nw-employee-help-desk"),
+        ("nw-insurance-claims", "nw-insurance-support"),
         ("/projects/", "/wrongType/"),
     ],
 )
@@ -587,8 +590,14 @@ def test_reuse_never_targets_another_project_even_when_all_identifiers_agree(rea
         "INSURANCE_PROJECT_NAME": "northwind",
     })
     for key in ("FOUNDRY_PROJECT_ENDPOINT", "AZURE_AI_PROJECT_ENDPOINT", "AZURE_AI_PROJECT_ID", "FOUNDRY_PROJECT_ENDPOINTS"):
-        env[key] = env[key].replace("northwind-orders", "northwind")
-    assert any("retain INSURANCE_PROJECT_NAME=northwind-orders" in error for error in module.validate_environment(env))
+        env[key] = env[key].replace(LIVE_PROJECT, "northwind")
+    assert any("retain INSURANCE_PROJECT_NAME=nw-insurance-claims or northwind-orders" in error
+               for error in module.validate_environment(env))
+
+
+def test_the_live_project_and_the_original_native_project_both_validate_in_reuse_mode():
+    assert module.validate_environment(valid_environment()) == []
+    assert module.validate_environment(valid_environment("northwind-orders")) == []
 
 
 def test_greenfield_may_name_the_insurance_project_but_reuse_pins_the_live_name():
@@ -637,13 +646,13 @@ def test_greenfield_defaults_are_insurance_native_and_readiness_is_explicitly_fa
     for retired in ("businessDomain", "orderProjectName", "orderAgentsHosted", "bakeoffDeployments", "enableCuIngest"):
         assert retired not in template["parameters"]
         assert retired not in parameter_defaults
-    assert template["parameters"]["insuranceProjectName"]["defaultValue"] == "northwind-orders"
+    assert template["parameters"]["insuranceProjectName"]["defaultValue"] == "nw-insurance-claims"
     assert template["parameters"]["hostedAgentsEnabled"]["defaultValue"] == "true"
     assert template["parameters"]["additionalModelDeployments"]["defaultValue"] == []
     assert template["parameters"]["gatewayStack"]["allowedValues"] == ["insurance"]
     assert template["parameters"]["insuranceAgentsReady"]["defaultValue"] == "false"
     parameters = parameter_defaults
-    assert parameters["insuranceProjectName"]["value"] == "northwind-orders"
+    assert parameters["insuranceProjectName"]["value"] == "nw-insurance-claims"
     assert parameters["hostedAgentsEnabled"]["value"] == "true"
     assert parameters["gatewayStack"]["value"] == "insurance"
     assert parameters["insuranceAgentsReady"]["value"] == "false"

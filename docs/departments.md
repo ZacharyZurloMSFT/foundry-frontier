@@ -13,16 +13,17 @@ synthetic, and no agent approves, denies or pays a claim.
 
 | Department (slug) | Foundry pillar | Foundry project | Search index | Portal tab (`enabled_tabs`) | Agents |
 | ----------------- | -------------- | --------------- | ------------ | --------------------------- | ------ |
-| **Claims Concierge** (`claims-concierge`, flagship) | Multi-agent + human approval | `northwind-orders` | `northwind-insurance-knowledge` | Claims / Policies (`insurance_records`), Claims Concierge chat (`agent_chat`), Reviewed drafts (`reviewed_drafts`), Approvals (`hitl`) | Five **hosted** agents: `northwind-insurance-{orchestrator,triage,policy-claim-lookup,policy-wording,claim-action-draft}` |
-| **Adjuster Support** (`adjuster-support`) | Grounded retrieval (RAG) | `nw-employee-help-desk` | `nw-insurance-adjuster-support` | Adjuster support (`adjuster_support`) | Prompt `northwind-insurance-adjuster-support`, read by the API (extractive, no tools) |
-| **Claims Document Intelligence** (`claims-documents`) | Content Understanding | `nw-claims-warranty` | `nw-claims` | Document Intelligence (`claims_inbox`) | **Prompt** agent `northwind-claims-triage`; analyzer `northwindInsuranceClaimsV1` |
-| **Policyholder Contact Center** (`contact-center`) | Voice Live | `nw-contact-center` | `nw-contact-center` | Policyholder Contact Center (`voice_console`) | **Prompt** agent `northwind-intent-classifier`; Voice Live app (`apps/web-voice`) |
+| **Claims Concierge** (`claims-concierge`, flagship) | Multi-agent + human approval | `nw-insurance-claims` | `northwind-insurance-knowledge` | Claims / Policies (`insurance_records`), Claims Concierge chat (`agent_chat`), Reviewed drafts (`reviewed_drafts`), Approvals (`hitl`) | Five **hosted** agents: `northwind-insurance-{orchestrator,triage,policy-claim-lookup,policy-wording,claim-action-draft}` |
+| **Adjuster Support** (`adjuster-support`) | Grounded retrieval (RAG) | `nw-insurance-support` | `nw-insurance-adjuster-support` | Adjuster support (`adjuster_support`) | Prompt `northwind-insurance-adjuster-support`, read by the API (extractive, no tools) |
+| **Claims Document Intelligence** (`claims-documents`) | Content Understanding | `nw-insurance-documents` | `nw-claims` | Document Intelligence (`claims_inbox`) | **Prompt** agent `northwind-claims-triage`; analyzer `northwindInsuranceClaimsV1` |
+| **Policyholder Contact Center** (`contact-center`) | Voice Live | `nw-insurance-contact-center` | `nw-contact-center` | Policyholder Contact Center (`voice_console`) | **Prompt** agent `northwind-intent-classifier`; Voice Live app (`apps/web-voice`) |
 
-The Foundry project names are **bound to the live deployment** and keep their original
-spelling. They are configuration values (`foundry_project` in
-`data/northwind/company.yaml`), not product names. The code accepts `northwind-orders` and
-`nw-insurance-claims` for the flagship project (`INSURANCE_PROJECTS` in
-`apps/api/app/insurance.py`); which project names exist in a given tenant is an operator
+The Foundry project names are the **live deployment's** names. They are configuration values
+(`foundry_project` in `data/northwind/company.yaml`), not product names, and the manifest,
+the Bicep defaults and the reuse-mode check all use them. The original native flagship
+project `northwind-orders` is still accepted wherever the flagship name is read
+(`INSURANCE_PROJECTS` in `apps/api/app/insurance.py`, the hosted-agent deploy script and
+`scripts/validate-reuse.py`). Which project names exist in a given tenant is an operator
 fact this repository cannot verify, so check before you rely on one.
 
 Slugs from earlier builds (and `X-Department` values or `FOUNDRY_PROJECT_ENDPOINTS` keys
@@ -96,7 +97,7 @@ departments' rows are authored regression rows that no workflow runs yet, and
 
 | Index | Published by | Used by |
 | ----- | ------------ | ------- |
-| `northwind-insurance-knowledge` (knowledge source `northwind-insurance-knowledge-ks`, knowledge base `northwind-insurance-kb`, project connection `northwind-insurance-kb-mcp`) | `scripts/publish-insurance-knowledge.py` (dry run unless `--apply`) | the hosted `policy-wording` agent |
+| `northwind-insurance-knowledge` (knowledge source `northwind-insurance-knowledge-ks`, knowledge base `northwind-insurance-kb`, project connection `nw-insurance-claims-kb-mcp`; the original name `northwind-insurance-kb-mcp` is still accepted by the hosted agent) | `scripts/publish-insurance-knowledge.py` (dry run unless `--apply`) | the hosted `policy-wording` agent |
 | `nw-insurance-adjuster-support` | `scripts/publish-adjuster-support.py` (dry run unless `--apply`; it never deletes) | `/adjuster-support/*` |
 | `nw-claims`, `nw-contact-center` | `scripts/create-department-indexes.py` (drops and recreates its own index), then `create-knowledge-base.py` and `connect-knowledge-base.py` | no current API route queries them; the prompt agents in those departments have no tools |
 
@@ -110,14 +111,14 @@ Concierge, and the contact-center operator chooses the intake intent.
 ## Where each Foundry project lives in Bicep
 
 `infra/modules/foundry.bicep` provisions the shared AI Services account and the flagship
-project (`insuranceProjectName`, default `northwind-orders`). The other three come from
+project (`insuranceProjectName`, default `nw-insurance-claims`). The other three come from
 the `additionalProjects` parameter, defaulted in `infra/main.bicep`:
 
 ```bicep
 param additionalProjects array = [
-  { slug: 'adjuster-support', projectName: 'nw-employee-help-desk', displayName: 'Northwind Adjuster Support', ... }
-  { slug: 'claims-documents', projectName: 'nw-claims-warranty',    displayName: 'Northwind Claims Documents', ... }
-  { slug: 'contact-center',   projectName: 'nw-contact-center',     displayName: 'Northwind Policyholder Contact Center', ... }
+  { slug: 'adjuster-support', projectName: 'nw-insurance-support',        displayName: 'Northwind Adjuster Support', ... }
+  { slug: 'claims-documents', projectName: 'nw-insurance-documents',      displayName: 'Northwind Claims Documents', ... }
+  { slug: 'contact-center',   projectName: 'nw-insurance-contact-center', displayName: 'Northwind Policyholder Contact Center', ... }
 ]
 ```
 

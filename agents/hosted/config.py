@@ -36,10 +36,13 @@ SPECIALISTS = {
     "policy_lookup": ("northwind-insurance-policy-wording", "INSURANCE_POLICY_AGENT_NAME"),
     "claim_action_draft": ("northwind-insurance-claim-action-draft", "INSURANCE_DRAFT_AGENT_NAME"),
 }
+# The live fleet reads its knowledge through the project-derived connection nw-insurance-claims-kb-mcp;
+# northwind-insurance-kb-mcp is the original name and stays accepted.
+INSURANCE_KB_CONNECTIONS = ("nw-insurance-claims-kb-mcp", "northwind-insurance-kb-mcp")
 INSURANCE_KNOWLEDGE = {
     "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
     "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
-    "AGENT_KB_CONNECTION": "northwind-insurance-kb-mcp",
+    "AGENT_KB_CONNECTION": INSURANCE_KB_CONNECTIONS[0],
 }
 # Canonical setting -> deprecated names that are still read while the canonical one is unset or blank.
 SETTING_ALIASES = {
@@ -310,9 +313,10 @@ class Settings:
         connection = self.expand(entry["connection"])
         if (kb != INSURANCE_KNOWLEDGE["AZURE_SEARCH_KNOWLEDGE_BASE"]
                 or self.env.get("AZURE_SEARCH_INDEX") != INSURANCE_KNOWLEDGE["AZURE_SEARCH_INDEX"]
-                or connection.rsplit("/", 1)[-1] != INSURANCE_KNOWLEDGE["AGENT_KB_CONNECTION"]):
+                or connection.rsplit("/", 1)[-1] not in INSURANCE_KB_CONNECTIONS):
             raise ValueError("Insurance policy wording requires explicit northwind-insurance-kb, "
-                             "northwind-insurance-knowledge and northwind-insurance-kb-mcp settings; "
+                             "northwind-insurance-knowledge and nw-insurance-claims-kb-mcp "
+                             "(or northwind-insurance-kb-mcp) settings; "
                              "other knowledge cannot be substituted.")
         return {
             "name": kb,

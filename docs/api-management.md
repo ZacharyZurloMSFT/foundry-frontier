@@ -74,8 +74,9 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   through them returned the synthetic records ([ai-gateway.md](./ai-gateway.md#findings-to-act-on),
 >   finding 8).
 > - **Not done:** the three hosted agents that do not call MCP
->   servers, and landing the insurance-resource-cleanup work. See
->   [Remaining steps](#remaining-steps) and [what is not verified](#not-verified-live-yet).
+>   servers, and the rest of the insurance-resource-cleanup work (its live project names
+>   have landed in the repository; see the first row of
+>   [Remaining steps](#remaining-steps) and [what is not verified](#not-verified-live-yet)).
 
 ## What exists in `rg-northwind-apps`
 
@@ -526,7 +527,7 @@ below was closed, and each change was canaried on a throwaway copy first and is 
 
 | App | What a plain `main` image lacked | Closed by |
 | --- | --- | --- |
-| `ca-insurance-api` | `main` hard-coded the original project name (the live project is `nw-insurance-claims`), and the live company and department data carry insurance project names that exist only in the unmerged `insurance-resource-cleanup` work. | #70 (`INSURANCE_PROJECTS` accepts both names) plus a data overlay. |
+| `ca-insurance-api` | `main` hard-coded the original project name (the live project is `nw-insurance-claims`), and the live company and department data carried insurance project names that existed only in the unmerged `insurance-resource-cleanup` work (they are in `data/northwind/company.yaml` now). | #70 (`INSURANCE_PROJECTS` accepts both names) plus a data overlay. |
 | `ca-insurance-lookup`, `ca-insurance-review` | The hand-built images predate the guard and expose only the insurance tools, which a plain CI image did not. | #72: `NORTHWIND_MCP_INSURANCE_ONLY=true` makes the CI image expose only the insurance tools. The legacy northwind MCP apps (retired from the repo) run in the insurance domain too and keep every tool, which is why the switch was its own setting rather than derived from the domain flag (since removed). The insurance-only cleanup removed the other tools from the code, so the switch is now a no-op for images built from this repository. |
 | Hosted agents | Version 1 of all five was packaged outside the repository and calls the MCP apps directly. | New versions of the two that call MCP servers. |
 
@@ -541,7 +542,8 @@ and `nw-insurance-contact-center`; the adjuster-support `search_index` became
 `nw-insurance-adjuster-support`, which the file has carried since the insurance-only cleanup,
 so that line is no longer needed). Build from `apps/api` with
 `az acr build -r acrzurlonorthwind --platform linux/amd64 .` (no local Docker needed). The overlay
-goes away once the `insurance-resource-cleanup` work is in `main`. The canary was a throwaway
+is no longer needed for a new build: the live project names are in `data/northwind/company.yaml`
+now, and the live image keeps the overlay until it is next released. The canary was a throwaway
 Container App cloned from
 the live configuration (same environment, identity and variables, one replica, tag
 `purpose=apim-canary`); 19 read-only GETs matched the live app apart from additive fields
@@ -614,9 +616,9 @@ reversible.
 
 | Step | Why it is not done | How to finish |
 | --- | --- | --- |
-| Land the `insurance-resource-cleanup` work | The live department project names and the policy-wording tweaks of hosted version 1 exist only there. Until then the API image carries the data overlay, and the policy-wording agent cannot be rebuilt from `main` (`main` insists on the connection name `northwind-insurance-kb-mcp`, the live one is `nw-insurance-claims-kb-mcp`). | Rebase and merge the branch (a trial merge on 2026-10-22, before the insurance-only cleanup, conflicted in 16 files), then rebuild the API from `main` without the overlay. |
-| The other three hosted agents (`...-triage`, `...-policy-wording`, `...-orchestrator`) | They never call an MCP app, so the lock-down does not touch them; their version-1 environment still lists the direct MCP URLs, unused. | Redeploy from `main` with the same environment when the cleanup work lands. |
-| Release the insurance apps from the workflow | `deploy-apps.yml` and `scripts/release-app.py` now cover all five `ca-insurance-*` apps, but the live `ca-insurance-api`, `ca-insurance-lookup` and `ca-insurance-review` were released by hand (see [Insurance stack cut-over](#insurance-stack-cut-over-2026-10-23)). A workflow build of `api` has no data overlay, so releasing it before the cleanup work lands would replace the live department project names with the ones in `data/northwind/company.yaml`. The automatic release after CI on `main` (gated by the `NORTHWIND_DEPLOY_ENABLED` repository variable) selects every service when `scripts/` or the workflows change. | After the cleanup work lands (it removes the overlay), release the three apps through the workflow. A release changes only the image and build metadata, so the guard variables and `NORTHWIND_MCP_INSURANCE_ONLY` carry over, as they did for the legacy apps. |
+| Finish the `insurance-resource-cleanup` work | **Landed from that branch:** the live project names (`data/northwind/company.yaml`, the Bicep defaults, the reuse-mode check, the API default), the live knowledge connection name `nw-insurance-claims-kb-mcp` (the hosted agent also still accepts the original `northwind-insurance-kb-mcp`) and the matching policy-wording prompt text. So the API no longer needs the data overlay, and the policy-wording agent can be rebuilt from `main`. **Not landed, still only on the unmerged branch `zacharyzurlo-microsoft-insurance-resource-cleanup`:** strict four-project department routing (it also reverts #70's acceptance of both flagship names), the `insurance_mode` activation guard with verification receipts in `release-app.py`, `scripts/verify-insurance-fleet.py`, and hosted-source provenance hashing. They are built on the retired business-domain switch and the old azd agent services, so they need re-expressing before they can land. | Decide whether the activation guard and verification script are still wanted; if so, port them onto the current names. Then rebuild the API from `main` without the overlay (see the release row below). |
+| The other three hosted agents (`...-triage`, `...-policy-wording`, `...-orchestrator`) | They never call an MCP app, so the lock-down does not touch them; their version-1 environment still lists the direct MCP URLs, unused. | Redeploy from `main` with the same environment (the policy-wording prompt text and connection name now match what version 1 runs). |
+| Release the insurance apps from the workflow | `deploy-apps.yml` and `scripts/release-app.py` now cover all five `ca-insurance-*` apps, but the live `ca-insurance-api`, `ca-insurance-lookup` and `ca-insurance-review` were released by hand (see [Insurance stack cut-over](#insurance-stack-cut-over-2026-10-23)) and the live API image still carries the data overlay. A workflow build of `api` now gets the live department project names from `data/northwind/company.yaml`, so it no longer needs the overlay, but it has not been canaried. The automatic release after CI on `main` (gated by the `NORTHWIND_DEPLOY_ENABLED` repository variable; as of 2026-10-23 the `northwind-apps` environment has no required reviewer, so nothing waits for an approval) selects every service when `scripts/` or the workflows change. | Canary an `api` build from `main` on a throwaway copy of the live app first, then release the three apps through the workflow. A release changes only the image and build metadata, so the guard variables carry over, as they did for the legacy apps. |
 
 ## Not verified live yet
 

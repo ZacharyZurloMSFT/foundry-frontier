@@ -5,7 +5,7 @@ tagline: "Policyholder intake, claim-status conversations and adjuster handoff."
 pillar: voice_live
 icon: "📞"
 brand_color: "#6a1b9a"
-foundry_project: nw-contact-center
+foundry_project: nw-insurance-contact-center
 search_index: nw-contact-center
 cu_inbox_prefix: contact-center
 enabled_tabs: [voice_console]

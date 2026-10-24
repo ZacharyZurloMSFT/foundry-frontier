@@ -5,7 +5,7 @@ tagline: "Grounded adjuster procedures, evidence handling and review boundaries.
 pillar: rag
 icon: "📚"
 brand_color: "#2e7d32"
-foundry_project: nw-employee-help-desk
+foundry_project: nw-insurance-support
 search_index: nw-insurance-adjuster-support
 cu_inbox_prefix: adjuster-support
 enabled_tabs: [adjuster_support]

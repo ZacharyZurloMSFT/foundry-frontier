@@ -46,11 +46,12 @@ names the files that hold the alias maps):
   groups `rg-northwind-*` and the Foundry project names
   ([api-management.md](../api-management.md#what-exists-in-rg-northwind-apps),
   [architecture.md](../architecture.md#data-stores)).
-- **Foundry project names.** Configuration values bound to the live deployment, not product names. `company.yaml`,
-  the Bicep default and the reuse-mode check use `northwind-orders` for the flagship; the API and
-  `scripts/deploy-hosted-agents.py` also accept `nw-insurance-claims` (`INSURANCE_PROJECTS` in
-  [`insurance.py`](../../apps/api/app/insurance.py)). Which names exist in a tenant is an operator fact this
-  repository cannot verify ([departments.md](../departments.md#the-four-departments),
+- **Foundry project names.** Configuration values, not product names: `company.yaml`, the Bicep defaults, the
+  reuse-mode check and the API default use the live names (`nw-insurance-claims`, `nw-insurance-support`,
+  `nw-insurance-documents`, `nw-insurance-contact-center`). The original native flagship project `northwind-orders`
+  is still accepted by the API, `scripts/deploy-hosted-agents.py` and `scripts/validate-reuse.py`
+  (`INSURANCE_PROJECTS` in [`insurance.py`](../../apps/api/app/insurance.py)). Which names exist in a tenant is an
+  operator fact this repository cannot verify ([departments.md](../departments.md#the-four-departments),
   [gotchas](gotchas/names-and-retired-vocabulary.md)).
 - **The `northwind` stack is not managed here.** The earlier stack (its Container Apps, API Management APIs
   `northwind-*`, AI Gateway tool servers, Foundry agents and Search indexes) is not deployed, released or tested by
