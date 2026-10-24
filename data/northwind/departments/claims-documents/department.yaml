@@ -5,7 +5,7 @@ tagline: "FNOL reports, repair estimates, supporting invoices and damage evidenc
 pillar: content_understanding
 icon: "📄"
 brand_color: "#ef6c00"
-foundry_project: nw-claims-warranty
+foundry_project: nw-insurance-documents
 search_index: nw-claims
 cu_inbox_prefix: claims-documents
 enabled_tabs: [claims_inbox]

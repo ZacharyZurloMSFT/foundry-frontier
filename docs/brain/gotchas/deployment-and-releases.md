@@ -62,11 +62,11 @@ short and cite a source.
   aborts it part-way; an abort does not advance the baseline, so the next release covers it (check that it
   passed). Sources: [`release-app.py`](../../../scripts/release-app.py),
   [`deploy-apps.yml`](../../../.github/workflows/deploy-apps.yml).
-- **Live apps were released by hand, canary-first; do not release `api` from the workflow yet.** The workflow now
-  covers all five `ca-insurance-*` apps, but the live API image carries a data overlay with the live department
-  project names that a workflow build lacks, so releasing it before the `insurance-resource-cleanup` work lands
-  would swap them for the names in `company.yaml`. A CI `api` image once made `/health` report
-  `insurance_agent_runtime_ready: false` (`main` then hard-coded the original project name; `INSURANCE_PROJECTS`
-  now accepts both). Canary on a throwaway copy of the live app and keep the previous digest. Sources:
-  [insurance cut-over](../../api-management.md#insurance-stack-cut-over-2026-10-23),
+- **Live apps were released by hand, canary-first; canary an `api` build from `main` before releasing it.** The
+  workflow now covers all five `ca-insurance-*` apps, but the live API image was built from `main` plus a data
+  overlay carrying the live department project names, and no workflow build has been canaried against it yet. The
+  overlay's content is now in `data/northwind/company.yaml`, so a new build no longer needs it. A CI `api` image
+  once made `/health` report `insurance_agent_runtime_ready: false` (`main` then hard-coded the original project
+  name; `INSURANCE_PROJECTS` now accepts both). Canary on a throwaway copy of the live app and keep the previous
+  digest. Sources: [insurance cut-over](../../api-management.md#insurance-stack-cut-over-2026-10-23),
   [Remaining steps](../../api-management.md#remaining-steps).

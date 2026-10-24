@@ -11,7 +11,7 @@ param acrLoginServer string
 
 param foundryEndpoint string
 param foundryProjectEndpoint string
-param insuranceProjectName string = 'northwind-orders'
+param insuranceProjectName string = 'nw-insurance-claims'
 param hostedAgentsEnabled bool = false
 @description('JSON string mapping department slug -> Foundry project endpoint. The API parses this at startup and picks the right endpoint per X-Department header. The claims-concierge entry = foundryProjectEndpoint.')
 param foundryProjectEndpoints string = ''

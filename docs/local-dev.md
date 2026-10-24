@@ -105,13 +105,13 @@ as an explicit "unavailable" state rather than a fallback.
 ```dotenv
 # Insurance runtime gate. Chat, /handoff and voice need ALL of these, and only after the
 # hosted agents are deployed and verified. The project name must be one the code accepts
-# (northwind-orders or nw-insurance-claims) and match the end of FOUNDRY_PROJECT_ENDPOINT,
-# which is the value azd outputs (.../api/projects/<INSURANCE_PROJECT_NAME>).
-INSURANCE_PROJECT_NAME=northwind-orders
+# (nw-insurance-claims or the original northwind-orders) and match the end of
+# FOUNDRY_PROJECT_ENDPOINT, which is the value azd outputs (.../api/projects/<INSURANCE_PROJECT_NAME>).
+INSURANCE_PROJECT_NAME=nw-insurance-claims
 HOSTED_AGENTS_ENABLED=true
 NORTHWIND_INSURANCE_AGENTS_READY=true
 FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID=northwind-insurance-orchestrator
-FOUNDRY_PROJECT_ENDPOINT=<project endpoint from azd, ending in /api/projects/northwind-orders>
+FOUNDRY_PROJECT_ENDPOINT=<project endpoint from azd, ending in /api/projects/nw-insurance-claims>
 
 # Adjuster support: grounded RAG over nw-insurance-adjuster-support
 ADJUSTER_SUPPORT_ENABLED=true

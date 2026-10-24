@@ -25,7 +25,7 @@
 #      Foundry project connection (for example nw-claims-kb-mcp) with the
 #      fresh Search admin key so the prompt agents' knowledge-base MCP
 #      tools keep working. The isolated insurance connection
-#      northwind-insurance-kb-mcp belongs to publish-insurance-knowledge.py
+#      nw-insurance-claims-kb-mcp belongs to publish-insurance-knowledge.py
 #      and is not touched.
 #
 # If you only need one of the steps, run the underlying script directly.

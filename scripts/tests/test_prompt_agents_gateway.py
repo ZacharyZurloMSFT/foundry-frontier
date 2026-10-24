@@ -425,7 +425,7 @@ def test_alias_maps_are_parsed_identically_by_the_agent_and_connection_scripts(r
 # --- knowledge-base MCP tools through the gateway tool servers -----------------------------------------
 
 KB = "northwind-insurance-kb"
-KB_CONNECTION = "northwind-insurance-kb-mcp"
+KB_CONNECTION = "nw-insurance-claims-kb-mcp"
 KB_TOOLSERVER = "https://ai-gateway-northwind.azure-api.net/default/toolservers/northwind-insurance-knowledge/mcp"
 KB_ROUTES = json.dumps({KB: {"toolserver": "northwind-insurance-knowledge", "connection": "nw-insurance-kb-gw"}})
 

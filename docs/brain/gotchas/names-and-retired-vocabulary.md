@@ -27,9 +27,12 @@ entry short and cite a source.
   `data/seed/`, `data/golden/` and `agents/` so `azd up` never breaks; the other three departments live under
   `data/northwind/departments/<slug>/` (real paths: [`company.yaml`](../../../data/northwind/company.yaml)). Source:
   [data/northwind/README.md](../../../data/northwind/README.md#why-claims-concierge-points-at-top-level-paths).
-- **The flagship Foundry project name is not settled by the repository.** `company.yaml`, the Bicep default and the
-  reuse-mode check pin one name; the API and `scripts/deploy-hosted-agents.py` accept two (`INSURANCE_PROJECTS` in
-  `apps/api/app/insurance.py`), and [ai-gateway.md](../../ai-gateway.md#live-inventory) records different
-  (`nw-insurance-*`) names for the live deployment as of 2026-10-22. The repository cannot verify which is live, so
-  do not align one side as a drive-by fix. Sources: [glossary](../glossary.md#naming-lineage),
+- **The repository uses the live Foundry project names and still accepts the original flagship name.**
+  `company.yaml`, the Bicep defaults, the reuse-mode check and the API default use `nw-insurance-claims` (and
+  `nw-insurance-support`, `nw-insurance-documents`, `nw-insurance-contact-center`). The API,
+  `scripts/deploy-hosted-agents.py` and `scripts/validate-reuse.py` also accept the original native project
+  `northwind-orders`, and the hosted policy-wording agent accepts both knowledge connection names
+  (`nw-insurance-claims-kb-mcp`, `northwind-insurance-kb-mcp`). The repository cannot verify which names exist in a
+  tenant (see [ai-gateway.md](../../ai-gateway.md#live-inventory)), so do not drop an accepted alias as a drive-by
+  cleanup. Sources: [glossary](../glossary.md#naming-lineage),
   [departments.md](../../departments.md#the-four-departments).

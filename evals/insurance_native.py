@@ -22,9 +22,9 @@ from evals.insurance_review import (
     verify_code_lineage, verify_pack, verify_receipt, write_new,
 )
 
-ENDPOINT = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/northwind-orders"
+ENDPOINT = "https://aisvc-zurlo-northwind.services.ai.azure.com/api/projects/nw-insurance-claims"
 TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
-PREFIX = "azureai://accounts/aisvc-zurlo-northwind/projects/northwind-orders/data/"
+PREFIX = "azureai://accounts/aisvc-zurlo-northwind/projects/nw-insurance-claims/data/"
 PROMPTS = {"triage": "triage.yaml", "lookup": "policy_claim_lookup.yaml", "policy_wording": "policy_wording.yaml"}
 
 

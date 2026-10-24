@@ -29,7 +29,9 @@ IDENTITY_KEYS = (
     "HOSTED_AGENTS_ENABLED",
 )
 FOUNDRY_ACCOUNT_NAME = "aisvc-zurlo-northwind"
-INSURANCE_PROJECT_NAME = "northwind-orders"  # live status of the project name is unverified; never invent another
+INSURANCE_PROJECT_NAME = "nw-insurance-claims"  # the live flagship project and the default for new environments
+# The original native project stays valid so azd environments created before the live names landed keep passing.
+INSURANCE_PROJECT_NAMES = (INSURANCE_PROJECT_NAME, "northwind-orders")
 # Canonical setting -> deprecated alias that azd environments created before the insurance-only cleanup still carry.
 # The canonical name wins; the alias is only a fallback and is never written.
 DEPRECATED_ALIASES = {
@@ -112,9 +114,10 @@ def validate_reuse_environment(env: Mapping[str, str]) -> list[str]:
     ready = env.get("NORTHWIND_INSURANCE_AGENTS_READY", "false")
     project_name = setting(env, "INSURANCE_PROJECT_NAME", INSURANCE_PROJECT_NAME)
     configuration_errors = []
-    if mode == "true" and project_name != INSURANCE_PROJECT_NAME:
+    if mode == "true" and project_name not in INSURANCE_PROJECT_NAMES:
         configuration_errors.append(
-            f"Reuse mode must retain INSURANCE_PROJECT_NAME={INSURANCE_PROJECT_NAME}; do not target a legacy project."
+            "Reuse mode must retain INSURANCE_PROJECT_NAME=" + " or ".join(INSURANCE_PROJECT_NAMES)
+            + "; do not target a legacy project."
         )
     if ready not in ("true", "false"):
         configuration_errors.append("NORTHWIND_INSURANCE_AGENTS_READY must be exactly true or false.")

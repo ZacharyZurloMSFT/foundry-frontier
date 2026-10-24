@@ -67,6 +67,8 @@ GATEWAY_NAME = "ai-gateway-northwind"
 MCP_GATEWAY_ROLES = ("policy-claim-lookup", "policy-wording")
 # The live insurance fleet runs in nw-insurance-claims; northwind-orders is the original native project.
 INSURANCE_PROJECTS = ("northwind-orders", "nw-insurance-claims")
+# The live knowledge connection is project-derived; the original connection name stays accepted.
+INSURANCE_KB_CONNECTIONS = ("nw-insurance-claims-kb-mcp", "northwind-insurance-kb-mcp")
 GATEWAY_MODEL_SETTINGS = ("AGENT_MODEL_GATEWAY_ENDPOINT", "AGENT_MODEL_GATEWAY_MODEL",
                           "AGENT_MODEL_GATEWAY_DEPLOYMENT")
 
@@ -270,7 +272,7 @@ def deploy(args):
         connection = environment.get("AGENT_KB_CONNECTION") or environment.get("AGENT_KB_CONNECTION_NAME", "")
         if (environment.get("AZURE_SEARCH_KNOWLEDGE_BASE") != "northwind-insurance-kb"
                 or environment.get("AZURE_SEARCH_INDEX") != "northwind-insurance-knowledge"
-                or connection.rsplit("/", 1)[-1] != "northwind-insurance-kb-mcp"):
+                or connection.rsplit("/", 1)[-1] not in INSURANCE_KB_CONNECTIONS):
             raise ValueError("Insurance policy wording requires its explicit insurance KB, index and connection; "
                              "no other knowledge base can be substituted.")
     credential_source = getattr(args, "credential_source", "cli")

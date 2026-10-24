@@ -14,7 +14,7 @@ Connection names are account-scoped, so each KB gets its own, `<kb>-mcp`
 (for example `nw-claims-kb-mcp`), pointing at that department's KB.
 
 Claims Concierge (the isolated `northwind-insurance-kb` and its
-`northwind-insurance-kb-mcp` connection) is published by
+`nw-insurance-claims-kb-mcp` connection) is published by
 `scripts/publish-insurance-knowledge.py`, and Adjuster Support has no
 knowledge base, so both are skipped here.
 

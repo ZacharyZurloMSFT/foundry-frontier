@@ -75,10 +75,10 @@ def test_insurance_knowledge_is_explicit_and_never_substituted():
         **ENV, "AGENT_ROLE": "policy-wording", "AZURE_SEARCH_ENDPOINT": "https://existing.search.invalid",
         "AZURE_SEARCH_KNOWLEDGE_BASE": "northwind-insurance-kb",
         "AZURE_SEARCH_INDEX": "northwind-insurance-knowledge",
-        "AGENT_KB_CONNECTION": "northwind-insurance-kb-mcp",
+        "AGENT_KB_CONNECTION": "nw-insurance-claims-kb-mcp",
     }
     spec = Settings.from_env(env).knowledge_spec()
-    assert spec["project_connection_id"] == "northwind-insurance-kb-mcp"
+    assert spec["project_connection_id"] == "nw-insurance-claims-kb-mcp"
     assert "/knowledgebases/northwind-insurance-kb/mcp?" in spec["url"]
     for key, value in (("AZURE_SEARCH_KNOWLEDGE_BASE", "other-kb"),
                        ("AZURE_SEARCH_INDEX", "other-knowledge"),

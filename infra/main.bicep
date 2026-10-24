@@ -13,8 +13,8 @@ param location string = 'canadacentral'
 @description('AI region — Foundry AI Services (Voice Live, Agent Service, models) and Azure AI Search. Private endpoints for these still land in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
 param aiLocation string = 'eastus2'
 
-@description('Insurance project within the existing shared Foundry account. The value is bound to the live deployment; the default stays northwind-orders.')
-param insuranceProjectName string = 'northwind-orders'
+@description('Insurance claims project within the existing shared Foundry account. The default is the live project name; the original native project northwind-orders is still accepted by the API and the hosted-agent deploy script.')
+param insuranceProjectName string = 'nw-insurance-claims'
 @description('Use the independently hosted insurance agents after they have been deployed.')
 @allowed(['true', 'false'])
 param hostedAgentsEnabled string = 'true'
@@ -89,23 +89,23 @@ param additionalModelDeployments array = []
 @allowed(['true', 'false'])
 param harnessEnabled string = 'false'
 
-@description('Additional Foundry projects — one per Northwind department beyond the claims concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`. The project names are bound to the live deployment and are not renamed.')
+@description('Additional Foundry projects — one per Northwind department beyond the claims concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`. The project names match the live deployment.')
 param additionalProjects array = [
   {
     slug: 'adjuster-support'
-    projectName: 'nw-employee-help-desk'
+    projectName: 'nw-insurance-support'
     displayName: 'Northwind Adjuster Support'
     description: 'RAG-only Foundry project for adjuster support: grounded answers about claims handling procedures, evidence handling and review boundaries. It cannot approve, deny or pay a claim.'
   }
   {
     slug: 'claims-documents'
-    projectName: 'nw-claims-warranty'
+    projectName: 'nw-insurance-documents'
     displayName: 'Northwind Claims Documents'
     description: 'Content Understanding project for claim documents: FNOL reports, repair estimates, supporting invoices and damage evidence. Owns the nw-claims Search index, the northwindInsuranceClaimsV1 Content Understanding analyzer, and the northwind-claims-triage prompt agent.'
   }
   {
     slug: 'contact-center'
-    projectName: 'nw-contact-center'
+    projectName: 'nw-insurance-contact-center'
     displayName: 'Northwind Policyholder Contact Center'
     description: 'Voice Live front door project for policyholder intake, claim status and adjuster handoff. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the claims concierge orchestrator.'
   }

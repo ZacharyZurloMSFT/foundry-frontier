@@ -27,11 +27,11 @@ SEARCH_ENDPOINT = f"https://{SEARCH_SERVICE}.search.windows.net"
 INDEX_NAME = "northwind-insurance-knowledge"
 SOURCE_NAME = "northwind-insurance-knowledge-ks"
 KB_NAME = "northwind-insurance-kb"
-CONNECTION_NAME = "northwind-insurance-kb-mcp"
+CONNECTION_NAME = "nw-insurance-claims-kb-mcp"
 PROJECT_ID = (
     f"/subscriptions/{SUBSCRIPTION}/resourceGroups/rg-northwind-ai"
     "/providers/Microsoft.CognitiveServices/accounts/aisvc-zurlo-northwind"
-    "/projects/northwind-orders"
+    "/projects/nw-insurance-claims"
 )
 SEARCH_API = "2026-05-01-preview"
 ARM_API = "2025-10-01-preview"

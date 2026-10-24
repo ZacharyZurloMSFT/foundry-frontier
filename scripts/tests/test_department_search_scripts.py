@@ -23,9 +23,9 @@ create_indexes = load("create_department_indexes_departments", "create-departmen
 SEARCH = "https://search.example.net"
 DEPARTMENTS = (
     ("claims-concierge", "northwind-insurance-knowledge", "northwind-orders"),
-    ("adjuster-support", "nw-insurance-adjuster-support", "nw-employee-help-desk"),
-    ("claims-documents", "nw-claims", "nw-claims-warranty"),
-    ("contact-center", "nw-contact-center", "nw-contact-center"),
+    ("adjuster-support", "nw-insurance-adjuster-support", "nw-insurance-support"),
+    ("claims-documents", "nw-claims", "nw-insurance-documents"),
+    ("contact-center", "nw-contact-center", "nw-insurance-contact-center"),
 )
 ENDPOINTS = {slug: f"https://aisvc.cognitiveservices.azure.com/api/projects/{project}"
              for slug, _, project in DEPARTMENTS}

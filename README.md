@@ -18,7 +18,7 @@ One shared Foundry AI Services account hosts one project per department: model
 deployments, identity and observability are shared; agents, connections and
 evaluators are per project. The manifest is
 [`data/northwind/company.yaml`](./data/northwind/company.yaml); the Foundry project
-names in it are bound to the live deployment and are not renamed. See
+names in it are the live deployment's names. See
 [`docs/departments.md`](./docs/departments.md).
 
 | Department (slug) | Pillar | What it does | Portal tab |
@@ -355,7 +355,7 @@ azd provision                                         # validates, then only rea
 | `AZURE_LOG_ANALYTICS_RESOURCE_GROUP`, `AZURE_CONTAINER_APPS_ENVIRONMENT_RESOURCE_GROUP`, `AZURE_VNET_RESOURCE_GROUP` | Optional; default to the apps, apps and networking groups |
 | `AZURE_COSMOS_PRIVATE_ENDPOINT_NAME` | Optional; default `pe-zz-cosmos-northwind` (in the networking group) |
 | `AZURE_LEGACY_RESOURCE_GROUP` | Omit or leave empty; a deprecated label, never a resource selector |
-| `INSURANCE_PROJECT_NAME` | Must keep the project name bound to the live deployment (pinned in `scripts/validate-reuse.py`) |
+| `INSURANCE_PROJECT_NAME` | `nw-insurance-claims` (the live project) or the original `northwind-orders`; the default is `nw-insurance-claims` (`INSURANCE_PROJECT_NAMES` in `scripts/validate-reuse.py`) |
 | `AZURE_AI_PROJECT_ID` | `/subscriptions/<id>/resourceGroups/<foundry group>/providers/Microsoft.CognitiveServices/accounts/aisvc-zurlo-northwind/projects/<INSURANCE_PROJECT_NAME>` |
 | `HOSTED_AGENTS_ENABLED` | Exactly `true` or `false` |
 | Preserved azd outputs | Present and non-blank: `FOUNDRY_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINT`, `AZURE_AI_PROJECT_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINTS`, `AGENT_OPENAI_ENDPOINT`, `AZURE_OPENAI_ENDPOINT`, `AGENT_KB_CONNECTION_NAME`, `FOUNDRY_KB_CONNECTION_NAME`, `FOUNDRY_PLANNER_DEPLOYMENT`, `FOUNDRY_WORKER_DEPLOYMENT`, `FOUNDRY_PROMPT_AGENT_DEPLOYMENT`, `FOUNDRY_EMBEDDING_DEPLOYMENT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `COSMOS_DATABASE`, `STORAGE_CU_CONTAINER`, `STORAGE_SEED_CONTAINER` |
@@ -470,7 +470,7 @@ The full feature-switch table is in
 | `AZURE_ENV_NAME`, `AZURE_LOCATION`, `AZURE_AI_LOCATION` | required, `canadacentral`, `eastus2` | Environment name; compute and network region; Foundry and Cosmos DB region |
 | `AZURE_PRINCIPAL_ID` | empty | User granted data-plane roles for local development |
 | `NORTHWIND_REUSE_EXISTING_RESOURCES` | `false` | `true` selects reference-only adoption |
-| `INSURANCE_PROJECT_NAME` | project bound to the live deployment | Flagship Foundry project that hosts the hosted agents |
+| `INSURANCE_PROJECT_NAME` | `nw-insurance-claims` | Flagship Foundry project that hosts the hosted agents (the original `northwind-orders` is still accepted) |
 | `HOSTED_AGENTS_ENABLED` | `true` | Use the hosted insurance agents |
 | `NORTHWIND_INSURANCE_AGENTS_READY` | `false` | Operator-confirmed readiness; enables agent inference |
 | `FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID` | empty | Deployed orchestrator; must start with `northwind-insurance-` when readiness is `true` |
