@@ -22,6 +22,14 @@ and cite a source.
 - **Versions are immutable; the selector controls traffic.** A new version of a pinned agent takes no traffic until
   `update_details` switches it, and switching back is the rollback; the runtime principal belongs to the agent, so
   no new role assignments are needed. [`deploy-hosted-agents.py`](../../../scripts/deploy-hosted-agents.py) switches
-  immediately and accepts only the five standard roles. The two insurance roles that call MCP servers must keep
-  `MCP_GATEWAY_CONNECTION` and the gateway URLs on every new version, or the locked apps answer 401. Source:
+  immediately and accepts only the five standard roles. Claim-action drafting must keep
+  `MCP_GATEWAY_CONNECTION` and its classic gateway URL on every new version, or the locked app answers 401.
+  Lookup and wording now use their AI Gateway MCP connections instead. Source:
   [insurance cut-over](../../api-management.md#insurance-stack-cut-over-2026-10-23).
+
+- **An environment flag is not proof an older deployed runtime implements it.** The older hosted bundle
+  ignored `AI_GATEWAY_REQUIRED` and the MCP gateway route configuration. Check source and selected-version responses:
+  `model_gateway_required=true`, `mcp_route=ai-gateway`, and the **exact** namespaced tool name.
+  `knowledge_base_retrieve` misleadingly starts with `knowledge_`, but only
+  `knowledge_knowledge_base_retrieve` proves that gateway namespace. Preserve canonical prompts when
+  reconciling runtime modules. Source: [live rollout evidence](../../ai-gateway.md#live-rollout-evidence-and-rollback).

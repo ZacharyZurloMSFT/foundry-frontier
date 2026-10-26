@@ -2,7 +2,7 @@
 
 How Northwind sends model inference and MCP traffic through the Azure API Management **AI Gateway tier** instance `ai-gateway-northwind`, what is verified live, what is deliberately not routed, and how to roll it out and roll it back.
 
-> **Current status (live Azure checked 2026-10-26):** the API model route is enabled and required; all five active hosted-agent versions have model-gateway endpoint/provider/alias settings, but lack `AI_GATEWAY_REQUIRED`, so those deployments do not fail closed. Their MCP calls still use classic `apim-northwind`; only lookup and claim-action draft have MCP connections. Prompt-agent models remain direct. Two insurance MCP servers are managed by this repository; the claim-review server is now observed but unmanaged because the AI Gateway drops its required workflow-binding header. The live AI Gateway supports metrics, but logs were not yet visible in Log Analytics after a synthetic model request. See [Current demo readiness](#current-demo-readiness) for verified blockers and the policy boundary.
+> **Current status (live rollout 2026-10-26):** all five hosted agents now require the AI Gateway for models. Policy/claim lookup and policy wording also require its MCP routes; claim-action drafting keeps classic APIM so workflow-binding headers survive. The unsafe OpenAPI facade and the two retired non-insurance knowledge registrations are blocked, not deleted. Both managed MCP servers have inline request-rate policies. Classic APIM apply completed, and model/MCP logs are now visible in Log Analytics. Prompt-agent models remain direct; end-to-end distributed trace correlation is not yet proven.
 
 The repo keeps AI Gateway rollout opt-in; a fresh `azd up` is unchanged. The runbook and historical inventory below retain dated deployment evidence. Azure writes are deliberately separate from ordinary deployment and use reviewed plan/apply scripts.
 
@@ -12,11 +12,46 @@ The repo keeps AI Gateway rollout opt-in; a fresh `azd up` is unchanged. The run
 |---|---|---|
 | Gateway and models | `ai-gateway-northwind` is `Succeeded` (SKU `AIGateway`); all six expected model registrations are present. A minimal synthetic `gpt-5.4-mini` chat request through the gateway returned HTTP 200. | Model route works. |
 | Insurance API | `/insurance/gateway/status` through `apim-northwind` returned 200 with `enabled=true`, `required=true`, all reported API model features on `gateway`, and `problem=null`. The direct Container App URL returned 401 `gateway_required`. | API inference is routed and fail-closed. |
-| Hosted agents | All five current versions are active and have `ORDERS_MODEL_GATEWAY_*` settings that resolve to the AI Gateway. None has `AI_GATEWAY_REQUIRED=true`. The two MCP-connected roles (policy/claim lookup and claim-action draft) use the `nw-insurance-claims-apim-mcp` classic APIM connection; the remaining three do not have an MCP connection. Live code fingerprints differ from the repository bundle, so do not redeploy these agents from this checkout until their source is reconciled. | Gateway settings are present, but actual model routing was not verified per live agent; routing is not fail-closed and tools are not using the AI Gateway. |
+| Hosted agents | Active selected versions: triage **3**, policy/claim lookup **4**, policy wording **4**, claim-action draft **3**, orchestrator **3**. Successful responses from each selected version report gateway inference and `model_gateway_required=true`. | Model routing and fail-closed runtime guards are verified. Lookup and wording also use gateway MCP; drafting stays on classic APIM. |
 | Prompt agents | Current prompt-agent models cannot consume the AI Gateway's `provider/registration` alias and remain direct. | Explicit exception; no safe gateway route is established. |
-| AI Gateway MCP | The managed lookup and knowledge servers are configured. `tools/list` returned 403 for the current caller, which has Models User but not Tools User. Tools User grants access to all published tool servers. The live `northwind-api` server includes HITL decide/delete operations, so do not grant broad tool access or create agent runtime keys until that exposure is narrowed. | MCP use is blocked on safe access/governance. Review/draft is deliberately unmanaged; it requires a workflow-binding header the AI Gateway drops and stays on classic APIM. |
-| Policies | `workspaces/default/policies` returned `MethodNotAllowedInPricingTier`; the live AIGateway tier exposes no standard APIM policy resource. | Keep API/MCP policies on classic `apim-northwind` (BasicV2): its existing policies include CORS, rate limits, optional JWT validation, subscription-key enforcement, and the APIM-to-app managed-identity token. Do not claim those are AI Gateway policies. |
-| Observability | Gateway diagnostic settings enable `GatewayLogs`, `GatewayLlmLogs`, `GatewayMCPLogs`, and `AllMetrics`, targeting `log-zurlo-northwind` in `rg-northwind-apps`. A successful model request was recorded by the Azure Monitor `Requests` metric, but the queried Log Analytics tables returned no rows yet. | Aggregate metrics are demoable; log/trace ingestion and correlation are not yet proven. |
+| AI Gateway MCP | Lookup v4 returned `lookup_lookup_claim`; wording v4 returned `knowledge_knowledge_base_retrieve`, both successfully with `mcp_route=ai-gateway`. Dedicated key `insurance-demo-agents` is held only in project connections `nw-insurance-aigw-lookup` / `nw-insurance-aigw-kb`. The unsafe facade and retired knowledge servers return MCP `AccessBlockedByGateway`. | Compatible MCP routes work. Keys remain gateway-wide: keep unsafe servers blocked. Drafting remains a deliberate classic-APIM exception. |
+| Policies | Standard `workspaces/default/policies` still rejects operations, but **inline `properties.policies` on tool-server resources works**. Both managed MCP servers round-trip `requestRateLimit`, `callsPerPeriod=120`, `periodSeconds=60`, `counterKey=["identity"]`, `scope=resource`. An isolated one-per-minute canary returned 200 then 429 on read-only `tools/call`, with `Retry-After: 49`; the canary was then removed. | AI Gateway inline policies are applied and invocation rate enforcement is proven. `tools/list` alone did not exercise the counter. These are not classic APIM XML policies. Classic APIM policies were also applied successfully. |
+| Observability | Model/token rows and MCP rows now ingest into `ApiManagementGatewayLlmLog` and `ApiManagementGatewayMCPLog` in `log-zurlo-northwind`. Model rows include actual `gpt-4o` / `gpt-5.4` provider traffic from this rollout. | Gateway metrics and logs are demoable. Application-to-gateway distributed trace correlation still needs separate proof. |
+
+### Live rollout evidence and rollback
+
+Classic APIM [apply run 40358557741](https://github.com/ZacharyZurloMSFT/foundry-frontier/actions/runs/40358557741)
+completed successfully, including its public smoke job, after the normal environment approval.
+It used the reviewed plan from run `40356515644` at main `844da45d759dc2168ab3652739f4fa56d1bdebff`.
+No existing Azure resource was deleted or renamed; blocked MCP registrations still appear in the portal.
+
+The deployed agents contained two runtime generations. Setting a flag on the older generation was
+**not** enough: it ignored both the fail-closed flags and the new MCP route. Triage, wording and
+orchestrator were therefore reconciled by copying only four runtime modules (`config`, `main`,
+`runtime`, `tools`) from the already-deployed lookup/draft generation. Their prompts and all other
+archive entries remain byte-identical to their original deployment. Reconciled archive SHA-256:
+`52be62362a623877db071780c91969fb695599bdb11dd9bf42ab28580889ede6`.
+Lookup and drafting retain their original `b3bff914...` source archive. This is not a blanket
+redeployment of the repository bundle.
+
+One synthetic request-evidence draft was saved to confirm the classic-APIM workflow-binding path;
+it remains pending human approval with `execution_status=not_executed`. No claim was approved,
+denied, settled or paid.
+
+Initial agent selector rollback targets are triage **1**, lookup **2**, wording **1**, drafting **2**,
+and orchestrator **1**. Roll back selectors before changing or removing the new MCP connections/key.
+Restoring a server's `accessState` from `blocked` to `active` is reversible but reopens its exposure;
+never unblock the unsafe facade while agent runtime credentials can reach it.
+The release manifest now owns the two inline rate policies and detects their drift; additional live
+policy types are a conflict rather than silently removed.
+
+Gateway log ingestion includes successful `tools/call` rows for `lookup_claim` at
+`2026-10-26T16:50:23Z` and `knowledge_base_retrieve` at `2026-10-26T16:57:32Z`, on the corresponding
+insurance tool-server endpoints. These log rows name the backend tool; the hosted response names
+the gateway-prefixed tool. Inline policy types are documented in the
+[Azure API specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/apimanagement/resource-manager/Microsoft.ApiManagement/AIGateway/AIGatewayModel.tsp);
+support on this live preview was established by apply/readback and the isolated invocation canary,
+not inferred from the newer specification alone.
 
 ### Demo telemetry queries
 
@@ -147,7 +182,7 @@ Historical deployment snapshot from 2026-10-22/23, superseded for current state 
 | Traffic | Route | Notes |
 |---|---|---|
 | Hosted agent inference | client-side gateway (`AGENT_MODEL_GATEWAY_*`) | `AI_GATEWAY_REQUIRED=true` makes direct paths a startup error |
-| Hosted MCP tools | **Currently `apim-northwind`; no hosted agent currently uses an AI Gateway MCP tool server** | The AI Gateway lookup/knowledge registrations are configured but agent routes are not deployed; avoid runtime keys while `northwind-api` exposes decide/delete operations |
+| Hosted MCP tools | **Lookup and wording through AI Gateway; drafting through classic APIM** | Lookup/knowledge use dedicated project connections and require the gateway. Unsafe/retired servers stay blocked. |
 | Hosted claim-action draft MCP (`claim-action-draft`) | **`apim-northwind`, never the AI Gateway** (direct calls are rejected since 2026-10-23) | Needs application-bound headers the AI Gateway drops; the live `northwind-insurance-review` registration is observed but unmanaged and rejects calls by design |
 | Prompt agent inference | **direct (cannot be routed today)** | Foundry rejects the gateway's `provider/registration` aliases as model ids (finding 9) |
 | Prompt agent knowledge-base MCP | the KB's gateway tool server, connection holding the runtime key | `AI_GATEWAY_MCP_KB_ROUTES`; a KB without a route stays on Search unless `AI_GATEWAY_MCP_REQUIRED` |
@@ -254,7 +289,11 @@ The preset gives the API app identity **AI Gateway Models User** only: the app c
 
 ### 3. Foundry connections
 
-**Blocked as of 2026-10-26:** do not create a runtime key or agent MCP connection yet. The gateway key grants access across the published tool servers, and observed `northwind-api` currently includes HITL decide/delete operations. First narrow or remove that exposure through a separately reviewed change, then re-verify the published tool set and key scope. The commands below are the later setup procedure, not approval to run them now.
+**Live rollout 2026-10-26:** `northwind-api` and the retired knowledge registrations were blocked
+and their data-plane denial verified before storing the dedicated `insurance-demo-agents` runtime key
+in `nw-insurance-aigw-lookup` / `nw-insurance-aigw-kb`. The commands below remain an alternative
+setup procedure, not a reason to create duplicate keys/connections. A newly created key initially
+returned 401 while configuration propagated; bounded retries with the same key succeeded.
 
 The runtime key is gateway-wide (finding 6), so after those prerequisites create a dedicated named key rather than reusing `master`:
 
@@ -310,7 +349,7 @@ python scripts/deploy-hosted-agents.py --role policy-claim-lookup `
   --requirements agents/hosted/requirements.txt --config hosted-gateway.json --output .release-state/policy-claim-lookup.json
 ```
 
-That is a dry run; it validates the gateway settings before any network call and prints the plan. Add `--apply` to deploy only after reconciling the live hosted-agent source fingerprints with this checkout; the current five live agent bundles differ from the repository bundle, so do not deploy these versions from this checkout yet. For a compatible, verified source, deploy `policy-claim-lookup` and `policy-wording` first and run an end-to-end claim through them (the canary); then the other three (`triage`, `claim-action-draft`, `orchestrator`) with `AI_GATEWAY_REQUIRED` only. `claim-action-draft` reaches its claim-review MCP through `apim-northwind` with `MCP_GATEWAY_CONNECTION` ([api-management.md](./api-management.md); live since 2026-10-23, and the direct URL is rejected now that the app is locked); it never uses the AI Gateway (finding 1). On the live insurance project `policy-claim-lookup` takes the same `apim-northwind` route, so leave its entry out of the `AGENT_MCP_GATEWAY` example above, because configuring both routes for one role is a startup error. The script accepts the two project names bound to the live deployment, `northwind-orders` and `nw-insurance-claims`; the endpoint and the ARM id must name the same project (checked with `--apply`).
+That is a dry run; it validates the gateway settings before any network call and prints the plan. Add `--apply` only after reconciling the live source fingerprints with this checkout; the selected bundles still differ from the repository bundle. See the live rollout evidence above for the source-preserving reconciliation actually used. `claim-action-draft` keeps `MCP_GATEWAY_CONNECTION` and classic `apim-northwind`, never the AI Gateway, because the workflow-binding header must survive. Lookup now uses the AI Gateway instead: remove its classic `MCP_GATEWAY_CONNECTION` when configuring that route; both routes for one role are a startup error. The script accepts the two project names bound to the live deployment, `northwind-orders` and `nw-insurance-claims`; the endpoint and ARM id must name the same project (checked with `--apply`).
 
 ### 6. Prompt agents
 

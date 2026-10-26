@@ -9,6 +9,7 @@ server are checked or reported, never modified, and this script has no delete op
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import json
 import os
@@ -48,7 +49,7 @@ SECRET_VALUE = re.compile(r"\$\{[A-Z][A-Z0-9_]{0,63}\}")
 ENDPOINT_NAMES = ("chat/completions", "responses", "embeddings")
 FAILURE_MODES = ("failClosed", "failOpen")
 TRANSPORTS = ("streamableHttp", "sse")
-SERVER_KEYS = {"displayName", "description", "failureMode", "endpoints", "expectedTools"}
+SERVER_KEYS = {"displayName", "description", "failureMode", "endpoints", "expectedTools", "policies"}
 ENDPOINT_KEYS = {"kind", "namespace", "required", "mcp", "credentials"}
 NAMED_SECTIONS = {
     "observed": ({"reason", "concern", "forbiddenToolPatterns"}, {"reason"}),
@@ -171,6 +172,19 @@ def _check_tool_servers(servers) -> None:
         _text(entry["displayName"], f"{where}.displayName")
         _text(entry["description"], f"{where}.description")
         _require(entry["failureMode"] in FAILURE_MODES, f"{where}.failureMode must be one of {', '.join(FAILURE_MODES)}.")
+        policies = entry["policies"]
+        _require(isinstance(policies, list) and len(policies) == 1,
+                 f"{where}.policies must contain one resource requestRateLimit policy.")
+        policy = policies[0]
+        _require(isinstance(policy, dict) and set(policy) == {
+            "type", "scope", "callsPerPeriod", "periodSeconds", "counterKey"
+        } and policy["type"] == "requestRateLimit" and policy["scope"] == "resource",
+                 f"{where}.policies supports only a resource requestRateLimit with explicit counterKey.")
+        _require(all(type(policy[field]) is int and policy[field] > 0
+                     for field in ("callsPerPeriod", "periodSeconds")),
+                 f"{where}.policies rate and period must be positive integers.")
+        _require(policy["counterKey"] == ["identity"],
+                 f"{where}.policies.counterKey must be ['identity'].")
         endpoints = entry["endpoints"]
         _require(isinstance(endpoints, list) and endpoints, f"{where}.endpoints must be a non-empty list.")
         namespaces = [_check_endpoint(endpoint, f"{where}.endpoints[{index}]") for index, endpoint in enumerate(endpoints)]
@@ -282,7 +296,7 @@ def desired_properties(entry: dict, environ=None) -> dict:
             "credentials": credentials,
         })
     return {"type": "mcp", "displayName": entry["displayName"], "description": entry["description"],
-            "failureMode": entry["failureMode"], "endpoints": endpoints}
+            "failureMode": entry["failureMode"], "endpoints": endpoints, "policies": copy.deepcopy(entry["policies"])}
 
 
 def comparable(properties: dict) -> dict:
@@ -300,7 +314,7 @@ def comparable(properties: dict) -> dict:
         })
     return {"type": properties.get("type"), "displayName": properties.get("displayName"),
             "description": properties.get("description"), "failureMode": properties.get("failureMode"),
-            "endpoints": endpoints}
+            "endpoints": endpoints, "policies": properties.get("policies") or []}
 
 
 def _endpoint_differences(want: dict, have: dict) -> list[str]:
@@ -319,6 +333,8 @@ def diff_views(desired: dict, live: dict) -> tuple[list[str], list[str]]:
     # so an absent live value is not drift; a returned value that differs still is.
     if live["failureMode"] is not None and live["failureMode"] != desired["failureMode"]:
         differences.append("failureMode")
+    if desired["policies"] != live["policies"]:
+        differences.append("policies")
     unpaired, remaining = [], list(live["endpoints"])
     for want in desired["endpoints"]:
         match = next((have for have in remaining if have["namespace"] == want["namespace"]), None)
@@ -333,6 +349,10 @@ def diff_views(desired: dict, live: dict) -> tuple[list[str], list[str]]:
         else:
             differences.append(f"endpoints[{want['namespace']}]")
     conflicts = [f"endpoints[{have['namespace']}] exists on the live server but not in the manifest" for have in remaining]
+    desired_types = [policy["type"] for policy in desired["policies"]]
+    live_types = [policy.get("type") for policy in live["policies"]]
+    if any(kind not in desired_types for kind in live_types) or len(set(live_types)) != len(live_types):
+        conflicts.append("Live inline policies include additional or duplicate types; review before replacing them")
     return sorted(differences), sorted(conflicts)
 
 
@@ -478,9 +498,6 @@ def check_plan_document(document) -> None:
 
 def put_body(manifest: dict, name: str, environ, live: dict | None) -> dict:
     properties = desired_properties(manifest["toolServers"][name], environ)
-    live_policies = ((live or {}).get("properties") or {}).get("policies")
-    if live_policies:
-        properties["policies"] = live_policies
     return {"properties": properties}
 
 
@@ -499,7 +516,8 @@ def apply_plan(runner, manifest: dict, document: dict, environ, *, now=None) -> 
             "The live gateway or the manifest no longer matches the reviewed plan; generate and review a new plan.")
     blocked = [action["name"] for action in current["actions"] if action["action"] == "conflict"]
     if blocked:
-        raise common.GatewayError("Refusing to apply while live tool server(s) have endpoints outside the manifest: "
+        raise common.GatewayError("Refusing to apply while live tool server(s) have endpoints outside the manifest "
+                                  "or additional inline policy types: "
                                   + ", ".join(blocked))
     pending = [action for action in current["actions"] if action["action"] in ("create", "update")]
     bodies = {action["name"]: put_body(manifest, action["name"], environ, live.get(action["name"])) for action in pending}

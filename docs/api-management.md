@@ -83,7 +83,11 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 > `ai-gateway-northwind` resource is SKU `AIGateway`; its workspace `policies` endpoint rejects
 > standard policy operations with `MethodNotAllowedInPricingTier`. Do not describe the classic
 > APIM CORS, rate-limit, optional JWT, subscription-key, or managed-identity policies as AI
-> Gateway policies. See [AI Gateway demo readiness](./ai-gateway.md#current-demo-readiness).
+> Gateway policies. However, inline `properties.policies` on AI Gateway tool-server resources
+> **is supported**: both managed MCP servers now have identity-partitioned request-rate policies
+> (120 requests per 60 seconds). The classic APIM apply and public smoke also completed in
+> [run 40358557741](https://github.com/ZacharyZurloMSFT/foundry-frontier/actions/runs/40358557741).
+> See [AI Gateway demo readiness](./ai-gateway.md#current-demo-readiness).
 
 ## What exists in `rg-northwind-apps`
 

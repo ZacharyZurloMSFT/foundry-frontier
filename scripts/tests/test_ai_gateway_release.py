@@ -254,6 +254,39 @@ def test_expected_tools_are_namespace_prefixed(manifest):
             assert tool == common.prefixed_tool(namespace, base)
 
 
+def test_inline_policies_are_included_in_writes_and_drift_detection(manifest):
+    properties = release.desired_properties(manifest["toolServers"][LOOKUP])
+    assert properties["policies"] == [{
+        "type": "requestRateLimit", "scope": "resource", "callsPerPeriod": 120,
+        "periodSeconds": 60, "counterKey": ["identity"],
+    }]
+    missing = copy.deepcopy(properties)
+    missing.pop("policies")
+    assert release.diff_views(release.comparable(properties), release.comparable(missing)) == (["policies"], [])
+    changed = copy.deepcopy(properties)
+    changed["policies"][0]["callsPerPeriod"] = 121
+    assert release.diff_views(release.comparable(properties), release.comparable(changed)) == (["policies"], [])
+
+
+def test_additional_live_inline_policies_are_a_conflict_not_silently_removed(manifest):
+    properties = release.desired_properties(manifest["toolServers"][LOOKUP])
+    live = copy.deepcopy(properties)
+    live["policies"].append({"type": "ipFilter", "action": "allow", "cidrRanges": ["192.0.2.0/24"]})
+    differences, conflicts = release.diff_views(release.comparable(properties), release.comparable(live))
+    assert differences == ["policies"]
+    assert conflicts and "additional or duplicate" in conflicts[0]
+
+
+@pytest.mark.parametrize("changes", [
+    {"counterKey": []}, {"counterKey": ["identity", "identity"]}, {"callsPerPeriod": 0},
+    {"callsPerPeriod": True}, {"periodSeconds": -1}, {"type": "cors"}, {"scope": "workspace"},
+])
+def test_invalid_inline_policies_are_rejected(manifest, changes):
+    manifest["toolServers"][LOOKUP]["policies"][0].update(changes)
+    with pytest.raises(release.ManifestError, match="policies"):
+        release.validate_manifest(manifest)
+
+
 def _literal_secret(manifest):
     manifest["toolServers"][KNOWLEDGE]["endpoints"][0]["credentials"]["headers"]["api-key"] = ["literal-key-value"]
 
@@ -638,6 +671,7 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     assert gateway.bodies[LOOKUP] == {"properties": {
         "type": "mcp", "displayName": "Northwind insurance lookup",
         "description": manifest["toolServers"][LOOKUP]["description"], "failureMode": "failClosed",
+        "policies": manifest["toolServers"][LOOKUP]["policies"],
         "endpoints": [{"kind": "mcp", "namespace": "lookup", "required": True,
                        "mcp": {"transport": "streamableHttp", "url": "https://apim-northwind.azure-api.net/insurance/mcp/tech-lookup"},
                        "credentials": {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": [APIM_KEY]}}}]}}
@@ -652,16 +686,16 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     assert gateway.methods() == {"GET", "PUT"}
 
 
-def test_apply_updates_with_the_etag_and_preserves_live_policies(manifest, tmp_path):
+def test_apply_updates_with_the_etag_and_reconciles_managed_policies(manifest, tmp_path):
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP, etag="etag-live", displayName="Old name")
     gateway.add(KNOWLEDGE)
-    gateway.servers[LOOKUP]["properties"]["policies"] = [{"kind": "rate-limit"}]
+    gateway.servers[LOOKUP]["properties"]["policies"][0]["callsPerPeriod"] = 121
     plan_path = make_plan(gateway, tmp_path)
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"INSURANCE_AGENTS_KEY": APIM_KEY}) == 0
     (put,) = gateway.puts()
     assert put["headers"] == {"If-Match": "etag-live"}
-    assert gateway.bodies[LOOKUP]["properties"]["policies"] == [{"kind": "rate-limit"}]
+    assert gateway.bodies[LOOKUP]["properties"]["policies"] == manifest["toolServers"][LOOKUP]["policies"]
     assert gateway.bodies[LOOKUP]["properties"]["displayName"] == "Northwind insurance lookup"
 
 
