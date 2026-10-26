@@ -45,6 +45,15 @@
       "displayName": "Northwind insurance lookup",
       "description": "Read-only synthetic insurance policy and claim lookups (ca-insurance-lookup) exposed through the AI Gateway. The app accepts only API Management's gateway token, so the tool server calls it through apim-northwind with the insurance-agents subscription key.",
       "failureMode": "failClosed",
+      "policies": [
+        {
+          "type": "requestRateLimit",
+          "scope": "resource",
+          "callsPerPeriod": 120,
+          "periodSeconds": 60,
+          "counterKey": ["identity"]
+        }
+      ],
       "endpoints": [
         {
           "kind": "mcp",
@@ -71,6 +80,15 @@
       "displayName": "Northwind insurance knowledge",
       "description": "Foundry IQ knowledge base northwind-insurance-kb (Azure AI Search MCP endpoint) exposed through the AI Gateway, which injects a read-only Search query key.",
       "failureMode": "failClosed",
+      "policies": [
+        {
+          "type": "requestRateLimit",
+          "scope": "resource",
+          "callsPerPeriod": 120,
+          "periodSeconds": 60,
+          "counterKey": ["identity"]
+        }
+      ],
       "endpoints": [
         {
           "kind": "mcp",
@@ -95,7 +113,7 @@
   },
   "observed": {
     "northwind-api": {
-      "reason": "OpenAPI facade of the Northwind REST API (23 tools). Read-only here: this unit never modifies it.",
+      "reason": "OpenAPI facade of the Northwind REST API (23 tools). Blocked live on 2026-10-26; this release unit never modifies it.",
       "concern": "Governance: the published operations include the HITL decide and delete operations. Approval and business execution are never agent tools, and every holder of AI Gateway Tools User or a runtime key can call every published tool. Narrow or remove this registration through a separate, reviewed change.",
       "forbiddenToolPatterns": ["decide", "delete"]
     },
