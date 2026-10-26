@@ -1,7 +1,7 @@
 # API Management gateway (`apim-northwind`)
 
 The HTTP APIs of the insurance stack in `rg-northwind-apps` (`ca-insurance-*`) are published
-through the existing Azure API Management instance **`apim-northwind`** (Standard v2, Central
+through the existing Azure API Management instance **`apim-northwind`** (BasicV2, Central
 US, `https://apim-northwind.azure-api.net`). The gateway is **opt-in and off by default**:
 the repository ships the definition, the guarded release pipeline and the cut-over
 tooling, but nothing changes in Azure until an operator runs the steps in
@@ -14,7 +14,7 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 > is the operator runbook for retiring it. Entries marked *legacy stack* below are the
 > 2026-10-22 records of that stack, kept for history.
 
-> **Status (2026-10-23).**
+> **Historical status (2026-10-23).**
 > - **Applied:** `apim-northwind` publishes all 8 APIs (both stacks), 4 products, the 2 agents
 >   subscriptions, the logger and per-API diagnostics. The first two applies ran locally through
 >   the guarded `scripts/apim-release.py` (the pipeline's OIDC identities did not exist yet).
@@ -77,6 +77,13 @@ tooling, but nothing changes in Azure until an operator runs the steps in
 >   servers, and the rest of the insurance-resource-cleanup work (its live project names
 >   have landed in the repository; see the first row of
 >   [Remaining steps](#remaining-steps) and [what is not verified](#not-verified-live-yet)).
+
+> **Current AI Gateway boundary (live checked 2026-10-26):** `apim-northwind` is BasicV2 and
+> remains the policy-enforcement surface for insurance API and MCP ingress. The separate
+> `ai-gateway-northwind` resource is SKU `AIGateway`; its workspace `policies` endpoint rejects
+> standard policy operations with `MethodNotAllowedInPricingTier`. Do not describe the classic
+> APIM CORS, rate-limit, optional JWT, subscription-key, or managed-identity policies as AI
+> Gateway policies. See [AI Gateway demo readiness](./ai-gateway.md#current-demo-readiness).
 
 ## What exists in `rg-northwind-apps`
 
@@ -505,9 +512,11 @@ every entry still has to fall inside the allow-list, which `apim-release.py` enf
   update the Foundry connection and re-run `configure-gateway-apps.py` for the harness
   secret, restart the hosted agents, then rotate the primary. For `insurance` the key sits in
   the connection `nw-insurance-claims-apim-mcp` (project `nw-insurance-claims`), in the secret
-  `mcp-gateway-key` of `ca-insurance-api` and in the credentials of the AI Gateway tool servers
-  `northwind-insurance-lookup` and `-review` (re-run `ai-gateway-release.py plan --refresh-secrets` and
-  `apply` with the new key in `INSURANCE_AGENTS_KEY`, see ai-gateway.md finding 8). Hosted agents resolve the connection once at start-up, so a new version (or a
+  `mcp-gateway-key` of `ca-insurance-api` and in the managed AI Gateway tool-server credential
+  `northwind-insurance-lookup` (re-run `ai-gateway-release.py plan --refresh-secrets northwind-insurance-lookup`
+  and `apply` with the new key in `INSURANCE_AGENTS_KEY`, see ai-gateway.md finding 8).
+  `northwind-insurance-review` is observed/unmanaged and needs a separate reviewed update if
+  retained. Hosted agents resolve the connection once at start-up, so a new version (or a
   restart) is what makes them pick up a new key.
 - **Telemetry:** every API has an `applicationinsights` diagnostic (logger
   `northwind-appinsights`, W3C correlation, no bodies logged) into `appi-zurlo-northwind`.

@@ -33,7 +33,7 @@ KEY_HEADER = {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": ["${INS
 LOOKUP = "northwind-insurance-lookup"
 KNOWLEDGE = "northwind-insurance-knowledge"
 REVIEW = "northwind-insurance-review"
-MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge|review))")
+MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge))")
 MCP_PATH = re.compile(r"/default/toolservers/([a-z0-9-]+)/mcp")
 
 
@@ -182,7 +182,7 @@ def actions_by_name(plan):
 
 
 def test_repository_manifest_defines_the_managed_boundary(manifest):
-    assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE, REVIEW}
+    assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE}
     lookup, knowledge = manifest["toolServers"][LOOKUP], manifest["toolServers"][KNOWLEDGE]
     assert lookup["endpoints"][0]["namespace"] == "lookup" and knowledge["endpoints"][0]["namespace"] == "knowledge"
     assert lookup["endpoints"][0]["mcp"] == {
@@ -195,20 +195,17 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
         "type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
     assert lookup["expectedTools"] == ["lookup_lookup_policy", "lookup_lookup_claim"]
     assert knowledge["expectedTools"] == ["knowledge_knowledge_base_retrieve"]
-    review = manifest["toolServers"][REVIEW]
-    assert review["endpoints"][0]["namespace"] == "review" and review["endpoints"][0]["credentials"] == KEY_HEADER
-    assert review["endpoints"][0]["mcp"]["url"] == "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
-    assert review["expectedTools"] == ["review_draft_claim_action"]
     assert set(manifest["observed"]) == {
-        "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge"}
+        "northwind-api", "northwind-claims-knowledge", "northwind-contact-center-knowledge", REVIEW}
+    assert manifest["observed"][REVIEW]["reason"].find("workflow-binding header") >= 0
     assert manifest["stale"] == {} and manifest["deferred"] == {}
 
 
-def test_review_server_is_registered_but_documents_that_the_gateway_cannot_forward_its_headers(manifest):
-    description = manifest["toolServers"][REVIEW]["description"]
-    assert "x-workflow-id" in description and "deprecated x-orders-workflow" in description
-    assert "does not forward client headers" in description
-    assert "rejected by design" in description and "apim-northwind" in description
+def test_review_server_is_observed_not_managed_because_the_gateway_cannot_forward_its_headers(manifest):
+    assert REVIEW not in manifest["toolServers"]
+    reason = manifest["observed"][REVIEW]["reason"]
+    assert "workflow-binding header" in reason and "apim-northwind" in reason
+    assert "Do not add this endpoint" in reason
     concern = manifest["observed"]["northwind-api"]["concern"].lower()
     assert "decide" in concern and "delete" in concern and "never agent tools" in concern
 
@@ -233,17 +230,16 @@ def test_manifest_urls_are_https_and_placeholders_only_hold_secrets(manifest):
     assert urls and all(urlsplit(url).scheme == "https" for url in urls)
     text = release.DEFAULT_MANIFEST.read_text(encoding="utf-8")
     assert sorted(re.findall(r"\$\{[A-Z0-9_]+\}", text)) == [
-        "${INSURANCE_AGENTS_KEY}", "${INSURANCE_AGENTS_KEY}", "${SEARCH_QUERY_KEY}"]
+        "${INSURANCE_AGENTS_KEY}", "${SEARCH_QUERY_KEY}"]
     assert manifest["gateway"]["url"] == common.GATEWAY_URL
 
 
 def test_the_locked_insurance_apps_are_registered_only_through_api_management(manifest):
-    # ca-insurance-lookup and ca-insurance-review accept only API Management's gateway token (a direct call is
-    # a 401), so a registration on a Container Apps host could never work.
-    for name in (LOOKUP, REVIEW):
-        (endpoint,) = manifest["toolServers"][name]["endpoints"]
-        assert urlsplit(endpoint["mcp"]["url"]).hostname == "apim-northwind.azure-api.net"
-        assert endpoint["credentials"] == KEY_HEADER
+    # ca-insurance-lookup accepts only API Management's gateway token (a direct call is a 401).
+    endpoint = manifest["toolServers"][LOOKUP]["endpoints"][0]
+    assert urlsplit(endpoint["mcp"]["url"]).hostname == "apim-northwind.azure-api.net"
+    assert endpoint["credentials"] == KEY_HEADER
+    assert REVIEW not in manifest["toolServers"]
     hosts = {urlsplit(endpoint["mcp"]["url"]).hostname for entry in manifest["toolServers"].values()
              for endpoint in entry["endpoints"]}
     assert not [host for host in hosts if host.endswith(".azurecontainerapps.io")]
@@ -385,15 +381,15 @@ def test_plan_creates_missing_managed_servers_without_secrets(manifest):
     plan, _ = release.build_plan(gateway, manifest)
     actions = actions_by_name(plan)
     assert {name: action["action"] for name, action in actions.items()} == {
-        LOOKUP: "create", KNOWLEDGE: "create", REVIEW: "create"}
+        LOOKUP: "create", KNOWLEDGE: "create"}
     assert actions[KNOWLEDGE]["requiredEnvironment"] == ["SEARCH_QUERY_KEY"]
     assert actions[LOOKUP]["requiredEnvironment"] == ["INSURANCE_AGENTS_KEY"]
-    assert actions[REVIEW]["requiredEnvironment"] == ["INSURANCE_AGENTS_KEY"]
+    assert REVIEW not in actions
     desired = actions[KNOWLEDGE]["desired"]["endpoints"][0]["credentials"]
     assert desired == {"type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
     assert actions[LOOKUP]["desired"]["endpoints"][0]["credentials"] == KEY_HEADER
     assert re.fullmatch(r"[0-9a-f]{64}", plan["planSha256"])
-    assert plan["summary"]["create"] == 3
+    assert plan["summary"]["create"] == 2
     assert [(call["method"], urlsplit(call["url"]).path.rsplit("/", 1)[-1]) for call in gateway.calls] == [
         ("GET", "toolServers"), ("GET", "models")]
     assert all(call["params"] == {"api-version": common.ARM_API_VERSION} for call in gateway.calls)
@@ -405,10 +401,9 @@ def test_plan_is_noop_when_live_matches_even_though_secrets_are_redacted(manifes
     gateway.redaction = redaction
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
-    gateway.add(REVIEW)
     plan, _ = release.build_plan(gateway, manifest)
-    assert [action["action"] for action in plan["actions"]] == ["noop", "noop", "noop"]
-    assert plan["summary"]["noop"] == 3 and not any(action["differences"] for action in plan["actions"])
+    assert [action["action"] for action in plan["actions"]] == ["noop", "noop"]
+    assert plan["summary"]["noop"] == 2 and not any(action["differences"] for action in plan["actions"])
 
 
 def test_secret_values_alone_never_schedule_an_update(manifest):
@@ -476,11 +471,11 @@ def test_plan_updates_when_managed_fields_differ(manifest, change, difference):
 
 def test_a_service_that_never_returns_failure_mode_is_not_drift(manifest):
     gateway = FakeGateway(manifest)
-    for name in (LOOKUP, KNOWLEDGE, REVIEW):
+    for name in (LOOKUP, KNOWLEDGE):
         gateway.add(name)
         del gateway.servers[name]["properties"]["failureMode"]
     plan, _ = release.build_plan(gateway, manifest)
-    assert [action["action"] for action in plan["actions"]] == ["noop", "noop", "noop"]
+    assert [action["action"] for action in plan["actions"]] == ["noop", "noop"]
     assert not any(action["differences"] for action in plan["actions"])
 
 
@@ -496,16 +491,14 @@ def test_plan_updates_when_header_names_change_but_not_when_values_do(manifest):
 
 def test_the_subscription_key_header_is_compared_by_name_only_and_without_regard_to_case(manifest):
     gateway = FakeGateway(manifest)
-    for name in (LOOKUP, KNOWLEDGE, REVIEW):
+    for name in (LOOKUP, KNOWLEDGE):
         gateway.add(name)
     gateway.servers[LOOKUP]["properties"]["endpoints"][0]["credentials"]["headers"] = {
         "OCP-APIM-SUBSCRIPTION-KEY": ["a-rotated-key"]}
-    gateway.servers[REVIEW]["properties"]["endpoints"][0]["credentials"]["headers"] = {"Authorization": ["***"]}
     plan, _ = release.build_plan(gateway, manifest)
     actions = actions_by_name(plan)
     assert actions[LOOKUP]["action"] == "noop" and "a-rotated-key" not in json.dumps(plan)
-    assert actions[REVIEW]["action"] == "update"
-    assert "endpoints[review].headerNames" in actions[REVIEW]["differences"]
+    assert REVIEW not in actions
 
 
 def test_extra_live_endpoints_are_a_conflict_and_apply_refuses_them(manifest, tmp_path):
@@ -584,7 +577,7 @@ def test_plan_reports_observed_stale_deferred_unlisted_and_model_findings(manife
     assert problems["gpt-5-6-luna"] == ["endpoint embeddings is not expected"]
     assert plan["models"]["unexpected"] == ["surprise-model"]
     assert plan["summary"]["staleNeedingDecision"] == 1 and plan["summary"]["governanceConcerns"] == 1
-    assert [action["action"] for action in plan["actions"]] == ["create", "create", "create"]
+    assert [action["action"] for action in plan["actions"]] == ["create", "create"]
 
 
 def test_model_endpoint_comparison_accepts_the_live_spelling(manifest):
@@ -601,7 +594,6 @@ def test_refresh_secrets_forces_an_update_only_when_requested(manifest, tmp_path
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
-    gateway.add(REVIEW)
     plan_path = make_plan(gateway, tmp_path, "--refresh-secrets", KNOWLEDGE)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     action = actions_by_name(plan)[KNOWLEDGE]
@@ -610,10 +602,10 @@ def test_refresh_secrets_forces_an_update_only_when_requested(manifest, tmp_path
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"SEARCH_QUERY_KEY": SECRET}) == 0
     assert [call["url"].rsplit("/", 1)[-1] for call in gateway.puts()] == [KNOWLEDGE]
     assert gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]["credentials"]["headers"] == {"api-key": [SECRET]}
-    assert release.validate_refresh(manifest, [LOOKUP, KNOWLEDGE, REVIEW]) == [KNOWLEDGE, LOOKUP, REVIEW]
+    assert release.validate_refresh(manifest, [LOOKUP, KNOWLEDGE]) == [KNOWLEDGE, LOOKUP]
     keyless = copy.deepcopy(manifest)
     keyless["toolServers"][LOOKUP]["endpoints"][0]["credentials"] = {"type": "none"}
-    for name, source in ((LOOKUP, keyless), ("not-managed", manifest)):
+    for name, source in ((LOOKUP, keyless), (REVIEW, manifest), ("not-managed", manifest)):
         with pytest.raises(release.ManifestError, match="not a managed tool server with header credentials"):
             release.validate_refresh(source, [name])
 
@@ -638,7 +630,7 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
                environ=ENVIRON)
     assert code == 0
     puts = gateway.puts()
-    assert [call["url"].rsplit("/", 1)[-1] for call in puts] == [KNOWLEDGE, LOOKUP, REVIEW]
+    assert [call["url"].rsplit("/", 1)[-1] for call in puts] == [KNOWLEDGE, LOOKUP]
     assert all(call["params"] == {"api-version": "2025-09-01-preview"} for call in puts)
     assert all(call["headers"] == {"If-None-Match": "*"} for call in puts)
     assert all(urlsplit(call["url"]).path.startswith(f"{common.GATEWAY_ID}/workspaces/default/toolServers/")
@@ -652,16 +644,11 @@ def test_apply_creates_only_the_managed_servers_with_the_contract_body(manifest,
     knowledge = gateway.bodies[KNOWLEDGE]["properties"]["endpoints"][0]
     assert knowledge["credentials"] == {"type": "header", "headers": {"api-key": [SECRET]}}
     assert knowledge["mcp"]["url"].endswith("/knowledgebases/northwind-insurance-kb/mcp?api-version=2026-05-01-preview")
-    review = gateway.bodies[REVIEW]["properties"]
-    assert review["failureMode"] == "failClosed" and review["description"] == manifest["toolServers"][REVIEW]["description"]
-    assert review["endpoints"][0]["namespace"] == "review"
-    assert review["endpoints"][0]["credentials"] == {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": [APIM_KEY]}}
-    assert review["endpoints"][0]["mcp"]["url"] == "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["complete"] is True and receipt["kind"] == "ai-gateway-release-receipt"
     assert receipt["planSha256"] == json.loads(plan_path.read_text(encoding="utf-8"))["planSha256"]
     assert [(row["name"], row["outcome"], row["converged"]) for row in receipt["results"]] == [
-        (KNOWLEDGE, "applied", True), (LOOKUP, "applied", True), (REVIEW, "applied", True)]
+        (KNOWLEDGE, "applied", True), (LOOKUP, "applied", True)]
     assert gateway.methods() == {"GET", "PUT"}
 
 
@@ -669,7 +656,6 @@ def test_apply_updates_with_the_etag_and_preserves_live_policies(manifest, tmp_p
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP, etag="etag-live", displayName="Old name")
     gateway.add(KNOWLEDGE)
-    gateway.add(REVIEW)
     gateway.servers[LOOKUP]["properties"]["policies"] = [{"kind": "rate-limit"}]
     plan_path = make_plan(gateway, tmp_path)
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", environ={"INSURANCE_AGENTS_KEY": APIM_KEY}) == 0
@@ -745,7 +731,6 @@ def test_apply_with_nothing_to_do_writes_nothing(manifest, tmp_path):
     gateway = FakeGateway(manifest)
     gateway.add(LOOKUP)
     gateway.add(KNOWLEDGE)
-    gateway.add(REVIEW)
     plan_path = make_plan(gateway, tmp_path)
     receipt_path = tmp_path / "receipt.json"
     assert run(gateway, "apply", "--plan", str(plan_path), "--yes", "--receipt", str(receipt_path)) == 0
@@ -782,7 +767,7 @@ def test_apply_leaves_observed_stale_and_unlisted_servers_and_models_untouched(m
     plan_path = make_plan(gateway, tmp_path, "--manifest", str(manifest_path))
     assert run(gateway, "apply", "--plan", str(plan_path), "--manifest", str(manifest_path), "--yes",
                environ=ENVIRON) == 0
-    assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE, REVIEW}
+    assert {call["url"].rsplit("/", 1)[-1] for call in gateway.puts()} == {LOOKUP, KNOWLEDGE}
     for name, item in before.items():
         assert gateway.servers[name] == item
     assert gateway.models == models_before
@@ -861,7 +846,7 @@ def test_secrets_never_reach_outputs_receipts_plans_or_argv(manifest, tmp_path, 
         assert secret in json.dumps(gateway.bodies)
         assert secret not in json.dumps([{key: value for key, value in call.items() if key != "body"}
                                          for call in gateway.calls])
-    assert APIM_KEY in json.dumps(gateway.bodies[LOOKUP]) and APIM_KEY in json.dumps(gateway.bodies[REVIEW])
+    assert APIM_KEY in json.dumps(gateway.bodies[LOOKUP])
     assert SECRET in json.dumps(gateway.bodies[KNOWLEDGE])
 
 
@@ -921,7 +906,7 @@ def test_verify_sends_only_initialize_and_tools_list_with_the_gateway_token_scop
     gateway = FakeGateway(manifest)
     code, _ = verify(gateway, capsys)
     assert code == 0
-    assert [call["body"]["method"] for call in gateway.calls] == ["initialize", "tools/list"] * 3
+    assert [call["body"]["method"] for call in gateway.calls] == ["initialize", "tools/list"] * 2
     for call in gateway.calls:
         assert call["method"] == "POST" and call["scope"] == "https://azure-api.net/aigateway/.default"
         assert call["headers"] == {"Accept": "application/json, text/event-stream", "Content-Type": "application/json",
