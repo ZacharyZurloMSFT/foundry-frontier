@@ -91,31 +91,6 @@
       "expectedTools": [
         "knowledge_knowledge_base_retrieve"
       ]
-    },
-    "northwind-insurance-review": {
-      "displayName": "Northwind insurance review",
-      "description": "Claim-action drafts for human review (ca-insurance-review), reached through apim-northwind with the insurance-agents subscription key. The server only accepts a draft from the application that owns the workflow (x-workflow-id, or the deprecated x-orders-workflow, must equal workflow_id) and the AI Gateway does not forward client headers, so calls made through this tool server are rejected by design. Callers that need to draft use apim-northwind directly, as the hosted claim-action-draft agent does.",
-      "failureMode": "failClosed",
-      "endpoints": [
-        {
-          "kind": "mcp",
-          "namespace": "review",
-          "required": true,
-          "mcp": {
-            "transport": "streamableHttp",
-            "url": "https://apim-northwind.azure-api.net/insurance/mcp/work-order"
-          },
-          "credentials": {
-            "type": "header",
-            "headers": {
-              "Ocp-Apim-Subscription-Key": ["${INSURANCE_AGENTS_KEY}"]
-            }
-          }
-        }
-      ],
-      "expectedTools": [
-        "review_draft_claim_action"
-      ]
     }
   },
   "observed": {
@@ -129,6 +104,9 @@
     },
     "northwind-contact-center-knowledge": {
       "reason": "Working Search knowledge-base MCP server (nw-contact-center-kb) that predates this unit."
+    },
+    "northwind-insurance-review": {
+      "reason": "The live claim-action draft server is intentionally unmanaged here: the AI Gateway drops the workflow-binding header it requires, so the agent must use apim-northwind instead. Do not add this endpoint as an agent tool unless the workflow binding can be preserved and verified."
     }
   },
   "stale": {},
