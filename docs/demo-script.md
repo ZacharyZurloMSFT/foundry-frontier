@@ -4,16 +4,19 @@ The whole demo runs against one deployment of the insurance stack (five apps, fi
 agents). Two browser tabs open before you start:
 
 - **Tab A**: the policyholder voice front door (`WEB_VOICE_URI`, the `ca-insurance-voice` app)
-- **Tab B**: the Northwind portal (`WEB_PORTAL_URI`, the `ca-insurance-portal` app), on the
-  four department tiles
+- **Tab B**: the Northwind portal (`WEB_PORTAL_URI`, the `ca-insurance-portal` app), signed in
+  to **My account** as an adjuster
 
 Both are `azd` outputs ([`README.md`](../README.md#configuration-reference)). The default portal
-build opens on the public Northwind Insurance site; staff reach the department tiles through
-**My account → Sign in with Microsoft → AI workspace**, which needs the Entra setup described in the
-README, *Portal, business API and evidence*. A build with `VITE_INSURANCE_BUSINESS_ENABLED=false`
+build opens on the public Northwind Insurance site. **My account → Sign in with Microsoft**
+needs the Entra setup described in the README, *Portal, business API and evidence*. There is no
+separate AI workspace: use **Claim queue** for embedded Claims Concierge and adjuster guidance,
+**Document review** for extraction, **Claim reviews** for preparing and reviewing drafts, and
+**Contact center** for voice intake and handoff. A build with `VITE_INSURANCE_BUSINESS_ENABLED=false`
 (the local `npm run dev` recipe in [`local-dev.md`](./local-dev.md)) opens directly on the
-tiles. Everything below starts from the tiles, and `?dept=<slug>` deep-links to one. The portal
-remembers the last department you opened, so press **← Departments** if it does not open on the tiles.
+tiles for standalone local development only. The department/side-bar terminology in the detailed
+pillar walkthroughs below refers to that standalone view; on the signed-in portal use the
+task sections mapped above instead. Do not look for department tiles in My account.
 
 ```mermaid
 flowchart LR
@@ -49,7 +52,7 @@ alone does not enable them.
    source identifiers and prompt/model provenance. Ask an unsupported question: expect a
    no-match response, not a model-memory answer or a search of staff procedures.
 5. Sign out. Explain that conversations are owner- and surface-bound. Staff still have
-   their workbench and **AI workspace**, with the hosted-agent, voice and approval flows
+   their workbench, with contextual claim assistance and task-specific hosted-agent, voice and approval flows
    below; the embedded policyholder assistant has no draft, approval or payment tool.
 
 ## The records you will use
@@ -367,5 +370,6 @@ With Entra sign-in configured and a seeded run (README, *Portal, business API an
 portal's **My account** shows what the server-assigned role allows. A policyholder sees **Policies**,
 **My claims** and **Report a loss**. An adjuster sees the **Claim queue** with **View case**, and for
 each case the evidence tasks, notes, timeline and **Adjuster actions** (**Move workflow**, **Create
-evidence task**, **Add case note**, **Assign case**), plus the **AI workspace** with the tiles used
-above. None of it sends a message or decides coverage.
+evidence task**, **Add case note**, **Assign case**). Claims Concierge and adjuster guidance
+sit inside the claim queue and case; document extraction, draft reviews and contact-center work
+have their own task sections rather than an AI workspace. None of it sends a message or decides coverage.

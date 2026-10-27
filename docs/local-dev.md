@@ -51,8 +51,9 @@ Serves on `http://localhost:5173`.
 
 The portal has two shells. Unless `VITE_INSURANCE_BUSINESS_ENABLED` is `"false"`, it opens
 the **business-first portal** (public insurer pages and a Microsoft Entra sign-in for
-policyholders, adjusters and presenters; staff reach the department workspace through
-**My account → AI workspace**). Without the `VITE_INSURANCE_AUTH_TENANT_ID`,
+policyholders, adjusters and presenters; adjusters use contextual assistance in **Claim queue**
+and direct **Document review**, **Claim reviews** and **Contact center** sections, with no
+separate AI workspace). Without the `VITE_INSURANCE_AUTH_TENANT_ID`,
 `VITE_INSURANCE_AUTH_CLIENT_ID`, `VITE_INSURANCE_AUTH_SCOPE` and `VITE_INSURANCE_RUN_ID`
 values it shows "My account is unavailable" and no sign-in is simulated. Setting the flag to
 `"false"` skips sign-in and lands on the **department tiles** (Claims Concierge, Adjuster
@@ -184,7 +185,9 @@ not a gateway alias; the shared adapter resolves its alias and never falls back 
 inference on gateway failure. The assistants do not require the hosted-fleet readiness
 flag and cannot draft or approve claim actions. Sign in as a policyholder to see Claims
 Concierge beside policies, claims and the loss form, plus Help Center. Staff retain their
-existing workbench and AI workspace. Availability comes from the authenticated
+existing services through contextual claim assistance and task-specific workbench sections.
+Those staff tools use their existing readiness switches, not the policyholder assistant flags.
+Policyholder assistant availability comes from the authenticated
 `GET /api/v1/assistants/status`; configuration alone is not a cloud smoke test.
 
 Resource limits are configurable: `NORTHWIND_ASSISTANT_TIMEOUT_SECONDS` (60),

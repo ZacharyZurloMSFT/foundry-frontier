@@ -62,7 +62,7 @@ flowchart LR
 | `api` | `apps/api` | `ca-insurance-api` | FastAPI: claims-concierge chat stream, handoff, human approvals, records and drafts, adjuster support, claim documents, Voice Live proxy, Copilot SDK harness, adjuster-workbench business API |
 | `mcp-policy-lookup` | `apps/mcp-policy-lookup` | `ca-insurance-lookup` | MCP server with the read-only tools `lookup_policy` and `lookup_claim` |
 | `mcp-claim-review` | `apps/mcp-claim-review` | `ca-insurance-review` | MCP server with `draft_claim_action`, which writes the human-review queue |
-| `web-portal` | `apps/web-portal` | `ca-insurance-portal` | React/Vite app served by nginx: policyholder portal, adjuster workbench and the staff AI workspace |
+| `web-portal` | `apps/web-portal` | `ca-insurance-portal` | React/Vite app served by nginx: policyholder portal and task-oriented adjuster workbench |
 | `web-voice` | `apps/web-voice` | `ca-insurance-voice` | React/Vite Voice Live intake app served by nginx |
 
 The five apps are declared in `azure.yaml` and `infra/modules/containerapps.bicep`; their
@@ -147,7 +147,7 @@ sequenceDiagram
 ## Embedded policyholder assistants
 
 The signed-in policyholder portal adds a separate, **read-only** assistant path; it does
-not replace the hosted orchestrator, staff AI workspace, voice, harness or approval flow.
+not replace the hosted orchestrator, staff claim tools, voice, harness or approval flow.
 `apps/api/app/assistants` serves `GET /api/v1/assistants/status` and
 `POST /api/v1/assistants/{surface}/chat`. Both use the business API's verified delegated
 Entra identity and `X-Demo-Run`; only policyholders can chat.
@@ -409,8 +409,15 @@ Cases follow `reported` to `evidence_requested` to `evidence_received` to `adjus
 to `customer_update_prepared` (with loops back to `evidence_requested`), and every command
 carries the case version so a stale write is refused. Adjusters create evidence tasks and
 notes (internal or customer-visible), assign cases and move the workflow; none of it sends
-a message or decides coverage. Staff roles also see the **AI workspace** (the department
-shell), which receives the portal's access token.
+a message or decides coverage. There is no separate AI workspace in the signed-in journey.
+Adjusters use Claims Concierge draft assistance and procedural guidance inside **Claim queue**
+and case detail, plus **Document review**, **Claim reviews** (prepare, pending, reviewed) and
+**Contact center**. Existing tools receive the portal's access token only after staff identity
+verification; unopened assistance disclosures do not mount their tools or fetch in the background.
+After opening, collapsing a disclosure preserves its in-memory conversation until navigation or sign-out.
+Staff draft assistance uses the synthetic insurance tools, not an automatically attached
+connected-case snapshot. Policyholders keep the separately scoped assistant surfaces, and
+presenters see read-only procedural guidance but no staff mutation tools.
 
 ## Foundry projects
 

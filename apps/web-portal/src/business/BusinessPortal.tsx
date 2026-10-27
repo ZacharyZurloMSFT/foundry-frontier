@@ -1,4 +1,4 @@
-import { ReactNode, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BusinessApi, BusinessError } from "./api";
 import { getInsuranceAuth, InsuranceAuth } from "./auth";
 import { BusinessConfig, businessTheme, readBusinessConfig } from "./config";
@@ -9,10 +9,30 @@ import ReportLoss from "./ReportLoss";
 import { ErrorNotice, Loading } from "./shared";
 import { AssistantProvider } from "./assistants/AssistantContext";
 import HelpCenter, { HelpTabButton } from "./HelpCenter";
+import { StaffTaskContent, StaffToolsProvider } from "./StaffTools";
 import "./business.css";
 
-type AccountTab = "policies" | "claims" | "report" | "help" | "ai";
-const StaffWorkspace = lazy(() => import("./StaffWorkspace"));
+export type AccountTab = "policies" | "claims" | "report" | "help" | "documents" | "reviews" | "contact";
+export function accountTabFor(role: Identity["role"], tab: AccountTab): AccountTab {
+  if (tab === "documents" || tab === "reviews" || tab === "contact") return role === "adjuster" ? tab : "policies";
+  return (tab === "report" || tab === "help") && role !== "policyholder" ? "claims" : tab;
+}
+export function AccountNavigation({ role, tab, onOpen }: { role: Identity["role"]; tab: AccountTab; onOpen: (tab: AccountTab) => void }) {
+  const active = accountTabFor(role, tab);
+  return <nav aria-label="Account navigation" className="business-account-nav">
+    <button aria-current={active === "policies" ? "page" : undefined} onClick={() => onOpen("policies")}>Policies</button>
+    <button aria-current={active === "claims" ? "page" : undefined} onClick={() => onOpen("claims")}>{role === "policyholder" ? "My claims" : "Claim queue"}</button>
+    {role === "policyholder" && <>
+      <button aria-current={active === "report" ? "page" : undefined} onClick={() => onOpen("report")}>Report a loss</button>
+      <HelpTabButton active={active === "help"} onOpen={() => onOpen("help")} />
+    </>}
+    {role === "adjuster" && <>
+      <button aria-current={active === "documents" ? "page" : undefined} onClick={() => onOpen("documents")}>Document review</button>
+      <button aria-current={active === "reviews" ? "page" : undefined} onClick={() => onOpen("reviews")}>Claim reviews</button>
+      <button aria-current={active === "contact" ? "page" : undefined} onClick={() => onOpen("contact")}>Contact center</button>
+    </>}
+  </nav>;
+}
 interface Intent { tab: AccountTab; revision: number }
 function useBusinessTheme() {
   useEffect(() => {
@@ -119,17 +139,15 @@ function AccountWorkspace({ api, auth, revision, intent }: { api: BusinessApi; a
   if (loading) return <Loading>Verifying your account with the insurance service…</Loading>;
   if (!identity) return <><ErrorNotice error={error} /><button onClick={() => setReload(v => v + 1)}>Retry account verification</button><p>No records or roles are inferred from a demo persona.</p></>;
   const isStaff = identity.role !== "policyholder";
-  const activeTab: AccountTab = (tab === "report" || tab === "help") && isStaff ? "claims" : tab === "ai" && !isStaff ? "policies" : tab;
-  return <AssistantProvider key={identity.actor_key} api={api} onError={onError}><div className="business-stack">
+  const activeTab = accountTabFor(identity.role, tab);
+  const content = <div className="business-stack">
     <div className="business-account-meta"><span>Server-authorized role: <strong>{identity.role}</strong></span><span>Run: <code>{identity.run_id}</code></span><span>Source: <code>{identity.source_version}</code></span></div>
-    <nav aria-label="Account navigation" className="business-account-nav">
-      <button aria-current={activeTab === "policies" ? "page" : undefined} onClick={() => setTab("policies")}>Policies</button>
-      <button aria-current={activeTab === "claims" ? "page" : undefined} onClick={() => { setSelected(null); setCreatedNotice(""); setTab("claims"); }}>{identity.role === "policyholder" ? "My claims" : "Claim queue"}</button>
-      {identity.role === "policyholder" && <button aria-current={activeTab === "report" ? "page" : undefined} onClick={() => { setPolicy(null); setTab("report"); }}>Report a loss</button>}
-      {identity.role === "policyholder" && <HelpTabButton active={activeTab === "help"} onOpen={() => setTab("help")} />}
-      {isStaff && <button aria-current={activeTab === "ai" ? "page" : undefined} onClick={() => setTab("ai")}>AI workspace</button>}
-    </nav>
-    {activeTab === "ai" && isStaff && <Suspense fallback={<Loading>Opening the AI workspace…</Loading>}><StaffWorkspace token={auth.token} /></Suspense>}
+    <AccountNavigation role={identity.role} tab={activeTab} onOpen={next => {
+      if (next === "claims") { setSelected(null); setCreatedNotice(""); }
+      if (next === "report") setPolicy(null);
+      setTab(next);
+    }} />
+    {(activeTab === "documents" || activeTab === "reviews" || activeTab === "contact") && <StaffTaskContent key={activeTab} task={activeTab} role={identity.role} />}
     {identity.role === "presenter" && <p className="business-callout">Presenter account · read-only access. Roles and assignments are provided by the server, not selected in this portal.</p>}
     {activeTab === "policies" && <Policies api={api} canReport={identity.role === "policyholder"} onReport={p => { setPolicy(p); setTab("report"); }} onError={onError} />}
     {activeTab === "claims" && <Claims api={api} identity={identity} selected={selected} onSelect={value => { setSelected(value); setCreatedNotice(""); }} createdNotice={createdNotice} onError={onError} />}
@@ -137,7 +155,10 @@ function AccountWorkspace({ api, auth, revision, intent }: { api: BusinessApi; a
     {activeTab === "report" && identity.role === "policyholder" && <ReportLoss api={api} identity={identity} initialPolicy={policy} onClaims={() => { setSelected(null); setTab("claims"); }} onCreated={(claim, replayed, warning) => {
       setSelected(claim); setCreatedNotice(`${replayed ? "Original report recovered" : "Loss report received"} — claim ${claim.claim_id}. The connected case is being read for its current state.${warning ? ` ${warning}` : ""}`); setTab("claims");
     }} onError={onError} />}
-  </div></AssistantProvider>;
+  </div>;
+  return <AssistantProvider key={identity.actor_key} api={api} onError={onError}>
+    {isStaff ? <StaffToolsProvider token={auth.token}>{content}</StaffToolsProvider> : content}
+  </AssistantProvider>;
 }
 function ConfiguredPortal({ config }: { config: BusinessConfig }) {
   const auth = useMemo(() => getInsuranceAuth(config), [config]);

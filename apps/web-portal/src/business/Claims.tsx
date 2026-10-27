@@ -6,6 +6,7 @@ import { PolicyView } from "./Policies";
 import CaseCommands from "./CaseCommands";
 import DocumentsPanel from "./DocumentsPanel";
 import AssistantPanel from "./assistants/AssistantPanel";
+import { StaffClaimAssistance } from "./StaffTools";
 
 export function ClaimDetail({ api, initialClaim, claimId, identity, onError }: {
   api: BusinessApi; initialClaim: ClaimRecord | null; claimId: string; identity: Identity; onError: (error: unknown) => void;
@@ -56,6 +57,7 @@ export function ClaimDetail({ api, initialClaim, claimId, identity, onError }: {
         <p className="business-muted">Evidence is managed below when enabled. Voice is not integrated with this case.</p>
       </article>
       <AssistantPanel surface="concierge" context={{ claim_id: claim.claim_id }} onError={onError} />
+      <StaffClaimAssistance role={identity.role} />
       <DocumentsPanel claim={claim} identity={identity} api={api} caseBusy={busy} caseLocked={locked}
         onCaseChanged={() => setReload(value => value + 1)} onError={onError} />
       <section className="business-panel" aria-labelledby="case-tasks-title"><h3 id="case-tasks-title">Evidence tasks</h3>
@@ -106,6 +108,7 @@ export default function Claims({ api, identity, selected, onSelect, createdNotic
     <div className="business-heading"><div><p className="business-eyebrow">Every case, one clear record</p><h2 id="claims-title">{identity.role === "policyholder" ? "My claims" : "Claim queue"}</h2></div><button disabled={busy} onClick={() => setReload(v => v + 1)}>Refresh claims</button></div>
     <p>{identity.role === "policyholder" ? "Follow your report and see evidence requests and case updates." : "Open a connected case to review evidence, tasks, notes, assignment, and workflow."}</p>
     <AssistantPanel surface="concierge" onError={onError} />
+    <StaffClaimAssistance role={identity.role} />
     <form className="business-lookup" onSubmit={e => { e.preventDefault(); if (lookup.trim()) onSelect(lookup.trim()); }}>
       <label htmlFor="claim-lookup">Find by exact claim number</label><div className="business-actions"><input id="claim-lookup" required maxLength={128} value={lookup} onChange={e => setLookup(e.target.value)} /><button type="submit">Open case</button></div>
     </form>

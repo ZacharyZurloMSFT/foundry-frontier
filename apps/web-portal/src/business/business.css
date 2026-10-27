@@ -198,7 +198,7 @@ html[data-theme="dark"][data-insurance-business="true"] {
 .business-trust li { display: flex; flex-direction: column; gap: 4px; }
 .business-trust strong { font-size: 1.25rem; color: var(--cp-accent); }
 .business-trust span { color: var(--cp-text-muted); font-size: 0.9rem; }
-.business-staff-workspace { border: 1px solid var(--cp-border); border-radius: 12px; overflow: hidden; min-height: 70vh; }
+.business-staff-tool { border: 1px solid var(--cp-border); border-radius: 12px; overflow: auto; height: min(75vh, 60rem); min-height: 28rem; margin-top: 16px; }
 .business-assistant { display: grid; gap: 16px; border-color: var(--cp-accent); }
 .business-assistant > * { margin: 0; }
 .business-assistant .business-heading { margin-bottom: 0; }
