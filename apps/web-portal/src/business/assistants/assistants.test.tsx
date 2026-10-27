@@ -86,6 +86,54 @@ describe("assistant stream", () => {
     await expect(collect(ndjson(...lines(session, ...Array(70).fill({ kind: "tool", name: "t", status: "ok", label: "l" }), done)))).rejects.toThrow(/event limit/);
     await expect(collect(ndjson(JSON.stringify(session) + "\n" + JSON.stringify(done)))).resolves.toHaveLength(2);
   });
+  it.each(["complete", "trailing-event", "transport-error", "oversized-tail"].flatMap(ending =>
+    ["concierge", "help_center"].map(surfaceName => ({ ending, surfaceName }))))("accepts $surfaceName answers only after the whole stream validates: $ending", async ({ ending, surfaceName }) => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    let state = reduce(emptyConversation, { type: "ask", question: "Question" });
+    const states: Conversation[] = [];
+    const consuming = (async () => {
+      try {
+        for await (const event of readEvents(stream)) {
+          state = reduce(state, { type: "event", event });
+          states.push(state);
+        }
+        state = reduce(state, { type: "ended" });
+      } catch (error) {
+        state = reduce(state, { type: "failed", code: "invalid_response", message: String(error) });
+      }
+    })();
+    const help = surfaceName === "help_center";
+    controller.enqueue(encoder.encode(lines(help ? helpSession : session,
+      { kind: "assistant_delta", text: "Candidate answer", agent: "a" },
+      help ? { kind: "sources", sources: [helpSource] } : { kind: "citations", citations: [citation] },
+      help ? helpDone : done).join("")));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const before = state;
+    const html = renderToStaticMarkup(createElement(Turn, { exchange: before.exchanges[0], latest: true, busy: before.busy,
+      label: "Assistant", variant: variantFor(surfaceName), onAgain: noop, onReveal: noop }));
+    if (ending === "transport-error") controller.error(new Error("Connection lost after done"));
+    else {
+      if (ending === "trailing-event") controller.enqueue(encoder.encode(lines({ kind: "tool", name: "t", status: "ok", label: "Late" }).join("")));
+      if (ending === "oversized-tail") controller.enqueue(encoder.encode(" ".repeat(MAX_STREAM_BYTES + 1)));
+      controller.close();
+    }
+    await consuming;
+    expect(before.busy).toBe(true);
+    expect(before.exchanges[0].status).toBe("pending");
+    expect(html).not.toContain("Candidate answer");
+    expect(html).not.toContain("Policy wording cited");
+    expect(html).not.toContain("Help articles quoted");
+    expect(state.busy).toBe(false);
+    if (ending === "complete") {
+      expect(state.exchanges[0]).toMatchObject({ status: "answered", answer: "Candidate answer", error: null,
+        citations: help ? [] : [citation], sources: help ? [helpSource] : [] });
+    } else {
+      expect(states.every(snapshot => snapshot.exchanges[0].status !== "answered")).toBe(true);
+      expect(state.exchanges[0]).toMatchObject({ status: "failed", answer: null, citations: [], sources: [],
+        error: { code: "invalid_response" } });
+    }
+  });
   it("reads a help-center turn that ends in a sources event", async () => {
     const text = lines(helpSession, { kind: "assistant_delta", text: "Here is what the Help Center says:", agent: "a" }, { kind: "sources", sources: [helpSource] }, helpDone).join("");
     const events = await collect(ndjson(text.slice(0, 60), text.slice(60)));

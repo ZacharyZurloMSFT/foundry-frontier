@@ -7,16 +7,17 @@ export interface ChatRequest {
   message: string; session_id?: string; context?: { claim_id?: string; policy_id?: string };
 }
 
-/** Reads a bounded, ordered NDJSON stream: one session first, then events, then exactly one terminal done. */
+/** Reads bounded, ordered NDJSON; done is withheld until EOF validates the entire response. */
 export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<AssistantEvent> {
   const reader = body.getReader(), decoder = new TextDecoder();
-  let buffer = "", bytes = 0, count = 0, started = false, finished = false;
+  let buffer = "", bytes = 0, count = 0, started = false;
+  let terminal: Extract<AssistantEvent, { kind: "done" }> | undefined;
   function* lines(final: boolean): Generator<AssistantEvent> {
     const parts = buffer.split("\n");
     buffer = final ? "" : parts.pop() ?? "";
     for (const line of final ? parts.filter(part => part.trim()) : parts) {
       if (!line.trim()) continue;
-      if (finished) throw new Error("Unexpected assistant data after completion.");
+      if (terminal) throw new Error("Unexpected assistant data after completion.");
       if (++count > MAX_EVENTS) throw new Error("The assistant response exceeded its event limit.");
       let value: unknown;
       try { value = JSON.parse(line); } catch { throw new Error("Invalid assistant event."); }
@@ -24,8 +25,8 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
       if (!started && event.kind !== "session") throw new Error("The assistant response did not start with a session.");
       if (started && event.kind === "session") throw new Error("Unexpected second assistant session.");
       started = true;
-      if (event.kind === "done") finished = true;
-      yield event;
+      if (event.kind === "done") terminal = event;
+      else yield event;
     }
   }
   try {
@@ -37,7 +38,8 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
       yield* lines(done);
       if (done) break;
     }
-    if (!finished) throw new Error("The assistant response was interrupted; nothing was confirmed.");
+    if (!terminal) throw new Error("The assistant response was interrupted; nothing was confirmed.");
+    yield terminal;
   } finally {
     try { await reader.cancel(); } catch { /* the stream already ended */ }
     reader.releaseLock();

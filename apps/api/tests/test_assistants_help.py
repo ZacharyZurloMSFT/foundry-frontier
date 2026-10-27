@@ -1,10 +1,12 @@
 """Customer Help Center through the real ASGI app: scripted search and model, real auth and role gate."""
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from azure.core.credentials import AccessToken
+from azure.identity.aio import ManagedIdentityCredential
 from pydantic import SecretStr
 
 from app import foundry_client
@@ -358,12 +360,28 @@ async def test_entra_authenticated_search_uses_a_scoped_bearer_token_and_never_a
     assert [e["kind"] for e in events_of(await ask(client, identity_))] == ["session", "assistant_delta", "sources", "done"]
     sent = search.requests[0]
     assert sent.headers["authorization"] == "Bearer entra-token" and "api-key" not in sent.headers
-    assert Credential.scopes == ["https://search.azure.com/.default"] and Credential.closed is True
+    assert Credential.scopes == ["https://search.azure.com/.default"] and Credential.closed is False
 
     monkeypatch.setattr(extractive, "_async_credential", lambda: Credential(RuntimeError("token-detail")))
     search.requests.clear()
     failed = await ask(client, identity_)
     assert events_of(failed)[1]["code"] == "assistant_failed" and "token-detail" not in failed.text and search.requests == []
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_the_shared_managed_identity_credential(helping, monkeypatch):
+    helping.help_center_search_auth = "entra_id"
+    # Exercise the real SDK lifecycle, mocking only token acquisition (no Azure calls).
+    async with ManagedIdentityCredential() as credential:
+        token = AsyncMock(return_value=AccessToken("managed-token", 0))
+        monkeypatch.setattr(credential, "get_token", token)
+        monkeypatch.setattr(extractive, "_async_credential", lambda: credential)
+        for _ in range(2):
+            assert await extractive._headers() == {
+                "Content-Type": "application/json", "Authorization": "Bearer managed-token"}
+        await credential.get_token("https://ai.azure.com/.default")
+        assert [call.args for call in token.await_args_list] == [
+            (extractive.SEARCH_SCOPE,), (extractive.SEARCH_SCOPE,), ("https://ai.azure.com/.default",)]
 
 
 @pytest.mark.asyncio

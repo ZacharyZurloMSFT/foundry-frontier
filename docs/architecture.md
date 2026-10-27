@@ -164,6 +164,9 @@ Entra identity and `X-Demo-Run`; only policyholders can chat.
 - **Trust boundary.** Questions, history, records and retrieved articles are untrusted
   data. The server validates identifiers, citations and decision language before saving
   an exchange; neither surface can submit a form, write a business record or decide a claim.
+  The browser withholds the answer and citations until the bounded NDJSON response reaches
+  EOF with exactly one terminal `done`. Trailing data, an oversized response or a transport
+  failure discards the browser's pending answer rather than displaying it as confirmed.
 - **Private history.** Successful exchanges are stored atomically in `conversations`,
   bound to the run, verified subject and surface, with a one-day TTL by default. The
   retained demo session reader cannot retrieve assistant exchanges. Only six prior
@@ -172,7 +175,8 @@ Entra identity and `X-Demo-Run`; only policyholders can chat.
 - **Model routing.** `foundry_client.py` shares main's Entra clients and AI Gateway
   configuration. A selected invalid or required missing gateway fails closed; a gateway
   error never falls back to direct inference. Requests use the gateway alias while
-  UI/history provenance names the deployment and canonical prompt SHA.
+  UI/history provenance names the deployment and canonical prompt SHA. Help Center Search
+  also reuses the shared Entra credential without closing it at the end of a request.
 
 Prompts live in `agents/insurance/assistants/`; the API bundle includes them alongside
 existing harness and adjuster-support prompts. The customer corpus is

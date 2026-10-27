@@ -99,8 +99,8 @@ async def _headers() -> dict[str, str]:
             raise RuntimeError("Explicit read-only Search query key is missing.")
         headers["api-key"] = key
     else:
-        async with _async_credential() as credential:
-            token = await credential.get_token(SEARCH_SCOPE)
+        # Foundry and adjuster support also use this cached credential; a request must not close it.
+        token = await _async_credential().get_token(SEARCH_SCOPE)
         headers["Authorization"] = "Bearer " + token.token
     return headers
 
