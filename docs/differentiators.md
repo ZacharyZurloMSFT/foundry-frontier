@@ -30,6 +30,21 @@ present it.
 
 Legend: ✅ native/GA · ⚠️ preview or partial (needs stitching) · ❌ not offered / DIY.
 
+## Assistance where policyholders already work
+
+The optional **embedded Claims Concierge** sits beside a signed-in policyholder's policies,
+claims and loss form; the **Help Center** sits beside customer help, not staff procedures.
+`apps/api/app/assistants` derives the owner from verified Entra identity and supplies only
+scoped, read-only tools. Record IDs in a prompt never grant access. Help answers are verified
+excerpts from an isolated synthetic customer corpus, with source and prompt provenance visible.
+Neither surface can submit a form, decide a claim or use a staff-wide record tool.
+
+This is application code built on Foundry models, shared gateway routing and Azure AI Search,
+**not** a claim that identity scoping or output validation happens automatically in the platform.
+The offline assistant golden suite tests those boundaries; real identity/model/Search readiness
+must be verified separately before enabling the feature. The existing staff workspace, hosted
+agents, voice front door, harness and four evaluation tiers remain available alongside it.
+
 ## Harness choice without replacing the Foundry platform
 
 The opt-in **Copilot SDK harness** (`COPILOT_HARNESS_ENABLED=true`, `/harness/*`, API only)

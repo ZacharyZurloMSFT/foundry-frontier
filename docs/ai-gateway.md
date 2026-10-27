@@ -189,6 +189,15 @@ Historical deployment snapshot from 2026-10-22/23, superseded for current state 
 | API app inference | `apps/api/app/model_gateway.py` with Entra token | `AI_GATEWAY_MODEL_*` settings; `GET /gateway/status` |
 | Copilot harness inference | SDK provider pointed at the gateway | same settings |
 
+The optional embedded policyholder surfaces (`concierge`, `help_center`) also use API
+app inference through `apps/api/app/foundry_client.py`. They reuse the same Entra client,
+alias mapping and fail-closed settings; they are not hosted agents or direct prompt-agent
+calls. `/gateway/status` reports their routing configuration, while authenticated
+`/api/v1/assistants/status` reports their separate feature availability. Outbound requests
+use aliases; UI/history provenance retains the deployment name. Invalid configuration or
+an upstream error never triggers a direct fallback. This is the code contract, not a claim
+that these opt-in surfaces have been enabled or verified on the live deployment.
+
 ### Configuration contract
 
 All optional; empty means unset and keeps the current direct behaviour (fresh `azd up` is unchanged).

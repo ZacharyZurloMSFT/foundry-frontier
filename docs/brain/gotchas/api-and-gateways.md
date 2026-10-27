@@ -14,6 +14,12 @@ cite a source.
   `infra/live/apim-apis.bicep`, the allow-list and role in `scripts/apim-release.py` and
   `scripts/configure-github-oidc.py`, and the tests together. Source:
   [api-management.md](../../api-management.md#changing-the-api).
+- **A shared conversation container is not a shared authorization boundary.** Embedded assistant exchanges live
+  in `conversations` but are owner/run/surface-bound. The retained demo reader must reject assistant session IDs
+  and exclude private records even in an ordinary session partition. Do not reuse that reader for authenticated
+  assistant history. Sources: [`repositories.py`](../../../apps/api/app/repositories.py),
+  [`history.py`](../../../apps/api/app/assistants/history.py),
+  [assistant route regressions](../../../apps/api/tests/test_assistants_routes.py).
 - **APIM plans are noisy.** Every API, policy and the logger show as *Modify* and product links as *Create* even
   when nothing changed. The real change signal is the diff of
   `infra/live/apim/specs/northwind-api.openapi.json`, and every entry must still fall inside the

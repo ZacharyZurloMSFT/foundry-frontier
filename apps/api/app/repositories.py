@@ -41,12 +41,18 @@ async def append_message(session_id: str, role: str, content: str, meta: dict | 
 
 
 async def load_conversation(session_id: str, limit: int = 50) -> list[dict]:
+    # Embedded assistant exchanges must only be read through their authenticated, owner-bound path.
+    if session_id.startswith("asst-"):
+        return []
     c = await _container("conversations")
-    query = "SELECT * FROM c WHERE c.sessionId = @sid ORDER BY c.ts ASC OFFSET 0 LIMIT @lim"
+    query = ("SELECT * FROM c WHERE c.sessionId = @sid "
+             "AND NOT IS_DEFINED(c.ownerKey) AND NOT IS_DEFINED(c.record_kind) "
+             "ORDER BY c.ts ASC OFFSET 0 LIMIT @lim")
     params = [{"name": "@sid", "value": session_id}, {"name": "@lim", "value": limit}]
     items: list[dict] = []
     async for item in c.query_items(query=query, parameters=params, partition_key=session_id):
-        items.append(item)
+        if "ownerKey" not in item and "record_kind" not in item:
+            items.append(item)
     return items
 
 

@@ -1,7 +1,7 @@
 """Route the API app's model inference through the Azure API Management AI Gateway.
 
-When ``AI_GATEWAY_MODEL_ENDPOINT`` is set, grounded adjuster support and the
-Copilot harness send their model calls to the
+When ``AI_GATEWAY_MODEL_ENDPOINT`` is set, grounded adjuster support, the
+Copilot harness and embedded customer assistants send their model calls to the
 gateway's OpenAI-compatible ``/openai/v1`` surface with an Entra bearer token
 instead of calling the Foundry project directly. The gateway routes on
 ``<provider>/<registration>`` aliases (``aisvc-zurlo-northwind/gpt-5-4``), not on
@@ -32,7 +32,7 @@ from openai import AsyncOpenAI
 from .settings import AI_GATEWAY_DEFAULT_SCOPE as DEFAULT_SCOPE
 from .settings import get_settings
 
-FEATURES = ("adjuster_support", "harness")
+FEATURES = ("adjuster_support", "harness", "concierge", "help_center")
 _ENDPOINT_SUFFIX = "/openai/v1"
 _HOST = re.compile(r"[A-Za-z0-9._-]+")
 _ALIAS = re.compile(r"[^\s/]+/[^\s/]+")
@@ -279,7 +279,7 @@ def status(settings: Any, deployments: Iterable[str] = ()) -> dict[str, Any]:
     except ValueError:
         host = ""
     names = (getattr(settings, "planner_deployment", ""), getattr(settings, "worker_deployment", ""),
-             getattr(settings, "harness_model", ""), *deployments)
+             getattr(settings, "harness_model", ""), getattr(settings, "assistant_model", ""), *deployments)
     aliases: dict[str, str | None] = {}
     if gateway_enabled(settings):
         for name in dict.fromkeys(n for n in names if isinstance(n, str) and n.strip()):

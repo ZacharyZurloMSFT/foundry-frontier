@@ -7,9 +7,11 @@ import Policies from "./Policies";
 import Claims from "./Claims";
 import ReportLoss from "./ReportLoss";
 import { ErrorNotice, Loading } from "./shared";
+import { AssistantProvider } from "./assistants/AssistantContext";
+import HelpCenter, { HelpTabButton } from "./HelpCenter";
 import "./business.css";
 
-type AccountTab = "policies" | "claims" | "report" | "ai";
+type AccountTab = "policies" | "claims" | "report" | "help" | "ai";
 const StaffWorkspace = lazy(() => import("./StaffWorkspace"));
 interface Intent { tab: AccountTab; revision: number }
 function useBusinessTheme() {
@@ -78,7 +80,7 @@ function ClaimsHelp({ onAccount }: { onAccount: () => void }) {
   return <section className="business-copy"><p className="business-eyebrow">When something happens</p><h1>Claims help</h1><p className="business-lead">A conventional, human-led process. No automated coverage or payment decisions.</p>
     <div className="business-panel"><h2>Before reporting a loss</h2><p>In a real emergency, move to safety and contact local emergency services. This synthetic portal is not an emergency service.</p>
       <ol className="business-help-steps"><li>Sign in using the Microsoft account linked to your policyholder record.</li><li>Select the insured vehicle and policy, then enter the loss date, state, incident type, and synthetic facts.</li><li>Submit once. Keep the returned claim number. If the connection fails, check your claims before explicitly retrying the exact report.</li><li>Read your case for evidence requests, human-reviewed updates, and its timeline.</li></ol><button className="business-primary" onClick={onAccount}>Report a synthetic loss</button></div>
-    <aside className="business-callout"><h2>Available here: manual reporting and case tracking</h2><p>Evidence storage and asynchronous processing are available only when explicitly enabled. An assistant and voice are not integrated with this journey. This portal does not send external communications, approve coverage, settle claims, or make payments. A prepared customer update is only an internal workflow stage.</p></aside>
+    <aside className="business-callout"><h2>Available here: manual reporting, case tracking and, when enabled, AI assistants</h2><p>Evidence storage and asynchronous processing are available only when explicitly enabled. When they are enabled for your account, the Help Center inside My account answers general questions from published help articles and cannot see your records, while the Claims Concierge answers questions about your own policies and claims. Neither can change anything or decide coverage, and a person reviews every claim. Voice is not integrated with this journey. This portal does not send external communications, approve coverage, settle claims, or make payments. A prepared customer update is only an internal workflow stage.</p></aside>
   </section>;
 }
 function PortalLayout({ account, authLabel }: { account: (intent: Intent) => ReactNode; authLabel: string }) {
@@ -117,23 +119,25 @@ function AccountWorkspace({ api, auth, revision, intent }: { api: BusinessApi; a
   if (loading) return <Loading>Verifying your account with the insurance service…</Loading>;
   if (!identity) return <><ErrorNotice error={error} /><button onClick={() => setReload(v => v + 1)}>Retry account verification</button><p>No records or roles are inferred from a demo persona.</p></>;
   const isStaff = identity.role !== "policyholder";
-  const activeTab = tab === "report" && !isStaff ? tab : tab === "report" ? "claims" : tab === "ai" && !isStaff ? "policies" : tab;
-  return <div className="business-stack">
+  const activeTab: AccountTab = (tab === "report" || tab === "help") && isStaff ? "claims" : tab === "ai" && !isStaff ? "policies" : tab;
+  return <AssistantProvider key={identity.actor_key} api={api} onError={onError}><div className="business-stack">
     <div className="business-account-meta"><span>Server-authorized role: <strong>{identity.role}</strong></span><span>Run: <code>{identity.run_id}</code></span><span>Source: <code>{identity.source_version}</code></span></div>
     <nav aria-label="Account navigation" className="business-account-nav">
       <button aria-current={activeTab === "policies" ? "page" : undefined} onClick={() => setTab("policies")}>Policies</button>
       <button aria-current={activeTab === "claims" ? "page" : undefined} onClick={() => { setSelected(null); setCreatedNotice(""); setTab("claims"); }}>{identity.role === "policyholder" ? "My claims" : "Claim queue"}</button>
       {identity.role === "policyholder" && <button aria-current={activeTab === "report" ? "page" : undefined} onClick={() => { setPolicy(null); setTab("report"); }}>Report a loss</button>}
+      {identity.role === "policyholder" && <HelpTabButton active={activeTab === "help"} onOpen={() => setTab("help")} />}
       {isStaff && <button aria-current={activeTab === "ai" ? "page" : undefined} onClick={() => setTab("ai")}>AI workspace</button>}
     </nav>
     {activeTab === "ai" && isStaff && <Suspense fallback={<Loading>Opening the AI workspace…</Loading>}><StaffWorkspace token={auth.token} /></Suspense>}
     {identity.role === "presenter" && <p className="business-callout">Presenter account · read-only access. Roles and assignments are provided by the server, not selected in this portal.</p>}
     {activeTab === "policies" && <Policies api={api} canReport={identity.role === "policyholder"} onReport={p => { setPolicy(p); setTab("report"); }} onError={onError} />}
     {activeTab === "claims" && <Claims api={api} identity={identity} selected={selected} onSelect={value => { setSelected(value); setCreatedNotice(""); }} createdNotice={createdNotice} onError={onError} />}
+    {activeTab === "help" && identity.role === "policyholder" && <HelpCenter />}
     {activeTab === "report" && identity.role === "policyholder" && <ReportLoss api={api} identity={identity} initialPolicy={policy} onClaims={() => { setSelected(null); setTab("claims"); }} onCreated={(claim, replayed, warning) => {
       setSelected(claim); setCreatedNotice(`${replayed ? "Original report recovered" : "Loss report received"} — claim ${claim.claim_id}. The connected case is being read for its current state.${warning ? ` ${warning}` : ""}`); setTab("claims");
     }} onError={onError} />}
-  </div>;
+  </div></AssistantProvider>;
 }
 function ConfiguredPortal({ config }: { config: BusinessConfig }) {
   const auth = useMemo(() => getInsuranceAuth(config), [config]);

@@ -30,6 +30,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import model_gateway  # noqa: E402
+from .assistants.history import SESSION_PREFIX  # noqa: E402
+from .assistants.routes import router as assistants_router  # noqa: E402
 from .business.routes import router as business_router
 from .adjuster_support import MODELS as SUPPORT_MODELS, router as adjuster_router
 from .company import (
@@ -93,6 +95,7 @@ app.include_router(claims_router)
 app.include_router(voice_router)
 app.include_router(adjuster_router)
 app.include_router(business_router)
+app.include_router(assistants_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -263,6 +266,8 @@ async def new_session() -> dict:
 
 @app.get("/session/{sid}/messages")
 async def get_messages(sid: str) -> dict:
+    if sid.startswith(SESSION_PREFIX):
+        raise HTTPException(404, "This conversation was not found.")
     return {"messages": await load_conversation(sid)}
 
 

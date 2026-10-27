@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9480307136945224933"
+      "templateHash": "13484454512025810999"
     }
   },
   "parameters": {
@@ -150,6 +150,25 @@
       "metadata": {
         "description": "Opt in to the authenticated manual business APIs only after identity mappings are approved."
       }
+    },
+    "assistantsEnabled": {
+      "type": "string",
+      "defaultValue": "false",
+      "allowedValues": [
+        "true",
+        "false"
+      ],
+      "metadata": {
+        "description": "Opt in to identity-bound customer assistants after identity, model routing and help content are verified."
+      }
+    },
+    "assistantSurfaces": {
+      "type": "string",
+      "defaultValue": ""
+    },
+    "assistantModel": {
+      "type": "string",
+      "defaultValue": ""
     },
     "insuranceAuthTenantId": {
       "type": "string",
@@ -2154,6 +2173,15 @@
           "businessApiEnabled": {
             "value": "[equals(parameters('businessApiEnabled'), 'true')]"
           },
+          "assistantsEnabled": {
+            "value": "[equals(parameters('assistantsEnabled'), 'true')]"
+          },
+          "assistantSurfaces": {
+            "value": "[parameters('assistantSurfaces')]"
+          },
+          "assistantModel": {
+            "value": "[parameters('assistantModel')]"
+          },
           "insuranceAuthTenantId": {
             "value": "[parameters('insuranceAuthTenantId')]"
           },
@@ -2174,7 +2202,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "2810665321016439893"
+              "templateHash": "10815281735655341426"
             }
           },
           "parameters": {
@@ -2265,6 +2293,18 @@
             "businessApiEnabled": {
               "type": "bool",
               "defaultValue": false
+            },
+            "assistantsEnabled": {
+              "type": "bool",
+              "defaultValue": false
+            },
+            "assistantSurfaces": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "assistantModel": {
+              "type": "string",
+              "defaultValue": ""
             },
             "insuranceAuthTenantId": {
               "type": "string",
@@ -2370,7 +2410,7 @@
                     {
                       "name": "api",
                       "image": "[variables('placeholder')]",
-                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'INSURANCE_PROJECT_NAME', 'value', parameters('insuranceProjectName')), createObject('name', 'HOSTED_AGENTS_ENABLED', 'value', string(parameters('hostedAgentsEnabled'))), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_CLAIM_REVIEW_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-review'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
+                      "env": "[union(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', reference(parameters('identityId'), '2023-01-31').clientId), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'OTEL_SERVICE_NAME', 'value', 'northwind-copilot'), createObject('name', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'value', 'http/protobuf'), createObject('name', 'FOUNDRY_ENDPOINT', 'value', parameters('foundryEndpoint')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINT', 'value', parameters('foundryProjectEndpoint')), createObject('name', 'INSURANCE_PROJECT_NAME', 'value', parameters('insuranceProjectName')), createObject('name', 'HOSTED_AGENTS_ENABLED', 'value', string(parameters('hostedAgentsEnabled'))), createObject('name', 'NORTHWIND_INSURANCE_AGENTS_READY', 'value', string(parameters('insuranceAgentsReady'))), createObject('name', 'FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID', 'value', parameters('insuranceOrchestratorAgentId')), createObject('name', 'FOUNDRY_PROJECT_ENDPOINTS', 'value', parameters('foundryProjectEndpoints')), createObject('name', 'FOUNDRY_PLANNER_DEPLOYMENT', 'value', parameters('plannerDeployment')), createObject('name', 'FOUNDRY_WORKER_DEPLOYMENT', 'value', parameters('workerDeployment')), createObject('name', 'FOUNDRY_PROMPT_AGENT_DEPLOYMENT', 'value', parameters('promptAgentDeployment')), createObject('name', 'FOUNDRY_EMBEDDING_DEPLOYMENT', 'value', parameters('embeddingDeployment')), createObject('name', 'AZURE_SEARCH_ENDPOINT', 'value', parameters('searchEndpoint')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabaseName')), createObject('name', 'STORAGE_ACCOUNT', 'value', parameters('storageAccountName'))), createArray(createObject('name', 'PORT', 'value', '8000'), createObject('name', 'COPILOT_HARNESS_ENABLED', 'value', string(parameters('harnessEnabled'))), createObject('name', 'NORTHWIND_BUSINESS_API_ENABLED', 'value', string(parameters('businessApiEnabled'))), createObject('name', 'NORTHWIND_ASSISTANTS_ENABLED', 'value', string(parameters('assistantsEnabled'))), createObject('name', 'NORTHWIND_ASSISTANT_SURFACES', 'value', parameters('assistantSurfaces')), createObject('name', 'NORTHWIND_ASSISTANT_MODEL', 'value', parameters('assistantModel')), createObject('name', 'INSURANCE_AUTH_TENANT_ID', 'value', parameters('insuranceAuthTenantId')), createObject('name', 'INSURANCE_AUTH_AUDIENCE', 'value', parameters('insuranceAuthAudience')), createObject('name', 'INSURANCE_AUTH_REQUIRED_SCOPE', 'value', parameters('insuranceAuthRequiredScope')), createObject('name', 'INSURANCE_AUTH_CLIENT_IDS', 'value', parameters('insuranceAuthClientIds')), createObject('name', 'MCP_CLAIM_REVIEW_URL', 'value', format('https://{0}/mcp/', reference(resourceId('Microsoft.App/containerApps', 'ca-insurance-review'), '2024-10-02-preview').configuration.ingress.fqdn))))]",
                       "resources": {
                         "cpu": "[json('1.0')]",
                         "memory": "2Gi"

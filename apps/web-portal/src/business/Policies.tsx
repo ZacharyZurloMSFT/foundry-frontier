@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { BusinessApi } from "./api";
 import { Page, PolicySnapshot, statusLabel } from "./models";
 import { DateText, ErrorNotice, Loading, Pager } from "./shared";
+import AssistantPanel from "./assistants/AssistantPanel";
+import { wordingAnchor } from "./assistants/wording";
 
 const money = (value: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 export function PolicyView({ snapshot }: { snapshot: PolicySnapshot }) {
@@ -30,7 +32,7 @@ export function PolicyView({ snapshot }: { snapshot: PolicySnapshot }) {
     <details className="business-panel">
       <summary>Read policy wording and source references</summary>
       <h4>{wording.title}</h4><p>Version {wording.version} · {wording.state} · <DateText value={wording.effective_from} /> – <DateText value={wording.effective_to} /></p>
-      {wording.sections.map(s => <section className="business-source" key={s.section_id}><h5>{s.section_id}</h5><code>{s.policy_ref}</code><p className="business-prewrap">{s.text}</p><p className="business-muted">Source: <code>{s.source_uri}</code></p></section>)}
+      {wording.sections.map(s => <section className="business-source" key={s.section_id} id={wordingAnchor(s.policy_ref)} tabIndex={-1}><h5>{s.section_id}</h5><code>{s.policy_ref}</code><p className="business-prewrap">{s.text}</p><p className="business-muted">Source: <code>{s.source_uri}</code></p></section>)}
       <h4>Versioned citations</h4>
       {snapshot.citations.map((s, i) => <section className="business-source" key={`${s.section_id}-${i}`}><h5>{s.title} · Version {s.version}</h5><code>{s.policy_ref}</code>
         <p>{s.state} · <DateText value={s.effective_from} /> – <DateText value={s.effective_to} /></p><p className="business-prewrap">{s.text}</p><p>Source: <code>{s.source_uri}</code></p></section>)}
@@ -55,6 +57,7 @@ export default function Policies({ api, canReport, onReport, onError }: {
   }
   return <section aria-labelledby="policies-title">
     <div className="business-heading"><div><p className="business-eyebrow">Your protection, in detail</p><h2 id="policies-title">Policies</h2></div><button disabled={busy} onClick={() => setReload(v => v + 1)}>Refresh policies</button></div>
+    <AssistantPanel surface="concierge" context={selected ? { policy_id: selected.policy.policy_id } : undefined} onError={onError} />
     <ErrorNotice error={error} />{busy && <Loading />}
     {selected ? <><button className="business-back" onClick={() => setSelected(null)}>← Back to policies</button><PolicyView snapshot={selected} />
       {canReport && <button className="business-primary" onClick={() => onReport(selected)}>Report a loss on this policy</button>}</> : page && <>

@@ -156,6 +156,58 @@ draft was saved. For those flows run the portal against the deployed API instead
 `apps/api/app/settings.py` is the full reference, and it also still reads the deprecated
 names that older azd environments carry (the canonical name wins).
 
+## Embedded assistants
+
+Use the **business-first portal**, not `VITE_INSURANCE_BUSINESS_ENABLED=false`, to test
+policyholder assistants. Keep the real Entra registration and seeded-run setup described
+above; there is no simulated sign-in. After verifying Cosmos access, the model route and
+(for Help Center) the isolated customer index, opt in on the API process:
+
+```dotenv
+NORTHWIND_BUSINESS_API_ENABLED=true
+NORTHWIND_ASSISTANTS_ENABLED=true
+NORTHWIND_ASSISTANT_SURFACES=concierge,help_center
+# NORTHWIND_ASSISTANT_MODEL=<deployment name>     # otherwise FOUNDRY_PLANNER_DEPLOYMENT
+NORTHWIND_HELP_CENTER_INDEX=nw-insurance-help-customer-v1
+NORTHWIND_HELP_CENTER_SEARCH_AUTH=entra_id
+# NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT=<Search endpoint>  # otherwise AZURE_SEARCH_ENDPOINT
+```
+
+`query_key` authentication is an explicit alternative requiring
+`NORTHWIND_HELP_CENTER_SEARCH_QUERY_KEY`; no management-key lookup or authentication
+fallback occurs. Help articles belong in `data/northwind/customer-help`, not the staff
+corpus. `python scripts\publish-customer-help.py` previews and validates locally without
+writing to Search; `--apply` is a separate, explicitly reviewed publication operation.
+
+Keep the existing `AI_GATEWAY_*` settings. `NORTHWIND_ASSISTANT_MODEL` names a deployment,
+not a gateway alias; the shared adapter resolves its alias and never falls back to direct
+inference on gateway failure. The assistants do not require the hosted-fleet readiness
+flag and cannot draft or approve claim actions. Sign in as a policyholder to see Claims
+Concierge beside policies, claims and the loss form, plus Help Center. Staff retain their
+existing workbench and AI workspace. Availability comes from the authenticated
+`GET /api/v1/assistants/status`; configuration alone is not a cloud smoke test.
+
+Resource limits are configurable: `NORTHWIND_ASSISTANT_TIMEOUT_SECONDS` (60),
+`NORTHWIND_ASSISTANT_MAX_TOOL_CALLS` (6),
+`NORTHWIND_ASSISTANT_MAX_CONCURRENT_REQUESTS` (4) and
+`NORTHWIND_ASSISTANT_HISTORY_TTL_SECONDS` (86400). History is owner- and surface-bound;
+changing the selected claim or policy starts a separate panel conversation.
+
+Offline checks exercise fake identities, stores, Search and models through the real
+assistant route/runtime; they do not require cloud access or weaken the four eval tiers:
+
+```powershell
+python evals\assistant_eval.py --self-check
+python -m pytest apps\api\tests\test_assistants_golden.py apps\api\tests\test_assistants_scope.py apps\api\tests\test_assistants_routes.py apps\api\tests\test_assistants_help.py apps\api\tests\test_assistants_gateway.py -q
+python scripts\bundle-harness-assets.py
+```
+
+`NORTHWIND_ASSISTANTS_ENABLED`, `NORTHWIND_ASSISTANT_SURFACES` and
+`NORTHWIND_ASSISTANT_MODEL` are supported by **greenfield** Bicep provisioning only and
+default off/empty. Reference-only adoption and
+scoped app releases preserve existing live settings; merging code does not opt in a live
+app or publish its help index.
+
 ## Run the checks CI runs
 
 ```powershell

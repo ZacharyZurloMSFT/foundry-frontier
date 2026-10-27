@@ -111,7 +111,7 @@ the same service-to-app map for the release workflow.
 
 | azd service | Source | Container App | What it is |
 | --- | --- | --- | --- |
-| `api` | `apps/api` | `ca-insurance-api` | FastAPI on port 8000: chat and handoff streams, human-review queue, department manifest, Content Understanding, adjuster support, Voice Live proxy, `/api/v1` business API, Copilot SDK harness, trace panel. The 59 HTTP operations are listed in the [generated route table](./infra/live/apim/specs/northwind-api.operations.md) |
+| `api` | `apps/api` | `ca-insurance-api` | FastAPI on port 8000: chat and handoff streams, human-review queue, department manifest, Content Understanding, adjuster support, Voice Live proxy, `/api/v1` business API and embedded assistants, Copilot SDK harness, trace panel. HTTP operations are listed in the [generated route table](./infra/live/apim/specs/northwind-api.operations.md) |
 | `mcp-policy-lookup` | `apps/mcp-policy-lookup` | `ca-insurance-lookup` | FastMCP server with the read-only tools `lookup_policy` and `lookup_claim` over the synthetic fixtures, returning versioned wording citations |
 | `mcp-claim-review` | `apps/mcp-claim-review` | `ca-insurance-review` | FastMCP server with `draft_claim_action`, which queues a validated, pending-only draft in Cosmos DB |
 | `web-portal` | `apps/web-portal` | `ca-insurance-portal` | React/Vite: public insurer site, signed-in account, staff AI workspace |
@@ -158,8 +158,8 @@ workspace** with the department workspaces from the table above. This experience
 default build; `VITE_INSURANCE_BUSINESS_ENABLED=false` builds the department workspaces
 on their own, without sign-in. The Agent Harness has no web UI.
 
-The business API (`apps/api/app/business`, routes under `/api/v1`, off until
-`NORTHWIND_BUSINESS_API_ENABLED=true`) is the only part of the API that verifies the
+The business API (`apps/api/app/business`) and embedded assistant routes share `/api/v1`,
+off until `NORTHWIND_BUSINESS_API_ENABLED=true`; these are the API routes that verify the
 delegated Entra token (v2 RS256: signature, issuer, tenant, audience, expiry, scope
 `access_as_user` and a permitted SPA client). Roles and customer access come from
 persisted run mappings, never from browser personas, token role labels or
@@ -205,6 +205,43 @@ workflow or financial state. Processing runs in a separate bounded worker, never
 background task (`python -m app.business.evidence_worker --run-id <run> --once`, from
 `apps\api`); it needs `NORTHWIND_CU_ENABLED` and an explicit run allowlist. The flags are
 in [Configuration](#configuration-reference).
+
+## Embedded policyholder assistants
+
+AI is also available **inside the signed-in policyholder's work**, without opening an AI
+workspace: Claims Concierge beside **My policies**, **My claims** and **Report a loss**,
+and a **Help Center** for general customer questions. Staff keep the existing workbench,
+AI workspace, hosted-agent, voice and approval capabilities.
+
+- **Claims Concierge** reads only the verified policyholder's own records through
+  server-scoped, read-only tools. Selecting or typing a record ID cannot grant access to
+  another owner. It explains recorded status and wording, but cannot submit a form,
+  change a record, decide coverage or approve a claim. Unsaved loss-form fields are not
+  shared with chat.
+- **Help Center** returns validated exact excerpts from 12 synthetic customer articles
+  in `data/northwind/customer-help`. Its index, `nw-insurance-help-customer-v1`, is separate
+  from staff procedures and has no personal-record tools. An unsupported question gets
+  a no-match response rather than an invented answer.
+- Both require the business API's delegated Entra identity and seeded run. Successful
+  exchanges have owner- and surface-bound private history; the retained public demo
+  session endpoints cannot read it. Source, model and prompt provenance are visible.
+
+The API is `GET /api/v1/assistants/status` and
+`POST /api/v1/assistants/{surface}/chat` (`concierge` or `help_center`). The feature defaults
+**off**. Enable only after verifying identity, Cosmos, the model route and the help index:
+`NORTHWIND_ASSISTANTS_ENABLED=true`,
+`NORTHWIND_ASSISTANT_SURFACES=concierge,help_center`; optionally set
+`NORTHWIND_ASSISTANT_MODEL` to a deployment (otherwise the planner deployment is used).
+Existing `AI_GATEWAY_*` routing and fail-closed behavior apply to both surfaces.
+
+`python scripts\publish-customer-help.py` is an offline preview; publishing requires a
+separate reviewed `--apply`. Greenfield Bicep supports the three assistant settings, but
+reference-only adoption and scoped image releases leave live capability settings alone.
+**Landing the code does not enable live assistants or publish Search content.** Setup and
+limits: [local development](./docs/local-dev.md#embedded-assistants). Contract and privacy:
+[architecture](./docs/architecture.md#embedded-policyholder-assistants). The additional
+[offline golden gate](./evals/README.md#embedded-assistant-contract-gate-additional-offline)
+preserves all four existing eval tiers.
 
 ## Copilot SDK harness
 
@@ -433,6 +470,11 @@ specified in [`evals/README.md`](./evals/README.md); how they fit together is in
 | 3 | `.github/workflows/red-team.yml` (weekly, and on pushes to `main` that touch agents, prompts or the harness) | Foundry AI Red Team against `northwind-insurance-orchestrator` and the harness HTTP target (`pipelines/red-team/run_redteam.py`) |
 | 4 | `.github/workflows/continuous-eval.yml`, `.github/workflows/drift-detector.yml` (nightly) | Re-scores about 5% of the last 24 hours of conversation traces; opens an `eval-regression` issue on drift |
 
+CI also runs the **additional offline assistant contract gate**: 61 golden cases over the
+real route and validators with fake dependencies, plus gateway and UI regressions. Run
+`python evals\assistant_eval.py --self-check` to check the dataset and customer corpus.
+This supplements, rather than replaces, the four tiers; it is not live readiness evidence.
+
 Beside them: `.github/workflows/optimizer.yml` (nightly Prompt Optimizer; a pull request
 when a prompt beats the baseline by the minimum lift), `.github/workflows/prompt-registry.yml`
 (publishes the prompts to the Foundry Prompt Store tagged with the git SHA on merge;
@@ -476,6 +518,7 @@ The full feature-switch table is in
 | `FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID` | empty | Deployed orchestrator; must start with `northwind-insurance-` when readiness is `true` |
 | `COPILOT_HARNESS_ENABLED` | `false` | Copilot SDK harness |
 | `NORTHWIND_BUSINESS_API_ENABLED` | `false` | Protected `/api/v1` routes |
+| `NORTHWIND_ASSISTANTS_ENABLED`, `NORTHWIND_ASSISTANT_SURFACES`, `NORTHWIND_ASSISTANT_MODEL` | `false`, empty, empty | Greenfield only: enable selected embedded policyholder assistants; empty model uses the planner deployment. Reuse mode preserves live settings |
 | `INSURANCE_AUTH_TENANT_ID`, `INSURANCE_AUTH_AUDIENCE`, `INSURANCE_AUTH_REQUIRED_SCOPE`, `INSURANCE_AUTH_CLIENT_IDS` | empty, empty, `access_as_user`, empty | Entra tenant GUID, API application GUID, delegated scope name, comma-separated SPA client GUIDs |
 | `NORTHWIND_GATEWAY_URL`, `NORTHWIND_GATEWAY_STACK` | empty, `insurance` | Opt-in API Management origin (`https://<name>.azure-api.net`, no path); the stack must be `insurance` |
 | `AZURE_*_RESOURCE_GROUP` selectors | empty | Reuse mode only (above) |
@@ -505,6 +548,8 @@ endpoint), `FOUNDRY_DEFAULT_PROJECT`, `AGENT_OPENAI_ENDPOINT`, `AZURE_OPENAI_END
 | Data | `COSMOS_ENDPOINT`, `COSMOS_DATABASE` (`northwind`), `AZURE_SEARCH_ENDPOINT`, `STORAGE_ACCOUNT`; optional keys (`FOUNDRY_API_KEY`, `COSMOS_KEY`, `STORAGE_KEY`, `AZURE_SEARCH_KEY`) from `scripts\fetch-keys.ps1`, otherwise managed identity |
 | Capability switches (all default `false`; Bicep sets only `COPILOT_HARNESS_ENABLED`) | `ADJUSTER_SUPPORT_ENABLED` (index `ADJUSTER_SUPPORT_INDEX`, default `nw-insurance-adjuster-support`), `NORTHWIND_CU_ENABLED` (`NORTHWIND_CU_ENDPOINT`, `NORTHWIND_CU_ANALYZER_ID`, `NORTHWIND_CU_COMPLETION_MODEL`: `gpt-4.1` or `gpt-4o`, upload limit 10 MiB), `VOICE_LIVE_ENABLED`, `VOICE_LIVE_READY` (`VOICE_LIVE_MODEL`, `VOICE_LIVE_ALLOWED_ORIGINS`), `COPILOT_HARNESS_ENABLED`. Keep them off until the real dependency and transport are verified |
 | Evidence (all `false` or empty) | `NORTHWIND_EVIDENCE_ENABLED`, `NORTHWIND_EVIDENCE_UPLOADS_ENABLED`, `NORTHWIND_EVIDENCE_EXTRACTION_ENABLED`, `NORTHWIND_EVIDENCE_WORKER_ENABLED`, `NORTHWIND_EVIDENCE_WORKER_RUN_IDS` (explicit allowlist), `NORTHWIND_EVIDENCE_WORKER_LEASE_SECONDS` (60), `NORTHWIND_EVIDENCE_WORKER_BATCH_SIZE` (5), `NORTHWIND_EVIDENCE_WORKER_MAX_ATTEMPTS` (3) |
+| Embedded assistants | `NORTHWIND_ASSISTANTS_ENABLED` (`false`), `NORTHWIND_ASSISTANT_SURFACES` (empty), `NORTHWIND_ASSISTANT_MODEL` (planner fallback); `NORTHWIND_ASSISTANT_TIMEOUT_SECONDS` (60), `NORTHWIND_ASSISTANT_MAX_TOOL_CALLS` (6), `NORTHWIND_ASSISTANT_MAX_CONCURRENT_REQUESTS` (4), `NORTHWIND_ASSISTANT_HISTORY_TTL_SECONDS` (86400) |
+| Customer help | `NORTHWIND_HELP_CENTER_INDEX` (`nw-insurance-help-customer-v1`), `NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT` (normal Search endpoint), `NORTHWIND_HELP_CENTER_SEARCH_AUTH` (`entra_id`), `NORTHWIND_HELP_CENTER_SEARCH_QUERY_KEY` (empty; secret required only for explicit `query_key` auth) |
 | Gateways | `AI_GATEWAY_REQUIRED`, `AI_GATEWAY_MODEL_ENDPOINT`, `AI_GATEWAY_SCOPE`, `AI_GATEWAY_MODEL_PROVIDER`, `AI_GATEWAY_MODEL_ALIASES`; `MCP_CLAIM_REVIEW_URL` and `MCP_GATEWAY_SUBSCRIPTION_KEY` (harness MCP); `NORTHWIND_GATEWAY_AUTH_REQUIRED`, `NORTHWIND_GATEWAY_TENANT_ID`, `NORTHWIND_GATEWAY_AUDIENCE`, `NORTHWIND_GATEWAY_ALLOWED_OIDS` (guard on the API and MCP apps) |
 | Observability | `APPLICATIONINSIGHTS_CONNECTION_STRING`, `APPINSIGHTS_WORKSPACE_ID` (or `LOG_ANALYTICS_WORKSPACE_ID`), `GIT_SHA`, `BUILD_ENV`, `DEPLOYED_AT`, `GITHUB_REPOSITORY` |
 
@@ -549,22 +594,23 @@ entirely private-network solution.
 azure.yaml               azd services and hooks
 docker-compose.yml       local API and both SPAs
 apps/
-  api/                   FastAPI (app/business, app/harness, voice, insurance, adjuster_support, ...)
+  api/                   FastAPI (app/business, app/assistants, app/harness, voice, insurance, adjuster_support, ...)
   mcp-policy-lookup/     MCP: lookup_policy, lookup_claim
   mcp-claim-review/      MCP: draft_claim_action
-  web-portal/            React/Vite portal
+  web-portal/            React/Vite portal with embedded policyholder assistants
   web-voice/             React/Vite Voice Live intake
 agents/
   insurance/             prompt source of truth: orchestrator, triage, policy_claim_lookup,
-                         policy_wording, claim_action_draft
+                         policy_wording, claim_action_draft; assistants/ for concierge and help-center
   hosted/                hosted-agent runtime (Agent Framework, Responses host)
   orchestrator/          main.py: entrypoint shared by every hosted role
   copilot-harness/       Copilot SDK harness instructions
 data/
-  northwind/             company.yaml, insurance-fixtures.json, departments/<slug>/
+  northwind/             company.yaml, insurance-fixtures.json, departments/<slug>/,
+                         customer-help/ (12 isolated synthetic customer articles)
   seed/                  synthetic corpus generator (generate.py)
-  golden/                dataset.jsonl (50 rows), harness.jsonl (17 rows)
-evals/                   four-tier evaluation, baseline.json (README.md)
+  golden/                dataset.jsonl (50 rows), harness.jsonl (17 rows), assistant.jsonl (61 rows)
+evals/                   four-tier evaluation plus offline assistant gate, baseline.json (README.md)
 pipelines/
   insurance-learning/    evaluation-only dataset preparation
   optimizer/             Prompt Optimizer

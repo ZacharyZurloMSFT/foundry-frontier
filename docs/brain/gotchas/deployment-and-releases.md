@@ -21,7 +21,7 @@ short and cite a source.
   an older azd environment whose `NORTHWIND_GATEWAY_STACK` is not `insurance`. Source:
   [`validate-reuse.py`](../../../scripts/validate-reuse.py).
 - **Generated copies: edit the source.** `apps/api/app/_northwind/` (from `data/northwind/` plus the fixtures and four
-  claim PDFs) and `apps/api/app/_agent_prompts/` (the harness and adjuster-support prompts, from
+  claim PDFs) and `apps/api/app/_agent_prompts/` (the harness, adjuster-support and embedded-assistant prompts, from
   `scripts/bundle-harness-assets.py`) are git-ignored build inputs, as are `data/seed/generated/` (run
   `python data/seed/generate.py --domain insurance` before packaging or testing the API) and `.release-state/` (the
   grant and enforce receipts that rollback needs; keep it). The MCP apps carry **checked-in** copies of

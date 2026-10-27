@@ -8,7 +8,10 @@ property and casualty insurer. A policyholder reaches the voice front door, the
 claims concierge orchestrator hands the work to four hosted agents (triage,
 policy and claim lookup, policy wording, claim-action draft), and a person
 approves the drafted claim action. Adjuster support, claim-document
-understanding and the Copilot SDK harness sit beside it. All data is synthetic.
+understanding and the Copilot SDK harness sit beside it. Optional read-only
+Claims Concierge and Help Center assistants are embedded in the signed-in
+policyholder portal; they use server-owned identity scope and an isolated
+customer-help corpus, not the staff-wide tools. All data is synthetic.
 `azd` and the release workflows deploy five apps: `api`, `mcp-policy-lookup`,
 `mcp-claim-review`, `web-portal` and `web-voice` (the live `ca-insurance-*`
 Container Apps).
@@ -20,9 +23,10 @@ Container Apps).
    `azd provision`/`azd deploy` and the app release lane working. Service names
    must stay in step across `azure.yaml`, `release-app.py` and the workflows.
    Never rename or delete live Azure resources from code.
-2. **Preserve the four eval tiers.** Never disable, weaken, or bypass an eval.
-   If a regression is legitimate, update `evals/baseline.json` in the same PR.
-3. **Prompt files (`agents/insurance/*.yaml`, `data/northwind/departments/*/prompts/*.yaml`,
+2. **Preserve the four eval tiers and the offline assistant golden gate.** Never
+   disable, weaken, or bypass an eval. If a regression is legitimate, update
+   `evals/baseline.json` in the same PR with reviewer approval.
+3. **Prompt files (`agents/insurance/**/*.yaml`, `data/northwind/departments/*/prompts/*.yaml`,
    `.prompty`) are source of truth.** Do not fork them into the code. Changes go
    through the PR + optimizer loop.
 4. **Every new capability must be visible in the UI or a GitHub artifact.**
@@ -46,6 +50,7 @@ Container Apps).
 ## Testing before opening a PR
 - `ruff check apps/api evals pipelines data/seed`  (`apps/api` has known E402/F401/F821 findings: add none)
 - `python evals/smoke_eval.py --self-check`
+- `python evals/assistant_eval.py --self-check` (if assistants, customer help or their golden set changed)
 - `python data/seed/generate.py --domain insurance`, then `python -m pytest apps/api/tests` and the
   `scripts/tests` files listed in `.github/workflows/ci.yml`
 - `python -m pytest agents/tests evals/tests`  (after `pip install -r agents/hosted/requirements.txt -r evals/requirements.txt`)

@@ -317,7 +317,7 @@ def test_status_is_non_secret_and_describes_the_route():
     assert result == {
         "required": True, "enabled": True, "endpoint_host": "ai-gateway-northwind.azure-api.net",
         "provider": PROVIDER, "scope": SCOPE,
-        "features": dict.fromkeys(("adjuster_support", "harness"), "gateway"),
+        "features": dict.fromkeys(("adjuster_support", "harness", "concierge", "help_center"), "gateway"),
         "model_aliases": {"gpt-5.4": f"{PROVIDER}/gpt-5-4", "gpt-5.4-mini": f"{PROVIDER}/gpt-5-4-mini",
                           "Kimi-K2.6": f"{PROVIDER}/kimi-k2-6"},
         "problem": None,
@@ -352,7 +352,7 @@ async def test_gateway_status_route_matches_the_helper(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["enabled"] is True and body["endpoint_host"] == "ai-gateway-northwind.azure-api.net"
-    assert body["features"] == dict.fromkeys(("adjuster_support", "harness"), "gateway")
+    assert body["features"] == dict.fromkeys(("adjuster_support", "harness", "concierge", "help_center"), "gateway")
     assert body["model_aliases"] == {"gpt-5.4": f"{PROVIDER}/gpt-5-4", "gpt-5.4-mini": f"{PROVIDER}/gpt-5-4-mini",
                                      "Kimi-K2.6": f"{PROVIDER}/kimi-k2-6"}
     assert set(body) == {"required", "enabled", "endpoint_host", "provider", "scope", "features",

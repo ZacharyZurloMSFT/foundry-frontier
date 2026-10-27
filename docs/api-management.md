@@ -100,7 +100,7 @@ five legacy `northwind` apps are no longer managed or released from the reposito
 
 | Container App | azd service | What it is | Published as |
 | --- | --- | --- | --- |
-| `ca-insurance-api` | `api` | FastAPI orchestrator: 59 HTTP operations in the current export + the Voice Live WebSocket | `insurance-api`, `insurance-voice` |
+| `ca-insurance-api` | `api` | FastAPI orchestrator: 61 HTTP operations in the current export + the Voice Live WebSocket | `insurance-api`, `insurance-voice` |
 | `ca-insurance-lookup` | `mcp-policy-lookup` | FastMCP policy/claim lookup (`lookup_policy`, `lookup_claim`) | `insurance-mcp-tech-lookup` |
 | `ca-insurance-review` | `mcp-claim-review` | FastMCP claim-action draft (`draft_claim_action`, writes the HITL queue) | `insurance-mcp-work-order` |
 | `ca-insurance-portal`, `ca-insurance-voice` | `web-portal`, `web-voice` | nginx SPAs (consumers of the API) | not published; their origins are CORS-allowed |
@@ -127,14 +127,14 @@ Deliberately **not** published: the two SPAs (they are clients, not APIs), Found
 hosted-agent endpoints (served by Foundry), the model gateway `ai-gateway-northwind`
 (separate instance in `rg-northwind-ai`), and data planes (Cosmos, Search, Storage).
 
-### The REST API surface (59 operations, 57 paths)
+### The REST API surface (61 operations, 59 paths)
 
 Generated from the application itself by `scripts/export-openapi.py`; the full table is
 [`infra/live/apim/specs/northwind-api.operations.md`](../infra/live/apim/specs/northwind-api.operations.md).
 
 | Group | Operations | Notes |
 | --- | --- | --- |
-| `insurance-business` | 24 | `/api/v1/*`, Entra delegated token (scope `access_as_user`) |
+| `insurance-business` | 26 | `/api/v1/*`, Entra delegated token (scope `access_as_user`); includes two embedded assistant operations |
 | `core` | 17 | session, handoff, company/departments, HITL (`/hitl*`, plus two deprecated aliases), traces, build, health, model gateway status, voice session ticket |
 | `insurance-content-understanding` | 6 | claims document analysis |
 | `synthetic-insurance` | 5 | `/insurance/*`: fixtures, records, claim-action draft and `POST /insurance/chat` |
@@ -142,11 +142,17 @@ Generated from the application itself by `scripts/export-openapi.py`; the full t
 | `voice` | 1 | `GET /voice/status` (the WebSocket itself is published as its own API) |
 
 Several operations stream newline-delimited JSON (`/insurance/chat`, `/handoff`, adjuster
-support, harness runs). The REST policy therefore never buffers responses.
+support, harness runs and `/api/v1/assistants/{surface}/chat`). The REST policy therefore
+never buffers responses.
 
-The chat surface is `POST /insurance/chat` only. The live APIs were imported from the earlier
-64-operation export (first applied on 2026-10-22); the routes that changed since are listed under
-[Renames and compatibility](#renames-and-compatibility).
+The hosted chat surface remains `POST /insurance/chat`. The embedded assistants add only
+`GET /api/v1/assistants/status` and `POST /api/v1/assistants/{surface}/chat` to the preceding
+59-operation export; none of those existing operations is removed or changed. They inherit
+the `/api/v1/*` gateway policies and verify the delegated user and run in the API. Importing
+the spec does not enable the default-disabled assistants or publish their customer-help index.
+The live APIs were originally imported from the earlier 64-operation export (first applied
+on 2026-10-22); historical observations below are not evidence of the currently imported
+spec. See [Renames and compatibility](#renames-and-compatibility).
 
 ## Architecture
 
@@ -160,7 +166,7 @@ flowchart LR
     CI[CI evals / red team]
   end
   subgraph APIM[apim-northwind]
-    R["/insurance  REST (59 ops)"]
+    R["/insurance  REST (61 ops)"]
     V["/insurance/voice/realtime  WebSocket"]
     M["/insurance/mcp/tech-lookup · work-order"]
   end
@@ -216,7 +222,7 @@ outputs or pipeline logs. The pipeline's apply identity cannot call `listSecrets
 
 - Standard v2 supports WebSocket APIs; Consumption does not. No dedicated IP on v2 tiers.
 - Overlapping path prefixes route correctly (longest wins); OpenAPI 3.1 imports as is
-  (the whole document: 64 operations at the 2026-10-22 import, 59 in the current export).
+  (the whole document: 64 operations at the 2026-10-22 import, 61 in the current export).
   OpenAPI 3.1 is import-only.
 - The native `type: mcp` API is a preview, APIM-hosted tool server with a different ARM
   contract than documented. The gateway instead uses **GA plain HTTP passthrough** APIs
@@ -265,7 +271,7 @@ still read, the canonical one wins.
 
 | Before | Now |
 | --- | --- |
-| `/chat`, `/qa`, `/agent/{slug}/chat`, the model-comparison routes, `/safety/*` | removed from the export (chat is `POST /insurance/chat`); the gateway stops exposing them when the next apply imports the 59-operation export |
+| `/chat`, `/qa`, `/agent/{slug}/chat`, the model-comparison routes, `/safety/*` | removed from the export (hosted chat is `POST /insurance/chat`); the gateway stops exposing them when the next apply imports the current 61-operation export |
 | `GET /work-orders`, `DELETE /work-orders/{id}` | `GET /hitl/resolved`, `DELETE /hitl/{id}`; the old paths are still served and published as deprecated aliases |
 | `MCP_TECH_LOOKUP_URL`, `MCP_WORK_ORDER_URL` | `MCP_POLICY_LOOKUP_URL`, `MCP_CLAIM_REVIEW_URL`; the old names are still read while the canonical one is unset |
 | `MCP_GATEWAY_CONNECTION_TECH_LOOKUP`, `MCP_GATEWAY_CONNECTION_WORK_ORDER` | `MCP_GATEWAY_CONNECTION_POLICY_LOOKUP`, `MCP_GATEWAY_CONNECTION_CLAIM_REVIEW`; the old names are still read while the canonical one is unset |

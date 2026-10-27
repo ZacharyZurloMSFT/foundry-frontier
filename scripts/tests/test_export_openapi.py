@@ -18,8 +18,8 @@ export_openapi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export_openapi)
 
 DOC_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
-HTTP_OPERATIONS = 59
-BUSINESS_OPERATIONS = 24
+HTTP_OPERATIONS = 61
+BUSINESS_OPERATIONS = 26
 HINT = "The APIM-facing API surface changed: run `python scripts/export-openapi.py` and update docs/api-management.md."
 
 
@@ -89,6 +89,15 @@ def test_business_api_surface_is_the_versioned_prefix(document):
     assert len(business) == BUSINESS_OPERATIONS, HINT
 
 
+def test_assistant_routes_are_additive_versioned_operations(document):
+    assistants = {(row["method"], row["path"]) for row in export_openapi.operations(document)
+                  if row["path"].startswith("/api/v1/assistants/")}
+    assert assistants == {
+        ("GET", "/api/v1/assistants/status"),
+        ("POST", "/api/v1/assistants/{surface}/chat"),
+    }
+
+
 def test_documentation_routes_are_not_published(document):
     assert not DOC_PATHS & set(document["paths"])
 
@@ -136,8 +145,10 @@ def test_schemas_are_not_recursive_which_apim_cannot_import(document):
 
 def test_export_is_deterministic_regardless_of_feature_flags(monkeypatch):
     baseline = export_openapi.render_spec(export_openapi.load_app().openapi())
-    for name in ("COPILOT_HARNESS_ENABLED", "NORTHWIND_BUSINESS_API_ENABLED", "VOICE_LIVE_ENABLED", "ADJUSTER_SUPPORT_ENABLED"):
+    for name in ("COPILOT_HARNESS_ENABLED", "NORTHWIND_BUSINESS_API_ENABLED", "VOICE_LIVE_ENABLED", "ADJUSTER_SUPPORT_ENABLED",
+                 "NORTHWIND_ASSISTANTS_ENABLED"):
         monkeypatch.setenv(name, "true")
+    monkeypatch.setenv("NORTHWIND_ASSISTANT_SURFACES", "concierge,help_center")
     app = export_openapi.load_app()
     app.openapi_schema = None
     assert export_openapi.render_spec(app.openapi()) == baseline

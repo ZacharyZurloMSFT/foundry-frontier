@@ -106,6 +106,22 @@ covers how the tiers fit into the delivery loop.
   `eval-regression`, `drift` and `copilot-fix` (the template
   `.github/ISSUE_TEMPLATE/eval-regression.yml` is the manual equivalent).
 
+### Additional offline assistant gate
+
+The CI contracts job also validates `data/golden/assistant.jsonl` with
+`python evals/assistant_eval.py --self-check` and runs `apps/api/tests/test_assistants*.py`
+through the real scoped routes and validators using fake identity, stores and models.
+This catches owner/context isolation, untrusted-input handling, validated citations,
+no-match behavior, read-only decision boundaries and atomic history failures without
+Azure access. Gateway regressions cover both surfaces' aliases, Entra authentication,
+shared-client lifetime and fail-closed errors. Portal tests cover context resets,
+authentication failures and complete-before-display NDJSON handling.
+
+This is an **additional deterministic contract gate**, not a fifth model-quality tier and
+not a replacement for the four existing workflows. It cannot establish live Search/model
+readiness or authorize new baseline numbers. Customer-help publishing is preview-only in
+CI; a reviewed `--apply` is separate from an app release.
+
 ### Baselines and the regression gate
 
 `evals/baseline.json` (schema version 2) is keyed by department slug
@@ -187,6 +203,7 @@ digest, never a tag:
 
 Prompts are files, and the files are the source of truth:
 `agents/insurance/*.yaml` (the five hosted roles),
+`agents/insurance/assistants/*.yaml` (embedded policyholder assistants),
 `agents/copilot-harness/instructions.prompty` (the harness),
 `data/northwind/departments/*/prompts/*.yaml` (prompt agents and adjuster
 support) and `evals/evaluators/rubrics/*.prompty` (judge rubrics). Change them
@@ -194,21 +211,25 @@ through a PR, the optimizer's included; do not fork them into code.
 
 On a push to `main` that touches `agents/insurance/`, `agents/copilot-harness/`
 or `evals/evaluators/rubrics/`, `.github/workflows/prompt-registry.yml` runs
-`scripts/publish-prompts.py`, which uploads the five agent prompts, the harness
-prompt and the two rubrics to the Foundry **Prompt Store** tagged with the git
-SHA, and keeps the harness prompt as the artifact `copilot-harness-prompt-<sha>`.
-The upload is best effort (see the table below). Three stamps tie a running
-system back to the prompt files:
+`scripts/publish-prompts.py`, which uploads the five hosted-agent prompts, the two
+embedded-assistant prompts, the harness prompt and the two rubrics to the Foundry
+**Prompt Store** tagged with the git SHA, and keeps the harness prompt as the artifact
+`copilot-harness-prompt-<sha>`. The upload is best effort (see the table below).
+The existing optimizer remains scoped to the hosted-role prompts; assistant prompt
+changes additionally run the deterministic assistant contract gate. Three stamps tie a
+running system back to the prompt files:
 
 - hosted agents report their deployment, role and the SHA-256 of the canonical
   prompt file (`prompt_sha256`) in the Responses metadata;
 - `scripts/bundle-harness-assets.py` writes `git_sha`, the repository and the
-  SHA-256 of the harness and adjuster-support prompts
-  (`prompt_sha.copilot-harness`, `prompt_sha.adjuster-support`) into the API
-  image; `GET /build` returns them;
+  SHA-256 of the harness, adjuster-support and embedded-assistant prompts
+  (`prompt_sha.copilot-harness`, `prompt_sha.adjuster-support`, `prompt_sha.concierge`,
+  `prompt_sha.help_center`) into the API image; `GET /build` returns them under the
+  existing `build` envelope. Assistant answers also carry their model and prompt SHA;
 - `apps/api/app/observability.py` stamps every span created through `get_tracer`
   with that build, the department, the Foundry project and the model route, and
-  the trace panel lists the prompt hashes under **Prompt versions**.
+  the trace panel lists the prompt hashes under **Prompt versions**. Assistant telemetry
+  contains metadata and hashed session references, not messages or usable session IDs.
 
 ## Supply-chain posture
 

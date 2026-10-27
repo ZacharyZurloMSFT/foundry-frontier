@@ -76,7 +76,7 @@ are run explicitly.
 ### API surface
 
 `apps/api/app/*.py` is the source of truth. `infra/live/apim/specs/northwind-api.operations.md`
-is the generated table of all 59 HTTP operations (regenerate it with
+is the generated table of all 61 HTTP operations (regenerate it with
 `python scripts/export-openapi.py`; `--check` compares it with the code).
 
 | Group | Routes |
@@ -90,6 +90,7 @@ is the generated table of all 59 HTTP operations (regenerate it with
 | Voice Live | `POST /voice/session`, `GET /voice/status`, WebSocket `/voice/realtime` |
 | Copilot SDK harness | `GET /harness/status`, `POST /harness/runs`, `GET /harness/runs/{run_id}` |
 | Adjuster workbench | `/api/v1/*`: `me`, `policies`, `claims`, tasks, notes, assignment, transitions, evidence documents and jobs. Needs an Entra delegated token |
+| Embedded policyholder assistants | `GET /api/v1/assistants/status`, `POST /api/v1/assistants/{surface}/chat`. Same delegated identity/run boundary; policyholder-only chat |
 
 Only `/api/v1/*` authenticates callers. The other routes are a synthetic public demo; the
 optional gateway guard ([API gateway](#api-gateway-opt-in)) is what restricts direct
@@ -143,6 +144,48 @@ sequenceDiagram
 5. **Draft.** Only `claim-action-draft` can persist anything, and only a pending draft
    (see [Human approval](#human-approval)).
 
+## Embedded policyholder assistants
+
+The signed-in policyholder portal adds a separate, **read-only** assistant path; it does
+not replace the hosted orchestrator, staff AI workspace, voice, harness or approval flow.
+`apps/api/app/assistants` serves `GET /api/v1/assistants/status` and
+`POST /api/v1/assistants/{surface}/chat`. Both use the business API's verified delegated
+Entra identity and `X-Demo-Run`; only policyholders can chat.
+
+- **`concierge`** is embedded beside My policies, My claims and Report a loss. The server
+  binds read-only business tools to the signed-in owner and a per-turn snapshot. A
+  selected policy or claim is a hint, not authority; a missing record and another owner's
+  record have the same result. Unsaved loss-report form fields are never sent to chat.
+- **`help_center`** answers general how-to questions using only the isolated
+  `nw-insurance-help-customer-v1` Search index. It cannot read policyholder records or use
+  the adjuster-support corpus. The model selects exact excerpts; the server validates
+  their text and provenance before rendering an answer. No match is an explicit result,
+  not permission to answer from model memory.
+- **Trust boundary.** Questions, history, records and retrieved articles are untrusted
+  data. The server validates identifiers, citations and decision language before saving
+  an exchange; neither surface can submit a form, write a business record or decide a claim.
+  The browser withholds the answer and citations until the bounded NDJSON response reaches
+  EOF with exactly one terminal `done`. Trailing data, an oversized response or a transport
+  failure discards the browser's pending answer rather than displaying it as confirmed.
+- **Private history.** Successful exchanges are stored atomically in `conversations`,
+  bound to the run, verified subject and surface, with a one-day TTL by default. The
+  retained demo session reader cannot retrieve assistant exchanges. Only six prior
+  exchanges are supplied as conversational context, never as current evidence. Telemetry
+  records metadata and a hashed session reference, not messages or a usable session ID.
+- **Model routing.** `foundry_client.py` shares main's Entra clients and AI Gateway
+  configuration. A selected invalid or required missing gateway fails closed; a gateway
+  error never falls back to direct inference. Requests use the gateway alias while
+  UI/history provenance names the deployment and canonical prompt SHA. Help Center Search
+  also reuses the shared Entra credential without closing it at the end of a request.
+
+Prompts live in `agents/insurance/assistants/`; the API bundle includes them alongside
+existing harness and adjuster-support prompts. The customer corpus is
+`data/northwind/customer-help`, outside department seed directories. Preview it with
+`python scripts/publish-customer-help.py`; publishing requires a reviewed `--apply` and
+explicit target/authentication checks. Status reports configuration, not proof of model,
+Search, identity or private-network readiness. See [local development](./local-dev.md#embedded-assistants)
+for opt-in settings and offline checks.
+
 ## Runtime readiness and feature switches
 
 `GET /insurance/fixtures` returns the synthetic records plus `agent_runtime_ready`. Chat,
@@ -168,6 +211,7 @@ off by default; none of them is set by `infra/main.bicep` except where noted:
 | Live Content Understanding | `NORTHWIND_CU_ENABLED`, `NORTHWIND_CU_COMPLETION_DEPLOYMENT`, optionally `NORTHWIND_CU_COMPLETION_MODEL` and `NORTHWIND_CU_ENDPOINT`; the analyzer is registered by `scripts/configure-insurance-cu.py` | `503 cu_disabled`; the sample list still loads, and no authored extraction is substituted |
 | Evidence records | `NORTHWIND_EVIDENCE_ENABLED`, `NORTHWIND_EVIDENCE_UPLOADS_ENABLED`, `NORTHWIND_EVIDENCE_EXTRACTION_ENABLED`, `NORTHWIND_EVIDENCE_WORKER_ENABLED`, `NORTHWIND_EVIDENCE_WORKER_RUN_IDS`, `STORAGE_ACCOUNT` | `GET /api/v1/evidence/status` reports disabled |
 | Adjuster workbench API | `NORTHWIND_BUSINESS_API_ENABLED` (a Bicep parameter), `INSURANCE_AUTH_TENANT_ID`, `INSURANCE_AUTH_AUDIENCE`, `INSURANCE_AUTH_REQUIRED_SCOPE`, `INSURANCE_AUTH_CLIENT_IDS` | `503 business_api_disabled` |
+| Embedded policyholder assistants | Business API identity/run configuration plus `NORTHWIND_ASSISTANTS_ENABLED`, `NORTHWIND_ASSISTANT_SURFACES` and optional `NORTHWIND_ASSISTANT_MODEL` (greenfield Bicep inputs, default off/empty); Help Center also needs its isolated Search index | Authenticated status explains unavailable surfaces; chat fails closed without changing records |
 | Copilot SDK harness | `COPILOT_HARNESS_ENABLED` (a Bicep parameter), `MCP_CLAIM_REVIEW_URL`, `COPILOT_HARNESS_*` | `POST /harness/runs` returns `503` |
 | Gateway routing | `AI_GATEWAY_*`, `NORTHWIND_GATEWAY_*` | model calls go straight to Foundry; the API is reached directly |
 | In-app trace panel | `APPINSIGHTS_WORKSPACE_ID` (or `LOG_ANALYTICS_WORKSPACE_ID`) | `GET /traces/{sid}` returns `status: unavailable` with a note; no stub trace is substituted |

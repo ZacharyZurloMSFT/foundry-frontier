@@ -19,15 +19,36 @@ settlement or executes a payment — it saves **drafts for human review**.
 
 The tiers are ordered by cost, not chained: they are independent workflows, so run
 `python evals/smoke_eval.py` locally before you spend Azure quota on a re-run.
-`.github/workflows/optimizer.yml` (nightly Prompt Optimizer) and
-`.github/workflows/prompt-registry.yml` (publish prompts on merge) work on the
-prompts under `agents/insurance/*.yaml`, which are the source of truth.
+`.github/workflows/optimizer.yml` (nightly Prompt Optimizer) selects the hosted-role
+prompts under `agents/insurance/*.yaml`. `.github/workflows/prompt-registry.yml`
+(publish prompts on merge) recursively includes `agents/insurance/**/*.yaml`,
+including the embedded-assistant prompts. These files are the source of truth;
+the additional assistant contract gate does not change the optimizer's scope.
 
 > **AI Gateway:** the evaluator judge model and the Foundry safety / red-team
 > services are **not** routed through the AI Gateway (out of scope, see
 > [`docs/ai-gateway.md`](../docs/ai-gateway.md)). Only the deployed app and
 > agents under test are, so PR evals measure the real gateway path. A gateway
 > failure (401/403/404/429) is an evaluation failure, never a skipped evaluator.
+
+## Embedded assistant contract gate (additional, offline)
+
+`data/golden/assistant.jsonl` is a separate deterministic golden set for the policyholder
+`concierge` and `help_center` surfaces. CI runs it through the real authenticated route,
+scoped runtime and output validators with fake identity, Cosmos, Search and model clients.
+It covers owner isolation, foreign/missing context, untrusted content, citation and
+identifier validation, no-match responses, human-decision boundaries and failed turns.
+Gateway integration tests additionally exercise alias/Entra routing, shared-client
+lifetime and failure without direct fallback.
+
+```powershell
+python evals\assistant_eval.py --self-check
+python -m pytest apps\api\tests\test_assistants_golden.py apps\api\tests\test_assistants_gateway.py -q
+```
+
+The self-check validates dataset and canonical customer-help references; pytest executes
+the cases. These offline checks are **not** model-quality or live readiness evidence and
+do not replace any of the four tiers or change `evals/baseline.json`.
 
 ## Tier 1 — smoke eval
 

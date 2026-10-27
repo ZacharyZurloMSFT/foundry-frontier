@@ -27,6 +27,9 @@ param harnessEnabled bool = false
 param insuranceAgentsReady bool = false
 param insuranceOrchestratorAgentId string = ''
 param businessApiEnabled bool = false
+param assistantsEnabled bool = false
+param assistantSurfaces string = ''
+param assistantModel string = ''
 param insuranceAuthTenantId string = ''
 param insuranceAuthAudience string = ''
 param insuranceAuthRequiredScope string = 'access_as_user'
@@ -119,6 +122,9 @@ resource api 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'PORT', value: '8000' }
             { name: 'COPILOT_HARNESS_ENABLED', value: string(harnessEnabled) }
             { name: 'NORTHWIND_BUSINESS_API_ENABLED', value: string(businessApiEnabled) }
+            { name: 'NORTHWIND_ASSISTANTS_ENABLED', value: string(assistantsEnabled) }
+            { name: 'NORTHWIND_ASSISTANT_SURFACES', value: assistantSurfaces }
+            { name: 'NORTHWIND_ASSISTANT_MODEL', value: assistantModel }
             { name: 'INSURANCE_AUTH_TENANT_ID', value: insuranceAuthTenantId }
             { name: 'INSURANCE_AUTH_AUDIENCE', value: insuranceAuthAudience }
             { name: 'INSURANCE_AUTH_REQUIRED_SCOPE', value: insuranceAuthRequiredScope }

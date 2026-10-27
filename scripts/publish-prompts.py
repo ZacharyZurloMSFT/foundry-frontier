@@ -1,4 +1,4 @@
-"""Publish every agent prompt (`agents/insurance/*.yaml`) and `.prompty` file to
+"""Publish every agent prompt (`agents/insurance/**/*.yaml`) and `.prompty` file to
 the Foundry Prompt Store, tagged with the current git SHA. Called by
 .github/workflows/prompt-registry.yml on every push to main.
 
@@ -52,7 +52,7 @@ def main() -> int:
     sha = os.environ.get("GIT_SHA", "unknown")
     endpoint = os.environ.get("FOUNDRY_PROJECT_ENDPOINT")
 
-    files = sorted((REPO_ROOT / "agents" / "insurance").glob("*.yaml")) + \
+    files = sorted((REPO_ROOT / "agents" / "insurance").rglob("*.yaml")) + \
             sorted((REPO_ROOT / "evals" / "evaluators" / "rubrics").glob("*.prompty")) + \
             sorted((REPO_ROOT / "agents" / "copilot-harness").glob("*.prompty"))
     if not files:

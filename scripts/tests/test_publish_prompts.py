@@ -34,7 +34,9 @@ def test_dry_run_lists_every_insurance_prompt_and_nothing_from_the_agents_root(m
     out = capsys.readouterr().out
     assert "[dry-run] would publish" in out
     listed = [line[len("  - "):].strip() for line in out.splitlines() if line.startswith("  - ")]
-    insurance = sorted(str(path.relative_to(module.REPO_ROOT)) for path in (module.REPO_ROOT / "agents" / "insurance").glob("*.yaml"))
+    insurance = sorted(str(path.relative_to(module.REPO_ROOT)) for path in (module.REPO_ROOT / "agents" / "insurance").rglob("*.yaml"))
     assert insurance and set(insurance) <= set(listed)
-    sources = {Path("agents", "insurance"), Path("agents", "copilot-harness"), Path("evals", "evaluators", "rubrics")}
+    assistants = Path("agents", "insurance", "assistants")
+    assert {str(assistants / "concierge.yaml"), str(assistants / "help-center.yaml")} <= set(listed)
+    sources = {Path("agents", "insurance"), assistants, Path("agents", "copilot-harness"), Path("evals", "evaluators", "rubrics")}
     assert {Path(item).parent for item in listed} <= sources

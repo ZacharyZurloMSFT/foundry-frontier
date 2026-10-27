@@ -27,6 +27,31 @@ flowchart LR
   approve --> reviewed["Reviewed drafts<br/>nothing is executed"]
 ```
 
+## Optional policyholder walkthrough — AI inside the work
+
+Use this as an additional walkthrough, not a replacement for the existing staff/voice beats.
+It needs a real seeded policyholder sign-in, the business API, reachable Cosmos, a verified
+model route and both assistant surfaces enabled; Help Center also needs its separately
+published customer index ([setup](./local-dev.md#embedded-assistants)). Disabled or unavailable
+surfaces must be shown honestly, not demonstrated with invented responses. Code deployment
+alone does not enable them.
+
+1. Sign in to **My account** as the seeded `PH-1001` policyholder. In **My policies**, open
+   their policy and ask the embedded **Claims Concierge** to explain the recorded deductible
+   and cite its wording. Point to the selected-record context and source provenance; a
+   policy schedule is not a coverage decision.
+2. Open **My claims** and ask what evidence the selected claim is awaiting. Ask about
+   `PH-1002`'s claim next: the assistant must not reveal whether another owner's record exists.
+   Names or identifiers in a prompt cannot change the signed-in identity.
+3. In **Report a loss**, show the assistance disclosure. The assistant explains the steps;
+   unsaved form fields are not shared with chat, and only the policyholder submits the form.
+4. Open **Help Center** and ask how to report a loss. Show exact customer-article excerpts,
+   source identifiers and prompt/model provenance. Ask an unsupported question: expect a
+   no-match response, not a model-memory answer or a search of staff procedures.
+5. Sign out. Explain that conversations are owner- and surface-bound. Staff still have
+   their workbench and **AI workspace**, with the hosted-agent, voice and approval flows
+   below; the embedded policyholder assistant has no draft, approval or payment tool.
+
 ## The records you will use
 
 All synthetic ([`data/northwind/insurance-fixtures.json`](../data/northwind/insurance-fixtures.json)):

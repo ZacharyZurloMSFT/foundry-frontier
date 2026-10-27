@@ -47,6 +47,11 @@ param insuranceOrchestratorAgentId string = ''
 @description('Opt in to the authenticated manual business APIs only after identity mappings are approved.')
 @allowed(['true', 'false'])
 param businessApiEnabled string = 'false'
+@description('Opt in to identity-bound customer assistants after identity, model routing and help content are verified.')
+@allowed(['true', 'false'])
+param assistantsEnabled string = 'false'
+param assistantSurfaces string = ''
+param assistantModel string = ''
 param insuranceAuthTenantId string = ''
 param insuranceAuthAudience string = ''
 param insuranceAuthRequiredScope string = 'access_as_user'
@@ -326,6 +331,9 @@ module containerapps 'modules/containerapps.bicep' = if (!reuseExisting) {
     insuranceAgentsReady: insuranceAgentsReady == 'true'
     insuranceOrchestratorAgentId: insuranceOrchestratorAgentId
     businessApiEnabled: businessApiEnabled == 'true'
+    assistantsEnabled: assistantsEnabled == 'true'
+    assistantSurfaces: assistantSurfaces
+    assistantModel: assistantModel
     insuranceAuthTenantId: insuranceAuthTenantId
     insuranceAuthAudience: insuranceAuthAudience
     insuranceAuthRequiredScope: insuranceAuthRequiredScope

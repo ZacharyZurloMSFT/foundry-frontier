@@ -144,6 +144,30 @@ def test_business_api_is_opt_in_and_identity_configuration_roundtrips(parameter_
     assert parameters["insuranceAuthClientIds"]["value"] == "33333333-3333-4333-8333-333333333333"
 
 
+def test_customer_assistants_are_opt_in_and_do_not_change_reuse_resources(template, parameter_defaults):
+    assert parameter_defaults["assistantsEnabled"]["value"] == "false"
+    assert parameter_defaults["assistantSurfaces"]["value"] == ""
+    assert parameter_defaults["assistantModel"]["value"] == ""
+    configured = compile_parameters({
+        "NORTHWIND_ASSISTANTS_ENABLED": "true", "NORTHWIND_ASSISTANT_SURFACES": "concierge,help_center",
+        "NORTHWIND_ASSISTANT_MODEL": "gpt-5.4",
+    })
+    assert configured["assistantsEnabled"]["value"] == "true"
+    assert configured["assistantSurfaces"]["value"] == "concierge,help_center"
+    assert configured["assistantModel"]["value"] == "gpt-5.4"
+    module = next(resource for resource in template["resources"] if resource["name"] == "containerapps")
+    assert module["condition"] == "[not(variables('reuseExisting'))]"
+    assert module["properties"]["parameters"]["assistantsEnabled"]["value"] == (
+        "[equals(parameters('assistantsEnabled'), 'true')]"
+    )
+    nested = module["properties"]["template"]
+    api = next(resource for resource in nested["resources"] if resource["name"] == "ca-insurance-api")
+    env = api["properties"]["template"]["containers"][0]["env"]
+    assert all(name in json.dumps(env) for name in (
+        "NORTHWIND_ASSISTANTS_ENABLED", "NORTHWIND_ASSISTANT_SURFACES", "NORTHWIND_ASSISTANT_MODEL"))
+    assert "NORTHWIND_ASSISTANTS_ENABLED" not in json.dumps(adoption_template(template))
+
+
 def test_fresh_mode_requires_no_adoption_inputs():
     assert module.validate_environment({}) == []
     assert module.validate_environment({"NORTHWIND_REUSE_EXISTING_RESOURCES": "false"}) == []

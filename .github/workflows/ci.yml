@@ -31,6 +31,14 @@ jobs:
           ruff check apps/api/app/business apps/api/tests/test_business_api.py apps/api/tests/test_business_foundation.py \
             apps/api/tests/test_evidence*.py scripts/configure-insurance-identity.py scripts/tests/test_insurance_identity_setup.py
           mypy apps/api/app/business --ignore-missing-imports --follow-imports=silent
+      - name: Check embedded customer assistants (offline only)
+        run: |
+          ruff check apps/api/app/assistants apps/api/app/foundry_client.py apps/api/app/diagnostics.py \
+            apps/api/tests/assistant_fakes.py apps/api/tests/test_assistants*.py apps/api/tests/test_diagnostics.py \
+            evals/assistant_eval.py scripts/publish-customer-help.py scripts/tests/test_publish_customer_help.py
+          mypy apps/api/app/assistants apps/api/app/foundry_client.py apps/api/app/diagnostics.py --ignore-missing-imports --follow-imports=silent
+          python evals/assistant_eval.py --self-check
+          python scripts/publish-customer-help.py
       - name: Compile infrastructure for deployment contract tests
         run: |
           az bicep install --version v0.46.1
@@ -72,6 +80,7 @@ jobs:
             scripts/tests/test_foundry_project_migration.py \
             scripts/tests/test_publish_prompts.py \
             scripts/tests/test_publish_adjuster_support.py \
+            scripts/tests/test_publish_customer_help.py \
             scripts/tests/test_no_legacy_vocabulary.py -q
   web:
     runs-on: ubuntu-latest
