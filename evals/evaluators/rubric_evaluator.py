@@ -13,7 +13,7 @@ Usage:
         prompty_path="evaluators/rubrics/triage_rubric.prompty",
         name="triage_rubric",
     )
-    result = ev(query="chiller alarm at seattle", response='{"site_id":...}')
+    result = ev(query="What is the status of claim CLM-2001?", response='{"claim_id":"CLM-2001",...}')
     # -> {"triage_rubric_score": 5, "triage_rubric_reason": "...", "triage_rubric_pass": True}
 """
 from __future__ import annotations
@@ -63,7 +63,7 @@ class RubricEvaluator:
         self.name = name
         self.pass_threshold = pass_threshold
 
-    # Public score/reason/pass keys — kept consistent so batch aggregation works.
+    # Public score/reason/pass keys — kept consistent so run_evals aggregation works.
     @property
     def score_key(self) -> str:
         return f"{self.name}_score"
@@ -192,7 +192,7 @@ def load_agent_rubric(
 
 
 def judge_model_config_from_env() -> dict[str, Any] | None:
-    """Build a judge model config from the Foundry env vars the eval pipelines share.
+    """Build a judge model config from the same env vars run_evals.py already uses.
 
     Prefers FOUNDRY_JUDGE_DEPLOYMENT, then FOUNDRY_PROMPT_AGENT_DEPLOYMENT (gpt-4o
     class — supports the classic max_tokens param that built-in evaluators use),

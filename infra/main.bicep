@@ -10,14 +10,14 @@ param environmentName string
 param location string = 'canadacentral'
 
 @minLength(1)
-@description('AI region — Foundry AI Services (Agent Service, models) and the Cosmos DB account. Cosmos is reached through a private endpoint in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
+@description('AI region — Foundry AI Services (Voice Live, Agent Service, models) and Azure AI Search. Private endpoints for these still land in the compute VNet, so cross-region traffic stays on the Microsoft backbone.')
 param aiLocation string = 'eastus2'
 
-@description('Order Concierge project within the existing shared Foundry account.')
-param orderProjectName string = 'northwind-orders'
-@description('Use independently hosted Order Concierge specialists after they have been deployed.')
+@description('Insurance claims project within the existing shared Foundry account. The default is the live project name; the original native project northwind-orders is still accepted by the API and the hosted-agent deploy script.')
+param insuranceProjectName string = 'nw-insurance-claims'
+@description('Use the independently hosted insurance agents after they have been deployed.')
 @allowed(['true', 'false'])
-param orderAgentsHosted string = 'true'
+param hostedAgentsEnabled string = 'true'
 
 @description('Opt in to reference-only adoption. No foundational resources, RBAC, models, app settings, or network configuration are reconciled.')
 @allowed(['true', 'false'])
@@ -39,12 +39,6 @@ param vnetResourceGroupName string = ''
 @description('Existing Cosmos private endpoint in Networking. Defaults to the approved replacement; set an explicit override for a transitional endpoint. Selection does not move its subnet.')
 @minLength(1)
 param cosmosPrivateEndpointName string = 'pe-zz-cosmos-northwind'
-@description('Explicit greenfield-only opt-in for the retired ingestion worker. Content Understanding API capability does not require this workload.')
-@allowed(['true', 'false'])
-param enableCuIngest string = 'false'
-@description('Explicit domain activation. Existing retail behavior remains the greenfield default.')
-@allowed(['retail', 'insurance'])
-param businessDomain string = 'retail'
 @description('Operator-confirmed deployment readiness, never inferred from packaged files.')
 @allowed(['true', 'false'])
 param insuranceAgentsReady string = 'false'
@@ -53,10 +47,20 @@ param insuranceOrchestratorAgentId string = ''
 @description('Opt in to the authenticated manual business APIs only after identity mappings are approved.')
 @allowed(['true', 'false'])
 param businessApiEnabled string = 'false'
+@description('Opt in to identity-bound customer assistants after identity, model routing and help content are verified.')
+@allowed(['true', 'false'])
+param assistantsEnabled string = 'false'
+param assistantSurfaces string = ''
+param assistantModel string = ''
 param insuranceAuthTenantId string = ''
 param insuranceAuthAudience string = ''
 param insuranceAuthRequiredScope string = 'access_as_user'
 param insuranceAuthClientIds string = ''
+@description('Origin of the API Management gateway (https://<name>.azure-api.net). When set, API_URI and the MCP URLs point at the gateway instead of the Container Apps. Empty keeps the direct URLs.')
+param gatewayUrl string = ''
+@description('Gateway API stack that fronts the Container Apps this environment manages. The insurance stack is the only one this repository manages.')
+@allowed(['insurance'])
+param gatewayStack string = 'insurance'
 @description('Preserved azd outputs for existing Foundry/runtime configuration. Required and validated only in reuse mode.')
 param existingSettings object = {}
 
@@ -83,28 +87,32 @@ param embeddingModelName string = 'text-embedding-3-small'
 param embeddingModelVersion string = '1'
 param embeddingModelCapacity int = 120
 
-@description('Optional: extra Azure-direct model deployments. Each entry: { name, version, capacity, sku?, format? }. Includes first-party Microsoft models AND partner models from the Foundry Models catalog (Moonshot/Kimi, DeepSeek, Llama, Mistral, etc.) — all served through this Foundry project with a single UAMI and OpenAI-compatible SDK. Default is empty because partner-model catalog availability varies per subscription + region. The Model bake-off screen that raced them was removed, so nothing in this repository reads them now.')
-param bakeoffDeployments array = []
+@description('Optional: extra Azure-direct model deployments on the shared Foundry account, for example a partner model (Kimi) offered to adjuster support. Each entry: { name, version, capacity, sku?, format? }. Default is empty because partner-model catalog availability varies per subscription + region.')
+param additionalModelDeployments array = []
 
-@description('Additional Foundry projects — one per Northwind department beyond Order Concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`.')
+@description('Enable the bounded Copilot SDK synthetic-demo harness. Existing workflows are unaffected when disabled.')
+@allowed(['true', 'false'])
+param harnessEnabled string = 'false'
+
+@description('Additional Foundry projects — one per Northwind department beyond the claims concierge. Each project sits inside the same AI Services account so they share model deployments + UAMI, but each keeps its own agents, connections, evaluators, and Observability lens. To add or remove a department, edit this array and re-run `azd provision`. The project names match the live deployment.')
 param additionalProjects array = [
   {
-    slug: 'employee-help-desk'
-    projectName: 'nw-employee-help-desk'
-    displayName: 'Northwind Employee Help Desk'
-    description: 'RAG-only Foundry project for HR/IT internal Q&A. Owns the nw-hr Search index and the northwind-hr-assistant prompt agent.'
+    slug: 'adjuster-support'
+    projectName: 'nw-insurance-support'
+    displayName: 'Northwind Adjuster Support'
+    description: 'RAG-only Foundry project for adjuster support: grounded answers about claims handling procedures, evidence handling and review boundaries. It cannot approve, deny or pay a claim.'
   }
   {
-    slug: 'claims-warranty'
-    projectName: 'nw-claims-warranty'
-    displayName: 'Northwind Claims & Warranty Ops'
-    description: 'Content Understanding project for warranty PDFs, damage photos, and intake forms. Owns the nw-claims Search index, the northwind-claim-intake CU analyzer, and the northwind-claims-triage prompt agent.'
+    slug: 'claims-documents'
+    projectName: 'nw-insurance-documents'
+    displayName: 'Northwind Claims Documents'
+    description: 'Content Understanding project for claim documents: FNOL reports, repair estimates, supporting invoices and damage evidence. Owns the nw-claims Search index, the northwindInsuranceClaimsV1 Content Understanding analyzer, and the northwind-claims-triage prompt agent.'
   }
   {
     slug: 'contact-center'
-    projectName: 'nw-contact-center'
-    displayName: 'Northwind Customer Contact Center'
-    description: 'Customer contact center project. Owns the nw-contact-center Search index and the northwind-intent-classifier prompt agent. Its Voice Live front door and handoff to the Order Concierge orchestrator were removed from this repository.'
+    projectName: 'nw-insurance-contact-center'
+    displayName: 'Northwind Policyholder Contact Center'
+    description: 'Voice Live front door project for policyholder intake, claim status and adjuster handoff. Owns the nw-contact-center Search index, the northwind-intent-classifier prompt agent, and cross-project handoff to the claims concierge orchestrator.'
   }
 ]
 
@@ -119,6 +127,7 @@ var resourceToken = 'zurlo-northwind'
 // Storage accounts and ACR only allow lowercase alphanumerics — strip the dash.
 var compactToken = replace(resourceToken, '-', '')
 var reuseExisting = reuseExistingResources == 'true'
+var gatewayBase = empty(gatewayUrl) ? '' : '${gatewayUrl}/${gatewayStack}'
 var existingLogAnalyticsGroup = empty(logAnalyticsResourceGroupName) ? appsResourceGroupName : logAnalyticsResourceGroupName
 var existingEnvironmentGroup = empty(containerAppsEnvironmentResourceGroupName) ? appsResourceGroupName : containerAppsEnvironmentResourceGroupName
 var existingVnetGroup = empty(vnetResourceGroupName) ? networkingResourceGroupName : vnetResourceGroupName
@@ -231,7 +240,7 @@ module foundry 'modules/foundry.bicep' = if (!reuseExisting) {
     location: aiLocation
     tags: tags
     aiServicesName: '${abbrs.cognitiveServicesAccounts}${resourceToken}'
-    projectName: orderProjectName
+    projectName: insuranceProjectName
     appPrincipalId: reuseExisting ? '' : identity!.outputs.principalId
     devPrincipalId: principalId
     searchPrincipalId: reuseExisting ? '' : search!.outputs.principalId
@@ -247,7 +256,7 @@ module foundry 'modules/foundry.bicep' = if (!reuseExisting) {
     embeddingModelName: embeddingModelName
     embeddingModelVersion: embeddingModelVersion
     embeddingModelCapacity: embeddingModelCapacity
-    bakeoffDeployments: bakeoffDeployments
+    additionalModelDeployments: additionalModelDeployments
     additionalProjects: additionalProjects
   }
 }
@@ -260,7 +269,7 @@ module foundryObservability 'modules/foundry-observability.bicep' = if (!reuseEx
   name: 'foundry-observability'
   params: {
     aiServicesName: '${abbrs.cognitiveServicesAccounts}${resourceToken}'
-    projectName: orderProjectName
+    projectName: insuranceProjectName
     appInsightsName: '${abbrs.insightsComponents}${resourceToken}'
     projectPrincipalId: reuseExisting ? '' : foundry!.outputs.projectPrincipalId
   }
@@ -301,10 +310,10 @@ module containerapps 'modules/containerapps.bicep' = if (!reuseExisting) {
     // wired settings for the API + workers
     foundryEndpoint: reuseExisting ? '' : foundry!.outputs.aiServicesEndpoint
     foundryProjectEndpoint: reuseExisting ? '' : foundry!.outputs.projectEndpoint
-    orderProjectName: orderProjectName
-    orderAgentsHosted: orderAgentsHosted == 'true'
+    insuranceProjectName: insuranceProjectName
+    hostedAgentsEnabled: hostedAgentsEnabled == 'true'
     foundryProjectEndpoints: reuseExisting ? '' : format(
-      '{{"order-concierge":"{0}","employee-help-desk":"{1}","claims-warranty":"{2}","contact-center":"{3}"}}',
+      '{{"claims-concierge":"{0}","adjuster-support":"{1}","claims-documents":"{2}","contact-center":"{3}"}}',
       foundry!.outputs.projectEndpoint,
       foundry!.outputs.additionalProjectEndpoints[0].endpoint,
       foundry!.outputs.additionalProjectEndpoints[1].endpoint,
@@ -315,18 +324,16 @@ module containerapps 'modules/containerapps.bicep' = if (!reuseExisting) {
     promptAgentDeployment: reuseExisting ? '' : foundry!.outputs.promptAgentDeploymentName
     embeddingDeployment: reuseExisting ? '' : foundry!.outputs.embeddingDeploymentName
     searchEndpoint: reuseExisting ? '' : search!.outputs.endpoint
-    searchIndexName: reuseExisting ? '' : search!.outputs.indexName
-    searchKnowledgeBase: reuseExisting ? '' : search!.outputs.knowledgeBaseName
-    searchKnowledgeSource: reuseExisting ? '' : search!.outputs.knowledgeSourceName
     cosmosEndpoint: reuseExisting ? '' : cosmos!.outputs.endpoint
     cosmosDatabaseName: reuseExisting ? '' : cosmos!.outputs.databaseName
     storageAccountName: reuseExisting ? '' : storage!.outputs.name
-    bakeoffDeployments: reuseExisting ? '' : join(concat([foundry!.outputs.plannerDeploymentName, foundry!.outputs.workerDeploymentName], foundry!.outputs.bakeoffDeploymentNames), ',')
-    enableCuIngest: enableCuIngest == 'true'
-    businessDomain: businessDomain
+    harnessEnabled: harnessEnabled == 'true'
     insuranceAgentsReady: insuranceAgentsReady == 'true'
     insuranceOrchestratorAgentId: insuranceOrchestratorAgentId
     businessApiEnabled: businessApiEnabled == 'true'
+    assistantsEnabled: assistantsEnabled == 'true'
+    assistantSurfaces: assistantSurfaces
+    assistantModel: assistantModel
     insuranceAuthTenantId: insuranceAuthTenantId
     insuranceAuthAudience: insuranceAuthAudience
     insuranceAuthRequiredScope: insuranceAuthRequiredScope
@@ -349,7 +356,7 @@ module reuse 'modules/existing-resources.bicep' = if (reuseExisting) {
     cosmosPrivateEndpointName: cosmosPrivateEndpointName
     resourceToken: resourceToken
     compactToken: compactToken
-    orderProjectName: orderProjectName
+    insuranceProjectName: insuranceProjectName
     preservedSettings: existingSettings
   }
 }
@@ -357,7 +364,7 @@ module reuse 'modules/existing-resources.bicep' = if (reuseExisting) {
 // ── Outputs consumed by azd + apps ─────────────────────────────────────────
 output AZURE_LOCATION string = location
 output AZURE_AI_LOCATION string = aiLocation
-// azd's hosted-agent target must follow the project, not the legacy app environment.
+// The insurance agent fleet is deployed to the Foundry project, so this group must follow the project, not the legacy app environment.
 output AZURE_RESOURCE_GROUP string = reuseExisting ? foundryResourceGroupName : rg!.name
 output AZURE_APPS_RESOURCE_GROUP string = reuseExisting ? appsResourceGroupName : rg!.name
 output AZURE_DATA_RESOURCE_GROUP string = reuseExisting ? dataResourceGroupName : rg!.name
@@ -377,32 +384,33 @@ output APPLICATIONINSIGHTS_CONNECTION_STRING string = reuseExisting ? reuse!.out
 
 output FOUNDRY_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_ENDPOINT : foundry!.outputs.aiServicesEndpoint
 output FOUNDRY_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
-output ORDER_PROJECT_NAME string = orderProjectName
-// Greenfield proposes the Orders default for a separately reviewed migration.
+output INSURANCE_PROJECT_NAME string = insuranceProjectName
+// Greenfield proposes the insurance project as the account default for a separately reviewed change.
 // Adoption instead reports the effective account default without changing it.
-output ORDER_DEFAULT_PROJECT string = reuseExisting ? reuse!.outputs.settings.ORDER_DEFAULT_PROJECT : orderProjectName
-output ORDER_AGENTS_HOSTED string = orderAgentsHosted
-output NORTHWIND_BUSINESS_DOMAIN string = businessDomain
-output ORDERS_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.ORDERS_KB_CONNECTION_NAME : '${orderProjectName}-kb-mcp'
-output FOUNDRY_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_KB_CONNECTION_NAME : '${orderProjectName}-kb-mcp'
-output ORDERS_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.ORDERS_OPENAI_ENDPOINT : 'https://${abbrs.cognitiveServicesAccounts}${resourceToken}.openai.azure.com/openai/v1/'
-// azd AI Agent extension (host: azure.ai.agent) resolves the Foundry project
-// via these exact env-var names during package/deploy/postdeploy.
+output FOUNDRY_DEFAULT_PROJECT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_DEFAULT_PROJECT : insuranceProjectName
+output HOSTED_AGENTS_ENABLED string = hostedAgentsEnabled
+output AGENT_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.AGENT_KB_CONNECTION_NAME : '${insuranceProjectName}-kb-mcp'
+output FOUNDRY_KB_CONNECTION_NAME string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_KB_CONNECTION_NAME : '${insuranceProjectName}-kb-mcp'
+output AGENT_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AGENT_OPENAI_ENDPOINT : 'https://${abbrs.cognitiveServicesAccounts}${resourceToken}.openai.azure.com/openai/v1/'
+// The Foundry project the insurance agent fleet is deployed to; the deployment
+// scripts resolve the project through these exact env-var names.
 output AZURE_AI_PROJECT_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_PROJECT_ENDPOINT : foundry!.outputs.projectEndpoint
 output AZURE_AI_PROJECT_ID string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_PROJECT_ID : foundry!.outputs.projectId
 
-// department-slug -> Foundry project endpoint map (JSON string), emitted as
-// FOUNDRY_PROJECT_ENDPOINTS. The post-provision scripts (create-prompt-agents.py,
-// connect-knowledge-base.py) read it to place each department's agents; the API
-// no longer parses it. The Order Concierge entry is always the flagship Orders
-// project.
+// department-slug -> Foundry project endpoint map (JSON string). The API
+// reads FOUNDRY_PROJECT_ENDPOINTS at startup, parses it, and picks the
+// right endpoint per request based on the X-Department header. The
+// claims-concierge entry is always the flagship insurance project so
+// existing X-Department-less callers keep working. An adopted value may
+// still use the deprecated slugs (order-concierge, employee-help-desk,
+// claims-warranty); the API and scripts/validate-reuse.py accept both.
 //
 // Bicep's `string(union(...))` emits a Bicep-object representation, not
 // real JSON — the API's json.loads() rejects it. We hand-format the JSON
 // here so the wire format is stable. Order matches
 // data/northwind/company.yaml.
 output FOUNDRY_PROJECT_ENDPOINTS string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_PROJECT_ENDPOINTS : format(
-  '{{"order-concierge":"{0}","employee-help-desk":"{1}","claims-warranty":"{2}","contact-center":"{3}"}}',
+  '{{"claims-concierge":"{0}","adjuster-support":"{1}","claims-documents":"{2}","contact-center":"{3}"}}',
   foundry!.outputs.projectEndpoint,
   foundry!.outputs.additionalProjectEndpoints[0].endpoint,
   foundry!.outputs.additionalProjectEndpoints[1].endpoint,
@@ -414,30 +422,10 @@ output FOUNDRY_PROMPT_AGENT_DEPLOYMENT string = reuseExisting ? reuse!.outputs.s
 output FOUNDRY_EMBEDDING_DEPLOYMENT string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_EMBEDDING_DEPLOYMENT : foundry!.outputs.embeddingDeploymentName
 output FOUNDRY_PROJECT_PRINCIPAL_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_PROJECT_PRINCIPAL_ID : foundry!.outputs.projectPrincipalId
 
-// Greenfield agent-ID outputs remain compatibility placeholders; reuse
-// preserves any IDs already populated in the azd environment.
-output FOUNDRY_AGENT_TRIAGE_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_AGENT_TRIAGE_ID : ''
-output FOUNDRY_AGENT_TECH_LOOKUP_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_AGENT_TECH_LOOKUP_ID : ''
-output FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_AGENT_MANUAL_RETRIEVAL_ID : ''
-output FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_AGENT_WORK_ORDER_DRAFT_ID : ''
-output FOUNDRY_ORCHESTRATOR_AGENT_ID string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_ORCHESTRATOR_AGENT_ID : ''
 // Foundry hosting expects this exact env-var name for the manager model.
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = reuseExisting ? reuse!.outputs.settings.AZURE_AI_MODEL_DEPLOYMENT_NAME : foundry!.outputs.plannerDeploymentName
 
-// Comma-joined list of the Azure-direct model deployments (FOUNDRY_BAKEOFF_DEPLOYMENTS).
-// Includes the flagship planner + worker. The API endpoint that raced them was
-// removed; the output is kept for operators and the reuse profile.
-output FOUNDRY_BAKEOFF_DEPLOYMENTS string = reuseExisting ? reuse!.outputs.settings.FOUNDRY_BAKEOFF_DEPLOYMENTS : join(
-  concat(
-    [foundry!.outputs.plannerDeploymentName, foundry!.outputs.workerDeploymentName],
-    foundry!.outputs.bakeoffDeploymentNames
-  ), ','
-)
-
 output AZURE_SEARCH_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_ENDPOINT : search!.outputs.endpoint
-output AZURE_SEARCH_INDEX string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_INDEX : search!.outputs.indexName
-output AZURE_SEARCH_KNOWLEDGE_BASE string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_KNOWLEDGE_BASE : search!.outputs.knowledgeBaseName
-output AZURE_SEARCH_KNOWLEDGE_SOURCE string = reuseExisting ? reuse!.outputs.settings.AZURE_SEARCH_KNOWLEDGE_SOURCE : search!.outputs.knowledgeSourceName
 output AZURE_OPENAI_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_OPENAI_ENDPOINT : foundry!.outputs.aiServicesEndpointOpenAI
 
 output COSMOS_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.COSMOS_ENDPOINT : cosmos!.outputs.endpoint
@@ -450,13 +438,18 @@ output STORAGE_SEED_CONTAINER string = reuseExisting ? reuse!.outputs.settings.S
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = reuseExisting ? reuse!.outputs.settings.AZURE_CONTAINER_REGISTRY_ENDPOINT : acr!.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = reuseExisting ? reuse!.outputs.settings.AZURE_CONTAINER_REGISTRY_NAME : acr!.outputs.name
 
-output API_URI string = reuseExisting ? reuse!.outputs.settings.API_URI : containerapps!.outputs.apiUri
-output WEB_TECH_URI string = reuseExisting ? reuse!.outputs.settings.WEB_TECH_URI : containerapps!.outputs.webTechUri
+output NORTHWIND_GATEWAY_URL string = gatewayUrl
+output NORTHWIND_GATEWAY_STACK string = gatewayStack
+// With a gateway configured these are the gateway URLs, so re-provisioning cannot silently revert the cutover.
+output API_URI string = !empty(gatewayBase) ? gatewayBase : (reuseExisting ? reuse!.outputs.settings.API_URI : containerapps!.outputs.apiUri)
+output WEB_PORTAL_URI string = reuseExisting ? reuse!.outputs.settings.WEB_PORTAL_URI : containerapps!.outputs.webPortalUri
+output WEB_VOICE_URI string = reuseExisting ? reuse!.outputs.settings.WEB_VOICE_URI : containerapps!.outputs.webVoiceUri
 
 // MCP server URLs consumed by scripts/create-prompt-agents.py to render
-// the type: mcp tool blocks in agents/tech_lookup.yaml + work_order_draft.yaml.
-output MCP_TECH_LOOKUP_URL string = reuseExisting ? reuse!.outputs.settings.MCP_TECH_LOOKUP_URL : containerapps!.outputs.mcpTechLookupUrl
-output MCP_WORK_ORDER_URL string = reuseExisting ? reuse!.outputs.settings.MCP_WORK_ORDER_URL : containerapps!.outputs.mcpWorkOrderUrl
+// the type: mcp tool blocks of the prompt agents. The paths are the live API
+// Management API identifiers (tech-lookup, work-order).
+output MCP_POLICY_LOOKUP_URL string = !empty(gatewayBase) ? '${gatewayBase}/mcp/tech-lookup' : (reuseExisting ? reuse!.outputs.settings.MCP_POLICY_LOOKUP_URL : containerapps!.outputs.mcpPolicyLookupUrl)
+output MCP_CLAIM_REVIEW_URL string = !empty(gatewayBase) ? '${gatewayBase}/mcp/work-order' : (reuseExisting ? reuse!.outputs.settings.MCP_CLAIM_REVIEW_URL : containerapps!.outputs.mcpClaimReviewUrl)
 
 output AZURE_LOG_ANALYTICS_RESOURCE_ID string = reuseExisting ? reuse!.outputs.settings.AZURE_LOG_ANALYTICS_RESOURCE_ID : observability!.outputs.logAnalyticsId
 output NORTHWIND_EXISTING_RESOURCE_IDS string = reuseExisting ? string(union(reuse!.outputs.resourceIds, {

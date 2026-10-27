@@ -7,6 +7,7 @@ import pytest
 from azure.core.credentials import AccessToken
 from pydantic import SecretStr
 
+from app import foundry_client
 from app.assistants import extractive, history, profiles, runtime
 from app.assistants.models import EVENTS, STANDING_NOTICE
 from app.business.service import InsuranceBusinessService
@@ -61,7 +62,7 @@ class Search:
 def helping(identity, monkeypatch):  # noqa: F811
     settings = identity[0].model_copy(update={
         "assistants_enabled": True, "assistant_surfaces": "concierge,help_center", "assistant_model": "gpt-test",
-        "foundry_project_endpoint": "https://foundry.unit.test/api/projects/northwind-orders",
+        "foundry_project_endpoint": "https://foundry.unit.test/api/projects/nw-insurance-claims",
         "help_center_search_endpoint": "https://search.unit.test", "help_center_search_auth": "query_key",
         "help_center_query_key": SecretStr("unit-query-key"),
         "assistant_timeout": 5, "assistant_max_tool_calls": 3, "assistant_concurrency": 2,
@@ -77,7 +78,7 @@ def helping(identity, monkeypatch):  # noqa: F811
 def install(monkeypatch, rows, *script, **options):
     search, project = Search(*rows, **options), ScriptedProject(*script)
     monkeypatch.setattr(extractive, "_http", search)
-    monkeypatch.setattr(extractive, "_project_client", project)
+    monkeypatch.setattr(foundry_client, "_project_client", project)
     return search, project
 
 

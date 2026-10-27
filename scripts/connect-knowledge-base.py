@@ -10,10 +10,13 @@ the KB's MCP endpoint:
 Multi-project fan-out: every department gets its own Foundry project (see
 `infra/modules/foundry.bicep` additionalProjects loop). Prompt agents in
 each project need their OWN project connection to the department's KB.
-We create the same-named connection (`northwind-kb-mcp`) inside every
-department's project — same name simplifies the agent yaml
-(`create-prompt-agents.py` uses a single default) while each connection
-points at its own department's KB.
+Connection names are account-scoped, so each KB gets its own, `<kb>-mcp`
+(for example `nw-claims-kb-mcp`), pointing at that department's KB.
+
+Claims Concierge (the isolated `northwind-insurance-kb` and its
+`nw-insurance-claims-kb-mcp` connection) is published by
+`scripts/publish-insurance-knowledge.py`, and Adjuster Support has no
+knowledge base, so both are skipped here.
 
 Authentication: Azure AI Search's MCP endpoint accepts the admin key via
 the `api-key` header (it does NOT accept `Authorization: Bearer <key>` —
@@ -22,13 +25,12 @@ so Foundry sends `api-key: <admin-key>` on every MCP call.
 
 Env vars consumed (populated by azd + fetch-keys.ps1):
   AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP
-  FOUNDRY_PROJECT_ENDPOINT          (Order Concierge flagship — for account name)
-  FOUNDRY_PROJECT_ENDPOINTS         (JSON map slug -> endpoint; falls back to
-                                     single-project when missing for older envs)
+  FOUNDRY_PROJECT_ENDPOINTS         (JSON map slug -> endpoint; deprecated slugs are
+                                     mapped to the canonical slug; falls back to a map
+                                     synthesized from FOUNDRY_ENDPOINT or the single
+                                     FOUNDRY_PROJECT_ENDPOINT for older envs)
   AZURE_SEARCH_ENDPOINT
   AZURE_SEARCH_KEY                  (Search admin key)
-  AZURE_SEARCH_KNOWLEDGE_BASE       (flagship KB name; defaults northwind-kb)
-  FOUNDRY_KB_CONNECTION_NAME        (defaults to northwind-kb-mcp)
 """
 from __future__ import annotations
 
@@ -48,6 +50,20 @@ from data.northwind import load_company  # noqa: E402
 
 _ARM_API = "2025-10-01-preview"
 _KB_API = "2026-05-01-preview"
+
+# Departments whose knowledge is published by another script (that script owns their
+# index, knowledge base and project connection), so no connection is made here.
+_PUBLISHED_ELSEWHERE = {
+    "claims-concierge": "scripts/publish-insurance-knowledge.py",
+    "adjuster-support": "scripts/publish-adjuster-support.py",
+}
+
+# Deprecated department slugs still found in already-deployed FOUNDRY_PROJECT_ENDPOINTS values.
+LEGACY_DEPARTMENT_SLUGS = {
+    "order-concierge": "claims-concierge",
+    "employee-help-desk": "adjuster-support",
+    "claims-warranty": "claims-documents",
+}
 
 
 def _env(name: str, *, default: str = "", required: bool = True) -> str:
@@ -84,17 +100,28 @@ def _project_from_endpoint(endpoint: str) -> str:
     return parts[-1]
 
 
+def _canonical_endpoints(raw: dict) -> dict[str, str]:
+    """Department-slug -> endpoint with deprecated slugs mapped to canonical ones.
+    A canonical key wins over its deprecated alias."""
+    canonical: dict[str, str] = {}
+    legacy: dict[str, str] = {}
+    for key, value in raw.items():
+        slug = str(key).strip().lower()
+        (legacy if slug in LEGACY_DEPARTMENT_SLUGS else canonical)[LEGACY_DEPARTMENT_SLUGS.get(slug, slug)] = str(value)
+    return {**legacy, **canonical}
+
+
 def _resolve_endpoints() -> dict[str, str]:
     raw = os.environ.get("FOUNDRY_PROJECT_ENDPOINTS", "").strip()
     if raw:
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
-                return {str(k): str(v) for k, v in parsed.items()}
+                return _canonical_endpoints(parsed)
         except json.JSONDecodeError:
             pass
     # Synthesis fallback — same shape as scripts/create-prompt-agents.py's
-    # `_resolve_endpoints`. Lets a local postprovision.ps1 run succeed even
+    # `_resolve_endpoints`. Lets a local run succeed even
     # when only FOUNDRY_ENDPOINT is set.
     single = os.environ.get("FOUNDRY_PROJECT_ENDPOINT", "").strip()
     account_endpoint = os.environ.get("FOUNDRY_ENDPOINT", "").strip()
@@ -109,13 +136,13 @@ def _resolve_endpoints() -> dict[str, str]:
                 for d in company.departments
             }
             if single:
-                synthesized["order-concierge"] = single
+                synthesized["claims-concierge"] = single
             print(f"Synthesized {len(synthesized)} project endpoints from "
                   f"FOUNDRY_ENDPOINT + manifest.")
             return synthesized
     if not single:
         raise RuntimeError("Neither FOUNDRY_PROJECT_ENDPOINTS nor FOUNDRY_PROJECT_ENDPOINT set.")
-    return {"order-concierge": single}
+    return {"claims-concierge": single}
 
 
 def _connect_one(
@@ -159,18 +186,6 @@ def main() -> None:
     rg = _env("AZURE_RESOURCE_GROUP")
     search_endpoint = _env("AZURE_SEARCH_ENDPOINT").rstrip("/")
     search_key = _env("AZURE_SEARCH_KEY")
-    flagship_kb = os.environ.get("AZURE_SEARCH_KNOWLEDGE_BASE", "northwind-kb").strip() or "northwind-kb"
-    # Connection names in Foundry are account-scoped, not project-scoped —
-    # a single `northwind-kb-mcp` in the Order Concierge project blocks the
-    # same name in every other project. So we derive one connection name
-    # per KB: `<kb>-mcp`. The flagship convention (`northwind-kb-mcp`)
-    # falls out naturally from `northwind-kb` -> `northwind-kb-mcp`.
-    flagship_conn = os.environ.get(
-        "FOUNDRY_KB_CONNECTION_NAME",
-        f"{os.environ.get('ORDER_PROJECT_NAME', 'northwind-orders')}-kb-mcp",
-    ).strip()
-    if not flagship_conn:
-        raise ValueError("FOUNDRY_KB_CONNECTION_NAME must not be empty")
 
     endpoints = _resolve_endpoints()
     company = load_company()
@@ -188,8 +203,14 @@ def main() -> None:
     print(f"Search endpoint: {search_endpoint}")
     print("Connections are account-scoped; each project gets a unique name.")
 
+    connected = 0
     with httpx.Client(timeout=60.0) as client:
         for dept in company.departments:
+            publisher = _PUBLISHED_ELSEWHERE.get(dept.slug)
+            if publisher:
+                print(f"\n[{dept.slug}] knowledge is published by {publisher} — skipping")
+                continue
+
             endpoint = endpoints.get(dept.slug)
             if not endpoint:
                 print(f"\n[{dept.slug}] SKIPPED — no endpoint in FOUNDRY_PROJECT_ENDPOINTS")
@@ -198,22 +219,17 @@ def main() -> None:
             project = _project_from_endpoint(endpoint)
             project_id = _project_resource_id(sub, rg, ai_account, project)
 
-            # Order Concierge keeps flagship KB name for backward compat
-            # with any legacy AZURE_SEARCH_KNOWLEDGE_BASE reader.
-            if dept.slug == "order-concierge":
-                kb_name = flagship_kb
-                conn_name = flagship_conn
-            else:
-                kb_name = f"{dept.search_index}-kb"
-                conn_name = f"{kb_name}-mcp"
+            kb_name = f"{dept.search_index}-kb"
+            conn_name = f"{kb_name}-mcp"
 
             print(f"\n[{dept.slug}] project={project}  kb={kb_name}  conn={conn_name}")
             _connect_one(
                 client, arm_token, project_id, conn_name,
                 search_endpoint, search_key, kb_name,
             )
+            connected += 1
 
-    print(f"\nAll {len(endpoints)} project connections ready.")
+    print(f"\n{connected} project connection(s) ready.")
 
 
 if __name__ == "__main__":

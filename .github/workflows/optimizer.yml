@@ -1,15 +1,16 @@
 name: Prompt Optimizer (nightly)
-# Runs the Foundry Prompt Optimizer + Agent Optimizer against each prompt
-# under agents/ using the golden dataset. When the optimizer finds a variant
-# that beats baseline by >= OPTIMIZER_MIN_LIFT on the rubric evaluator, it
-# opens a PR swapping the .prompty file and updating baseline.json.
+# Runs the Foundry Prompt Optimizer + Agent Optimizer against each Northwind
+# Insurance agent prompt under agents/insurance/ using the golden dataset. When
+# the optimizer finds a variant that beats baseline by >= OPTIMIZER_MIN_LIFT on
+# the rubric evaluator, it opens a PR with the improved prompt. A human reviews
+# the PR; evals/baseline.json only changes with reviewer approval.
 on:
   schedule:
     - cron: "0 6 * * *"    # nightly 06:00 UTC
   workflow_dispatch:
     inputs:
       agent:
-        description: "Agent name (e.g. triage, work_order_draft, or 'all')"
+        description: "Agent key (triage, policy_claim_lookup, policy_wording, claim_action_draft, orchestrator, or 'all')"
         default: "all"
         required: true
       min_lift:
@@ -29,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [triage, work_order_draft]
+        agent: [triage, claim_action_draft]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
@@ -66,9 +67,9 @@ jobs:
             - Golden set: `data/golden/dataset.jsonl`
             - Judge model: `gpt-5.4`
             - Report: attached as workflow artifact
-            - Prompt file: `agents/${{ matrix.agent }}.yaml`
+            - Prompt file: `${{ steps.opt.outputs.prompt_path }}`
 
-            The PR checks (CI and the Tier-1 smoke eval) will re-run when you push a commit to this branch.
+            All four eval tiers will re-run when you push a commit to this branch.
           branch: optimizer/${{ matrix.agent }}
           labels: optimizer, needs-review
       - uses: actions/upload-artifact@v7

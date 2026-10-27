@@ -33,8 +33,8 @@ class RequestScope:
 
     def require_workflow(self) -> str:
         if self.workflow_id is None:
-            raise ValueError("Response metadata.workflow_id is required to propose a resolution")
+            raise ValueError("Response metadata.workflow_id is required to draft a claim action")
         return self.workflow_id
 
 
-current_scope: ContextVar[RequestScope] = ContextVar("northwind_order_request")
+current_scope: ContextVar[RequestScope] = ContextVar("northwind_claim_request")

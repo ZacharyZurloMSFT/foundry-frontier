@@ -31,14 +31,15 @@ build/
 data/seed/generated/
 
 # Local learning state and generated upload packages
-pipelines/orders-learning/workspace/
-pipelines/orders-learning/upload-pack/
-pipelines/orders-learning/insurance-upload-pack/
+pipelines/insurance-learning/workspace/
+pipelines/insurance-learning/upload-pack/
+pipelines/insurance-learning/insurance-upload-pack/
+# Same state kept by checkouts that predate the pipelines/orders-learning -> pipelines/insurance-learning rename
+pipelines/orders-learning/
 
 # Manifest copy bundled into the API container at azd package time
 apps/api/app/_northwind/
 apps/api/app/_agent_prompts/
-agents/*/agents/
 
 # Secrets
 *.pem

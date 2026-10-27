@@ -28,7 +28,7 @@ from evals.insurance_gates import unsafe_conclusion  # noqa: E402
 
 DATASET = ROOT / "data" / "golden" / "assistant.jsonl"
 FIXTURE = ROOT / "data" / "northwind" / "insurance-fixtures.json"
-HELP_SEED = ROOT / "data" / "northwind" / "departments" / "employee-help-desk" / "seed" / "customer"
+HELP_SEED = ROOT / "data" / "northwind" / "customer-help"
 SURFACES = {"concierge", "help_center"}
 CATEGORIES = {"scope", "internal", "determination", "grounding", "status", "injection", "unknown", "safety",
               "help_grounded", "help_unknown", "help_personal", "help_determination", "help_injection", "help_contract"}

@@ -1,0 +1,43 @@
+name: Continuous Eval
+# Tier 4: re-scores ~5% of the last 24h of AI-conversation traces (insurance API / Copilot SDK
+# harness) with the same evaluators used at PR time. API_URI must point at the insurance API.
+on:
+  schedule:
+    - cron: "0 7 * * *"   # nightly 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Install
+        run: |
+          pip install -r evals/requirements.txt
+          pip install azure-monitor-query==1.4.0
+      - name: Sample + evaluate 5% of prod traffic
+        env:
+          APPINSIGHTS_RESOURCE_ID: ${{ secrets.APPINSIGHTS_RESOURCE_ID }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+          API_URI: ${{ secrets.STAGING_API_URI }}
+        run: python evals/continuous_eval.py
+      - name: Publish to observability dashboard
+        run: |
+          echo "Results uploaded — see Foundry Observability > northwind.continuous_eval"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: continuous-eval-results
+          path: continuous-eval-results.json

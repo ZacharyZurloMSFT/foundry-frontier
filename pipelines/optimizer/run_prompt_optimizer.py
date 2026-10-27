@@ -1,14 +1,14 @@
 """Nightly Prompt/Agent Optimizer runner.
 
-Wraps Foundry's Prompt Optimizer against a single agent's prompty/yaml.
-Compares candidate variants against the current golden-set baseline; if
-the best variant beats baseline by >= OPTIMIZER_MIN_LIFT on the rubric
-evaluator, this script:
+Wraps Foundry's Prompt Optimizer against one Northwind Insurance agent prompt
+under agents/insurance/. Compares candidate variants against the current
+golden-set baseline; if the best variant beats baseline by >= OPTIMIZER_MIN_LIFT
+on the rubric evaluator, this script:
 
-  1. Rewrites `agents/<agent>.yaml` (`instructions:` block) with the winning
+  1. Rewrites the agent's prompt file (`instructions:` block) with the winning
      prompt in-place.
-  2. Emits GitHub Actions outputs `improved=true`, `lift=0.NNN` so the
-     workflow can open a PR.
+  2. Emits GitHub Actions outputs `improved=true`, `lift=0.NNN` and
+     `prompt_path=agents/insurance/<file>.yaml` so the workflow can open a PR.
   3. Writes a JSON report summarising all candidates.
 
 If no lift is found, exits cleanly with `improved=false`.
@@ -31,12 +31,37 @@ from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PROMPTS_DIR = REPO_ROOT / "agents" / "insurance"
+# Agent keys match the rubric names (`<agent>_rubric_score`).
+PROMPT_FILES = {
+    "triage": "triage.yaml",
+    "policy_claim_lookup": "policy_claim_lookup.yaml",
+    "policy_wording": "policy_wording.yaml",
+    "claim_action_draft": "claim_action_draft.yaml",
+    "orchestrator": "orchestrator.yaml",
+}
+# The canonical department slug comes first; the legacy slug is still read from older baseline files.
+BASELINE_DEPARTMENTS = ("claims-concierge", "order-concierge")
 
 
 def _load_agent_prompt(agent: str) -> tuple[Path, dict]:
-    path = REPO_ROOT / "agents" / f"{agent}.yaml"
+    path = PROMPTS_DIR / PROMPT_FILES[agent]
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return path, data
+
+
+def _baseline_score(path: Path, metric: str) -> float:
+    """aggregates.<department>.orchestrator.<metric> from the reviewer-approved baseline
+    (a flat aggregates object is read as-is); 0.0 when no measured baseline exists."""
+    if not path.exists():
+        return 0.0
+    aggregates = json.loads(path.read_text(encoding="utf-8")).get("aggregates", {})
+    for department in BASELINE_DEPARTMENTS:
+        if isinstance(aggregates.get(department), dict):
+            aggregates = aggregates[department].get("orchestrator", {})
+            break
+    value = aggregates.get(metric, 0.0)
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
 
 
 def _write_agent_prompt(path: Path, data: dict) -> None:
@@ -75,11 +100,6 @@ def run(agent: str, dataset: str, baseline_path: str, min_lift: float) -> dict:
     endpoint = os.environ["FOUNDRY_PROJECT_ENDPOINT"]
     judge = os.environ.get("FOUNDRY_JUDGE_DEPLOYMENT", "gpt-5.4")
 
-    baseline_scores = {}
-    bp = Path(baseline_path)
-    if bp.exists():
-        baseline_scores = json.loads(bp.read_text(encoding="utf-8"))
-
     opt = Optimizer(azure_ai_project=endpoint, judge_deployment=judge)
     result = opt.optimize(
         seed_prompt=current, dataset_path=dataset,
@@ -92,11 +112,12 @@ def run(agent: str, dataset: str, baseline_path: str, min_lift: float) -> dict:
                 "reason": "optimizer returned no candidates."}
 
     best = max(candidates, key=lambda c: c.get("score", 0.0))
-    baseline_score = float(baseline_scores.get(f"{agent}_rubric_score", 0.0))
+    baseline_score = _baseline_score(Path(baseline_path), f"{agent}_rubric_score")
     lift = float(best.get("score", 0.0)) - baseline_score
 
     report = {
-        "agent": agent, "baseline_score": baseline_score,
+        "agent": agent, "prompt_path": path.relative_to(REPO_ROOT).as_posix(),
+        "baseline_score": baseline_score,
         "best_score": best.get("score"), "lift": lift,
         "min_lift": min_lift, "candidates": candidates,
         "chosen_prompt_preview": best.get("prompt", "")[:300],
@@ -112,7 +133,7 @@ def run(agent: str, dataset: str, baseline_path: str, min_lift: float) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agent", required=True)
+    ap.add_argument("--agent", required=True, choices=sorted(PROMPT_FILES))
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--report", required=True)
@@ -131,9 +152,11 @@ def main() -> int:
 
     gh_out = os.environ.get("GITHUB_OUTPUT")
     if gh_out:
+        prompt_path = (PROMPTS_DIR / PROMPT_FILES[args.agent]).relative_to(REPO_ROOT).as_posix()
         with open(gh_out, "a", encoding="utf-8") as fh:
             fh.write(f"improved={'true' if report.get('improved') else 'false'}\n")
             fh.write(f"lift={report.get('lift', 0.0):.4f}\n")
+            fh.write(f"prompt_path={prompt_path}\n")
     return 0
 
 

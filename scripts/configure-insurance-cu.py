@@ -31,7 +31,7 @@ OWNER = "northwind-insurance-cu-v1"
 API_VERSION = "2025-11-01"
 SCOPE = "https://cognitiveservices.azure.com/.default"
 ACCOUNT_ID = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/{GROUP}/providers/Microsoft.CognitiveServices/accounts/{ACCOUNT}"
-DEFINITION = ROOT / "data" / "northwind" / "departments" / "claims-warranty" / "cu-analyzers" / "claim-intake.json"
+DEFINITION = ROOT / "data" / "northwind" / "departments" / "claims-documents" / "cu-analyzers" / "claim-intake.json"
 DOCS = "https://learn.microsoft.com/rest/api/contentunderstanding/content-analyzers/create-or-replace?view=rest-contentunderstanding-2025-11-01"
 
 

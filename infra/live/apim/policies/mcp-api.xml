@@ -1,0 +1,27 @@
+<!--
+  MCP passthrough APIs: the policy/claim lookup server (API kind tech-lookup) and the claim-action review server (API
+  kind work-order) of each stack; the kinds are live API identifiers. These are plain HTTP APIs, not the preview
+  "mcp" API type: the backends are FastMCP servers (stateless streamable HTTP) mounted at /mcp/, and a request to
+  /mcp (no trailing slash) is a 307 that Foundry's MCP client does not follow, so the backend URI is always rewritten
+  to /mcp/. Never read context.Response.Body here (it forces buffering and breaks event streams).
+  infra/live/apim-apis.bicep fills in the per-subscription rate limit and the gateway-token fragment.
+-->
+<policies>
+  <inbound>
+    <base />
+    <rate-limit-by-key calls="__RATE_LIMIT__" renewal-period="60" counter-key="@(context.Subscription?.Id ?? context.Request.IpAddress)" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <set-query-parameter name="subscription-key" exists-action="delete" />
+    <rewrite-uri template="/mcp/" copy-unmatched-params="false" />
+    __GATEWAY_TOKEN__
+  </inbound>
+  <backend>
+    <forward-request timeout="300" buffer-response="false" />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

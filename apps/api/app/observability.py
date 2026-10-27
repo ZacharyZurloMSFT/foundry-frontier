@@ -15,6 +15,12 @@ department (see `apps/api/app/company.py`), it records the resolved
 every span created for the remainder of the request. That's how the
 Foundry Observability blade slices traces by project without any
 per-callsite instrumentation.
+
+**Model route stamping** — :func:`set_request_gateway` does the same for the
+model route (``gateway.route`` = ``gateway`` or ``direct``; see
+`model_gateway.py`), so a trace shows whether its inference went through the
+AI Gateway. Call sites add ``gateway.model_alias`` on the span that makes the
+model call.
 """
 from __future__ import annotations
 
@@ -55,6 +61,26 @@ def _current_dept_stamp() -> dict[str, str]:
     return _request_department.get() or {}
 
 
+# Which model route (AI Gateway or direct Foundry) serves the current request.
+_request_gateway: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "request_gateway", default=None,
+)
+
+
+def set_request_gateway(route: str, model_alias: str = "") -> None:
+    """Record the model route for the current request. Every span created
+    afterwards within this asyncio task carries `gateway.route` (and
+    `gateway.model_alias` when one is given)."""
+    stamp = {"gateway.route": route}
+    if model_alias:
+        stamp["gateway.model_alias"] = model_alias
+    _request_gateway.set(stamp)
+
+
+def _current_gateway_stamp() -> dict[str, str]:
+    return _request_gateway.get() or {}
+
+
 _NOISY_LOGGERS = (
     "azure.core.pipeline.policies.http_logging_policy",
     "azure.monitor.opentelemetry.exporter.export._base",
@@ -73,9 +99,9 @@ def _quiet_noisy_loggers() -> None:
 
 @lru_cache
 def build_info() -> dict[str, str]:
-    """Read git SHA + prompt-version manifest once and cache. All three env
-    vars are set by the deploy workflow (see .github/workflows/prompt-registry.yml
-    and deploy-progressive.yml). Falls back to `"local"` for dev."""
+    """Read git SHA + prompt-version manifest once and cache. The build env
+    vars are set by the app release lane (scripts/release-app.py, run from
+    .github/workflows/deploy-apps.yml). Falls back to `"local"` for dev."""
     info: dict[str, str] = {
         "git_sha":       os.environ.get("GIT_SHA", "local"),
         "build_env":     os.environ.get("BUILD_ENV", "local"),
@@ -142,6 +168,8 @@ class _BuildInfoTracer:
             attrs.setdefault(k, v)
         for k, v in _current_dept_stamp().items():
             attrs.setdefault(k, v)
+        for k, v in _current_gateway_stamp().items():
+            attrs.setdefault(k, v)
         return self._inner.start_as_current_span(name, *args, attributes=attrs, **kwargs)
 
     def start_span(self, name: str, *args, **kwargs):
@@ -149,6 +177,8 @@ class _BuildInfoTracer:
         for k, v in self._stamp.items():
             attrs.setdefault(k, v)
         for k, v in _current_dept_stamp().items():
+            attrs.setdefault(k, v)
+        for k, v in _current_gateway_stamp().items():
             attrs.setdefault(k, v)
         return self._inner.start_span(name, *args, attributes=attrs, **kwargs)
 

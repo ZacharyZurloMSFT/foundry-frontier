@@ -86,7 +86,7 @@ def test_dry_run_never_authenticates_or_contacts_cloud(monkeypatch, capsys):
     assert summary["documents"] == wordings + seeds
     assert summary["policy_wording_sections"] == wordings
     assert summary["seed_documents"] == seeds
-    assert summary["connection"] == "northwind-insurance-kb-mcp"
+    assert summary["connection"] == "nw-insurance-claims-kb-mcp"
     assert summary["project"] == module.PROJECT_ID
     assert "credentials" not in summary and "content" not in summary
 
@@ -158,7 +158,7 @@ def test_invalid_fixtures_fail_before_any_cloud_call(change, monkeypatch, cloud)
     if change == "not-synthetic":
         fixture["policy_wordings"][0]["synthetic"] = False
     elif change == "wrong-domain":
-        fixture["business_domain"] = "retail"
+        fixture["business_domain"] = "other"
     elif change == "bad-citation":
         fixture["policy_wordings"][0]["sections"][0]["source_uri"] = "https://real-insurer.example/policy"
     elif change == "reversed-dates":
@@ -240,7 +240,11 @@ def test_apply_and_reapply_touch_only_new_insurance_targets(cloud, capsys):
     assert len(cloud.docs) == sum(expected_counts())
     puts = [request for request in cloud.requests if request.method == "PUT"]
     assert len(puts) == 7  # First connection creation; repeated owned connection is unchanged.
-    assert all("northwind-insurance-" in str(request.url) for request in cloud.requests)
+    assert all(
+        module.PROJECT_ID in str(request.url) and module.CONNECTION_NAME in str(request.url)
+        if request.url.host == "management.azure.com" else "northwind-insurance-" in str(request.url)
+        for request in cloud.requests
+    )
     assert all(request.method in ("GET", "PUT", "POST") for request in cloud.requests)
     for request in puts:
         body = json.loads(request.content)
@@ -275,7 +279,7 @@ def test_preflight_failure_never_writes_or_exposes_response_body(status, cloud):
 
 def test_foreign_index_schema_prevents_any_writes(cloud):
     cloud.resources[f"{module.SEARCH_ENDPOINT}/indexes/{module.INDEX_NAME}?api-version={module.SEARCH_API}"] = {
-        "name": module.INDEX_NAME, "fields": [{"name": "retail_order", "type": "Edm.String", "key": True}],
+        "name": module.INDEX_NAME, "fields": [{"name": "other_domain_key", "type": "Edm.String", "key": True}],
     }
     with pytest.raises(RuntimeError, match="incompatible"):
         module.publish(apply=True)
@@ -290,7 +294,7 @@ def test_foreign_documents_prevent_overwriting_a_matching_schema(cloud):
     assert not any(request.method == "PUT" or request.url.path.endswith("/docs/index") for request in cloud.requests)
 
 
-def test_retail_source_in_insurance_named_kb_prevents_any_writes(cloud):
+def test_foreign_knowledge_source_in_insurance_named_kb_prevents_any_writes(cloud):
     kb = module.kb_body()
     kb["knowledgeSources"] = [{"name": "northwind-knowledge-ks"}]
     cloud.resources[f"{module.SEARCH_ENDPOINT}/knowledgebases/{module.KB_NAME}?api-version={module.SEARCH_API}"] = kb

@@ -1,4 +1,4 @@
-"""Release existing Northwind apps without changing their configuration or capabilities."""
+"""Release the live Northwind Insurance apps without changing their configuration or capabilities."""
 from __future__ import annotations
 
 import argparse
@@ -19,8 +19,16 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 RESOURCE_GROUP = "rg-northwind-apps"
 REGISTRY = "acrzurlonorthwind.azurecr.io"
 REPOSITORY = "ZacharyZurloMSFT/foundry-frontier"
-SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order", "web-tech")
-APPS = {f"ca-{service}": service for service in SERVICES}
+# azd service name -> live Container App. The service name is also the app's image repository in the registry.
+SERVICE_APPS = {
+    "api": "ca-insurance-api",
+    "mcp-policy-lookup": "ca-insurance-lookup",
+    "mcp-claim-review": "ca-insurance-review",
+    "web-portal": "ca-insurance-portal",
+    "web-voice": "ca-insurance-voice",
+}
+SERVICES = tuple(SERVICE_APPS)
+APPS = {app: service for service, app in SERVICE_APPS.items()}
 BUILD_NAMES = ("GIT_SHA", "BUILD_ENV", "DEPLOYED_AT", "GITHUB_REPOSITORY")
 API_VERSION = {"api-version": "2024-03-01"}
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -34,16 +42,14 @@ def changed_services(paths: list[str]) -> list[str]:
     selected = set()
     for path in paths:
         path = path.replace("\\", "/")
-        if path.startswith((".github/workflows/", "scripts/")):
+        if path.startswith((".github/workflows/", "scripts/", "agents/copilot-harness/")):
             return list(SERVICES)
         if path in ("azure.yaml", ".dockerignore"):
             return list(SERVICES)
         if path.startswith(("data/northwind/", "data/seed/generated/")):
-            selected.update(("api", "mcp-tech-lookup", "mcp-work-order"))
-        if path.startswith("agents/insurance/assistants/"):
-            selected.add("api")  # packaged into the API image by scripts/bundle-assistant-assets.py
-        if path == "apps/api/app/insurance_domain.py":
-            selected.update(("mcp-tech-lookup", "mcp-work-order"))
+            selected.update(("api", "mcp-policy-lookup", "mcp-claim-review"))
+        if path in ("apps/api/app/insurance_domain.py", "apps/api/app/gateway_guard.py"):
+            selected.update(("mcp-policy-lookup", "mcp-claim-review"))
         for service in SERVICES:
             if path.startswith(f"apps/{service}/"):
                 selected.add(service)
@@ -75,17 +81,21 @@ def plan(source_sha: str, base_sha: str | None, service: str | None = None) -> l
 
 
 def validate_frontend_environment(env: dict[str, str]) -> None:
+    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") not in ("true", "false"):
+        raise ValueError("Business frontend flag must be true or false")
+    if env.get("VITE_INSURANCE_BUSINESS_ENABLED", "true") != "true":
+        return
     names = ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID", "VITE_INSURANCE_AUTH_SCOPE", "VITE_INSURANCE_RUN_ID")
     if not any(env.get(name) for name in names):
         return  # Public branded pages only; sign-in stays unavailable until identity is configured.
     uuid = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
     for name in ("VITE_INSURANCE_AUTH_TENANT_ID", "VITE_INSURANCE_AUTH_CLIENT_ID"):
         if not re.fullmatch(uuid, env.get(name, "")):
-            raise ValueError("Business frontend requires explicit tenant/client UUIDs")
+            raise ValueError("Enabled business frontend requires explicit tenant/client UUIDs")
     if not re.fullmatch(r"(?:api|https)://[^\s]+/[^\s/]+", env.get("VITE_INSURANCE_AUTH_SCOPE", "")):
-        raise ValueError("Business frontend requires a full delegated API scope URI")
+        raise ValueError("Enabled business frontend requires a full delegated API scope URI")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", env.get("VITE_INSURANCE_RUN_ID", "")):
-        raise ValueError("Business frontend requires an explicit valid run ID")
+        raise ValueError("Enabled business frontend requires an explicit valid run ID")
 
 
 def _valid_metadata(name: str, value: str) -> bool:
@@ -122,7 +132,7 @@ def validate_release(args: argparse.Namespace) -> dict[str, str]:
     if args.expected_revision == f"{args.app}--{args.revision}":
         raise ValueError("Refusing to reuse the currently deployed revision suffix")
     metadata = (args.git_sha, args.deployed_at, args.github_repository)
-    if args.app != "ca-api":
+    if APPS[args.app] != "api":
         if any(value is not None for value in metadata):
             raise ValueError("Only the API may receive build metadata environment changes")
         return {}
@@ -259,7 +269,8 @@ def release(args: argparse.Namespace, http, token, *, sleep=time.sleep, clock=ti
                 and revision.get("healthState") == "Healthy"
                 and revision.get("provisioningState") == "Provisioned"
                 and revision.get("runningState") == "Running"):
-            path = "/health" if args.app == "ca-api" else "/healthz" if "mcp-" in args.app else "/"
+            service = APPS[args.app]
+            path = "/health" if service == "api" else "/healthz" if service.startswith("mcp-") else "/"
             try:
                 smoke = http.get(f"https://{_fqdn(current)}{path}", follow_redirects=False)
             except httpx.RequestError:
@@ -279,6 +290,8 @@ def parser() -> argparse.ArgumentParser:
     planner.add_argument("--base-sha")
     planner.add_argument("--service", choices=(*SERVICES, "all"))
     commands.add_parser("check-frontend", help="Reject invalid enabled business frontend build configuration")
+    namer = commands.add_parser("app-name", help="Print the Container App that hosts a service")
+    namer.add_argument("--service", choices=SERVICES, required=True)
     deploy = commands.add_parser("release", help="Dry-run by default; no automatic rollback or mutation retries")
     deploy.add_argument("--subscription", required=True)
     deploy.add_argument("--tenant", required=True)
@@ -315,6 +328,8 @@ def main() -> int:
             print(json.dumps(plan(args.source_sha, args.base_sha, args.service)))
         elif args.command == "check-frontend":
             validate_frontend_environment(dict(os.environ))
+        elif args.command == "app-name":
+            print(SERVICE_APPS[args.service])
         else:
             validate_release(args)
             if not 10 <= args.timeout <= 1800:

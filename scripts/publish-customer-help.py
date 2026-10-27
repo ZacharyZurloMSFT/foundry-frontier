@@ -21,7 +21,7 @@ ENDPOINT = f"https://{SERVICE}.search.windows.net"
 INDEX = "nw-insurance-help-customer-v1"
 OWNER = "northwind-help-center-customer-v1"
 API = "2026-05-01-preview"
-SEED = Path("data") / "northwind" / "departments" / "employee-help-desk" / "seed" / "customer"
+SEED = Path("data") / "northwind" / "customer-help"
 TOPICS = frozenset({"claims", "evidence", "coverage", "rental", "billing", "privacy", "contact", "glossary",
                     "assistants"})
 EXPECTED_IDS = frozenset({

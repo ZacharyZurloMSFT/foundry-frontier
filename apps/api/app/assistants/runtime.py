@@ -14,10 +14,11 @@ from typing import Any
 
 from opentelemetry import trace
 
+from .. import model_gateway
 from ..business.models import BusinessError
 from ..company import resolve_department
 from ..diagnostics import log_failure
-from ..foundry_client import _extract_output_text, _project_client
+from ..foundry_client import _extract_output_text, model_client
 from ..observability import get_tracer, set_request_department
 from ..settings import get_settings
 from .grounding import Grounding
@@ -166,37 +167,38 @@ async def run_turn(
                     "current_question": message, "pinned_context": pinned, "history_not_evidence": history[-12:],
                 }, ensure_ascii=False)),
             ]
-            async with _project_client() as project:
-                async with project.get_openai_client() as client:
-                    for _ in range(limit + 1):
-                        stage = "model_request"
-                        request: dict[str, Any] = {
-                            "model": model, "store": False, "max_output_tokens": MAX_OUTPUT_TOKENS,
-                            "input": items, "tools": toolbox.specs(),
-                            "tool_choice": "none" if calls >= limit else "auto",
-                        }
-                        with turn.active():
-                            response = await client.responses.create(**request)
-                        require_completed(response)
-                        requested = _function_calls(response)
-                        if not requested:
-                            answer_text = _extract_output_text(response)
-                            break
-                        stage = "tool_execution"
-                        for call in requested:
-                            if calls >= limit:
-                                result = ToolOutcome(
-                                    dump({"error": "tool_limit", "message": "The tool-call budget for this answer is spent."}),
-                                    ToolEvent(name="limit", status="error", label="Tool-call limit reached"))
-                            else:
-                                with turn.active():
-                                    result = await toolbox.call(str(call.name), str(call.arguments))
-                            calls += 1
-                            yield result.event
-                            items.append({"type": "function_call", "call_id": call.call_id,
-                                          "name": call.name, "arguments": call.arguments})
-                            items.append({"type": "function_call_output", "call_id": call.call_id,
-                                          "output": result.output})
+            stage = "model_request"
+            model_gateway.stamp_span(turn.span, settings, model)
+            async with model_client(settings, model) as (client, outbound_model):
+                for _ in range(limit + 1):
+                    stage = "model_request"
+                    request: dict[str, Any] = {
+                        "model": outbound_model, "store": False, "max_output_tokens": MAX_OUTPUT_TOKENS,
+                        "input": items, "tools": toolbox.specs(),
+                        "tool_choice": "none" if calls >= limit else "auto",
+                    }
+                    with turn.active():
+                        response = await client.responses.create(**request)
+                    require_completed(response)
+                    requested = _function_calls(response)
+                    if not requested:
+                        answer_text = _extract_output_text(response)
+                        break
+                    stage = "tool_execution"
+                    for call in requested:
+                        if calls >= limit:
+                            result = ToolOutcome(
+                                dump({"error": "tool_limit", "message": "The tool-call budget for this answer is spent."}),
+                                ToolEvent(name="limit", status="error", label="Tool-call limit reached"))
+                        else:
+                            with turn.active():
+                                result = await toolbox.call(str(call.name), str(call.arguments))
+                        calls += 1
+                        yield result.event
+                        items.append({"type": "function_call", "call_id": call.call_id,
+                                      "name": call.name, "arguments": call.arguments})
+                        items.append({"type": "function_call_output", "call_id": call.call_id,
+                                      "output": result.output})
             stage = "answer_validation"
             answer = parse_answer(answer_text)
             citations = vet_answer(answer, grounding, message)

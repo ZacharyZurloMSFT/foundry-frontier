@@ -1,0 +1,156 @@
+"""Gateway cutover contract for the azd template: outputs only change when a gateway is configured."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+_spec = importlib.util.spec_from_file_location("validate_reuse_gateway", ROOT / "scripts" / "validate-reuse.py")
+validator = importlib.util.module_from_spec(_spec)
+sys.modules["validate_reuse_gateway"] = validator
+_spec.loader.exec_module(validator)
+
+GATEWAY = "https://apim-northwind.azure-api.net"
+
+
+@pytest.fixture(scope="module")
+def template():
+    return json.loads((ROOT / "infra" / "main.json").read_text(encoding="utf-8"))
+
+
+def bicep_binary():
+    found = shutil.which("bicep")
+    if found:
+        return found
+    installed = Path.home() / ".azure" / "bin" / ("bicep.exe" if os.name == "nt" else "bicep")
+    if not installed.is_file():
+        pytest.skip("Bicep is not installed")
+    return str(installed)
+
+
+def compile_parameters(values):
+    source = ROOT / "infra" / "main.bicepparam"
+    keys = re.findall(r"readEnvironmentVariable\('([^']+)'", source.read_text(encoding="utf-8"))
+    env = {key: value for key, value in os.environ.items() if key not in keys}
+    env.update({"AZURE_ENV_NAME": "synthetic-gateway-test", **values})
+    result = subprocess.run([bicep_binary(), "build-params", str(source), "--stdout"], env=env, capture_output=True,
+                            text=True, encoding="utf-8", timeout=60)
+    assert result.returncode == 0, result.stderr
+    compiled = json.loads(result.stdout)
+    if "parametersJson" in compiled:
+        compiled = json.loads(compiled["parametersJson"])
+    return compiled["parameters"]
+
+
+def test_gateway_is_off_by_default_and_the_stack_is_constrained(template):
+    assert template["parameters"]["gatewayUrl"]["defaultValue"] == ""
+    assert template["parameters"]["gatewayStack"]["defaultValue"] == "insurance"
+    assert template["parameters"]["gatewayStack"]["allowedValues"] == ["insurance"]
+    assert template["variables"]["gatewayBase"] == (
+        "[if(empty(parameters('gatewayUrl')), '', format('{0}/{1}', parameters('gatewayUrl'), parameters('gatewayStack')))]"
+    )
+
+
+@pytest.mark.parametrize("output,suffix,reuse_setting,greenfield_output", [
+    ("API_URI", None, "API_URI", "apiUri"),
+    ("MCP_POLICY_LOOKUP_URL", "tech-lookup", "MCP_POLICY_LOOKUP_URL", "mcpPolicyLookupUrl"),
+    ("MCP_CLAIM_REVIEW_URL", "work-order", "MCP_CLAIM_REVIEW_URL", "mcpClaimReviewUrl"),
+])
+def test_outputs_follow_the_gateway_only_when_it_is_set(template, output, suffix, reuse_setting, greenfield_output):
+    value = template["outputs"][output]["value"]
+    expected = "variables('gatewayBase')" if suffix is None else f"format('{{0}}/mcp/{suffix}', variables('gatewayBase'))"
+    assert value.startswith(f"[if(not(empty(variables('gatewayBase'))), {expected}, if(variables('reuseExisting'), ")
+    assert f"outputs.settings.value.{reuse_setting}" in value, "reuse mode keeps the adopted Container App URL"
+    assert f"outputs.{greenfield_output}.value" in value, "greenfield keeps the Container Apps module URL"
+
+
+def test_the_retired_mcp_url_outputs_are_gone(template):
+    assert "MCP_TECH_LOOKUP_URL" not in template["outputs"]
+    assert "MCP_WORK_ORDER_URL" not in template["outputs"]
+
+
+def test_other_service_urls_are_never_rewritten(template):
+    for output in ("WEB_PORTAL_URI", "WEB_VOICE_URI"):
+        assert "gatewayBase" not in template["outputs"][output]["value"]
+
+
+def test_gateway_choice_is_visible_in_azd_outputs(template):
+    assert template["outputs"]["NORTHWIND_GATEWAY_URL"]["value"] == "[parameters('gatewayUrl')]"
+    assert template["outputs"]["NORTHWIND_GATEWAY_STACK"]["value"] == "[parameters('gatewayStack')]"
+
+
+def test_parameters_come_from_the_azd_environment():
+    defaults = compile_parameters({})
+    assert defaults["gatewayUrl"]["value"] == "" and defaults["gatewayStack"]["value"] == "insurance"
+    configured = compile_parameters({"NORTHWIND_GATEWAY_URL": GATEWAY, "NORTHWIND_GATEWAY_STACK": "insurance"})
+    assert configured["gatewayUrl"]["value"] == GATEWAY and configured["gatewayStack"]["value"] == "insurance"
+
+
+@pytest.mark.parametrize("value", ["", GATEWAY, "https://apim-other-01.azure-api.net"])
+def test_valid_gateway_origins_are_accepted_in_both_modes(value):
+    for reuse in ("false", "true"):
+        errors = validator.validate_environment({"NORTHWIND_REUSE_EXISTING_RESOURCES": reuse, "NORTHWIND_GATEWAY_URL": value})
+        assert not [error for error in errors if "GATEWAY" in error]
+
+
+@pytest.mark.parametrize("value", [
+    f"{GATEWAY}/", f"{GATEWAY}/insurance", f"{GATEWAY}?x=1", "http://apim-northwind.azure-api.net",
+    "https://apim-northwind.example.com", "https://evil.example/azure-api.net", f" {GATEWAY}",
+    "https://APIM-NORTHWIND.azure-api.net", "https://apim-northwind.azure-api.net:8443",
+])
+def test_malformed_gateway_origins_are_rejected_before_any_change(value):
+    errors = validator.validate_environment({"NORTHWIND_REUSE_EXISTING_RESOURCES": "false", "NORTHWIND_GATEWAY_URL": value})
+    assert errors == ["NORTHWIND_GATEWAY_URL must be a bare https://<name>.azure-api.net origin with no path, query, or trailing slash."]
+
+
+@pytest.mark.parametrize("stack,valid", [("insurance", True), ("northwind", False), ("", False), ("other", False), ("Insurance", False)])
+def test_gateway_stack_must_be_a_known_stack(stack, valid):
+    errors = validator.validate_environment({"NORTHWIND_REUSE_EXISTING_RESOURCES": "false", "NORTHWIND_GATEWAY_STACK": stack})
+    assert (errors == []) is valid
+
+
+def test_spa_builds_use_the_gateway_only_when_configured():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8"))
+    deploy = workflow["jobs"]["deploy"]
+    assert deploy["env"]["NORTHWIND_GATEWAY_URL"] == "${{ vars.NORTHWIND_GATEWAY_URL }}"
+    run = next(step["run"] for step in deploy["steps"] if "VITE_API_BASE_URL" in step.get("run", ""))
+    assert "${{" not in run
+    assert r"^https://[a-z0-9-]+\.azure-api\.net$" in run, "the gateway origin is validated before it is baked into a build"
+    assert run.index('[[ "$NORTHWIND_GATEWAY_URL" =~') < run.index('export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/insurance"')
+    assert 'export VITE_API_BASE_URL="https://$api_fqdn"' in run, "the direct Container App URL remains the default"
+    assert run.index("NORTHWIND_GATEWAY_URL") < run.index("api_fqdn")
+
+
+def _deploy_steps(workflow):
+    return {step.get("name", ""): step["run"] for step in workflow["jobs"]["deploy"]["steps"] if "run" in step}
+
+
+def test_workflow_service_allow_list_matches_azure_yaml_and_the_dispatch_choices():
+    azure = yaml.safe_load((ROOT / "azure.yaml").read_text(encoding="utf-8"))["services"]
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8"))
+    snapshot = next(run for name, run in _deploy_steps(workflow).items() if name.startswith("Snapshot"))
+    allowed = set(re.search(r'case "\$service" in ([^)]*)\) ;;', snapshot).group(1).split("|"))
+    triggers = workflow.get("on", workflow.get(True))  # PyYAML reads a bare `on` key as True
+    choices = set(triggers["workflow_dispatch"]["inputs"]["service"]["options"]) - {"all"}
+    assert allowed == choices == set(azure)
+
+
+def test_every_planned_service_is_snapshotted_built_and_released_behind_the_current_main_guard():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8"))
+    steps = _deploy_steps(workflow)
+    snapshot = next(run for name, run in steps.items() if name.startswith("Snapshot"))
+    build = next(run for name, run in steps.items() if name.startswith("Build and push immutable images"))
+    release = next(run for name, run in steps.items() if name.startswith("Release digest-pinned"))
+    assert '".release-state/before-$service.json"' in snapshot and '".release-state/before-$service.json"' in release
+    assert '".release-state/build-$service.json"' in build and '".release-state/image-$service"' in build
+    assert '".release-state/image-$service"' in release
+    assert release.index("commits/main") < release.index("release-app.py"), "current main is rechecked before every release"

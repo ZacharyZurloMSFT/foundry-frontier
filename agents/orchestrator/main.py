@@ -1,4 +1,4 @@
-"""Compatibility entrypoint for the shared Agent Framework manager runtime."""
+"""Package entrypoint shared by every hosted insurance role; AGENT_ROLE selects which one runs."""
 from agents.hosted.main import main
 
 if __name__ == "__main__":

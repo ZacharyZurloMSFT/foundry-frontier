@@ -20,6 +20,7 @@ def load(name):
 
 release = load("infra-release")
 setup = load("configure-github-oidc")
+app_release = load("release-app")
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +51,7 @@ def test_live_template_only_manages_private_storage_networking(compiled):
 def test_template_changes_cannot_silently_expand_the_management_boundary(compiled, mutation):
     candidate = copy.deepcopy(compiled)
     if mutation == "extra_resource":
-        candidate["resources"].append({"type": "Microsoft.App/containerApps", "name": "ca-api"})
+        candidate["resources"].append({"type": "Microsoft.App/containerApps", "name": "ca-insurance-api"})
     elif mutation == "duplicate_resource":
         candidate["resources"].append(copy.deepcopy(candidate["resources"][0]))
     else:
@@ -136,10 +137,12 @@ def test_infra_workflow_does_not_apply_on_push_or_pr():
     assert not any("azd " in str(step.get("run", "")) for job in jobs.values() for step in job.get("steps", []))
 
 
-def test_retired_workflow_cannot_provision_or_delete():
-    text = (ROOT / ".github" / "workflows" / "deploy-progressive.yml").read_text()
-    assert "azd up" not in text and "azd down" not in text and "azure/login" not in text
-    assert "exit 1" in text
+def test_no_workflow_provisions_or_deletes_with_azd_and_the_retired_stub_is_gone():
+    workflows = ROOT / ".github" / "workflows"
+    assert not (workflows / "deploy-progressive.yml").exists()
+    for path in workflows.glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        assert "azd up" not in text and "azd down" not in text and "azd provision" not in text, path.name
 
 
 def test_oidc_plan_has_no_credentials_and_no_subscription_wide_assignments():
@@ -147,14 +150,16 @@ def test_oidc_plan_has_no_credentials_and_no_subscription_wide_assignments():
     assert preview["credentials"] == "OIDC only; no client secret"
     assert not preview["actions_enabled_by_this_script"]
     assert preview["environment_branch_allowlist"] == ["main"]
-    assert len(preview["identities"]) == 3
+    assert len(preview["identities"]) == 5
     for identity in preview["identities"]:
         assert identity["federated_subject"] == f"{setup.SUBJECT_PREFIX}:environment:{identity['environment']}"
     assert all(binding["scope"] != setup.BASE for binding in preview["role_bindings"])
     assert not any("roleAssignments/write" in action for role in setup.ROLES.values() for action in role["actions"])
     assert all(not role.get("dataActions") for role in setup.ROLES.values())
     app_scopes = [scope for key, scope, role in setup.bindings() if key == "apps" and role == setup.role_id("apps")]
-    assert len(app_scopes) == 4 and all("/Microsoft.App/containerApps/ca-" in scope for scope in app_scopes)
+    assert len(app_scopes) == 5 and all("/Microsoft.App/containerApps/ca-insurance-" in scope for scope in app_scopes)
+    assert sorted(scope.rsplit("/", 1)[1] for scope in app_scopes) == sorted(app_release.APPS)
+    assert set(setup.APPS_NAMES) == set(app_release.APPS), "the release lane and its OIDC role must cover the same apps"
 
 
 def test_oidc_preview_has_no_cloud_calls(monkeypatch):

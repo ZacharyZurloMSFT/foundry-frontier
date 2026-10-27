@@ -5,9 +5,10 @@ tagline: "Policyholder intake, claim-status conversations and adjuster handoff."
 pillar: voice_live
 icon: "📞"
 brand_color: "#6a1b9a"
-foundry_project: nw-contact-center
+foundry_project: nw-insurance-contact-center
 search_index: nw-contact-center
 cu_inbox_prefix: contact-center
+enabled_tabs: [voice_console]
 customer_archetype: "Contact center director, CX / call intake leader."
 
 seed_dir: seed
@@ -22,6 +23,13 @@ agents:
   voice_live:
     system_prompt_path: prompts/voice-live-system.md
     greeting_path: prompts/greeting.md
+
+# Cross-project: on button press the console posts the running call summary
+# to POST /handoff on the API, which starts a northwind-insurance-orchestrator
+# run inside the Claims Concierge project.
+handoff_target:
+  department: claims-concierge
+  agent: northwind-insurance-orchestrator
 
 corpus_theme: |
   Fictional insurer call scripts, first notice of loss, claim status,

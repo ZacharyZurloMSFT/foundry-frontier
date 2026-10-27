@@ -1,0 +1,31 @@
+schema_version: 1
+slug: adjuster-support
+name: "Adjuster Support"
+tagline: "Grounded adjuster procedures, evidence handling and review boundaries."
+pillar: rag
+icon: "📚"
+brand_color: "#2e7d32"
+foundry_project: nw-insurance-support
+search_index: nw-insurance-adjuster-support
+cu_inbox_prefix: adjuster-support
+enabled_tabs: [adjuster_support]
+customer_archetype: "Claims supervisors, adjuster enablement and quality teams."
+
+seed_dir: seed
+golden_path: golden/dataset.jsonl
+prompts_dir: prompts
+cu_analyzer_dir: null
+
+# Slim single-agent RAG story — one prompt agent, one Search index, no HITL.
+agents:
+  hosted: []
+  prompt:
+    - northwind-insurance-adjuster-support
+
+# Authoring target — the corpus is the versioned adjuster procedures in
+# `seed/adjuster-procedures.json`, published by scripts/publish-adjuster-support.py.
+corpus_theme: |
+  Northwind Insurance adjuster procedures: duty and review boundaries,
+  evidence intake and preservation, escalation to a claims supervisor and
+  claims privacy handling. Fictional insurer; agents cannot approve, deny or
+  pay an insurance claim, assign a real adjuster or contact a policyholder.

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import yaml  # type: ignore[import-untyped]
 
+from .. import model_gateway
 from ..settings import get_settings
 
 Kind = Literal["scoped_tools", "extractive_help"]
@@ -36,7 +37,7 @@ PROFILES: dict[str, AssistantProfile] = {
     "concierge": AssistantProfile(
         surface="concierge", kind="scoped_tools", label="Claims Concierge",
         agent="northwind-insurance-concierge", roles=frozenset({"policyholder"}),
-        department="order-concierge", prompt_file="concierge.yaml",
+        department="claims-concierge", prompt_file="concierge.yaml",
         tools=("list_my_policies", "get_policy", "list_my_claims", "get_claim"),
         accepts=("claim", "policy"),
         suggestions=(
@@ -48,7 +49,7 @@ PROFILES: dict[str, AssistantProfile] = {
     "help_center": AssistantProfile(
         surface="help_center", kind="extractive_help", label="Help Center",
         agent="northwind-insurance-help-center", roles=frozenset({"policyholder"}),
-        department="employee-help-desk", prompt_file="help-center.yaml", tools=(), accepts=(),
+        department="claims-concierge", prompt_file="help-center.yaml", tools=(), accepts=(),
         suggestions=(
             "How do I report a loss?",
             "What happens after I report a loss?",
@@ -104,9 +105,15 @@ def unavailable_reason(profile: AssistantProfile) -> str | None:
     """Why an enabled surface cannot serve right now; configuration only, never proof of readiness."""
     settings = get_settings()
     reasons: list[str] = []
-    if settings.business_domain != "insurance":
-        reasons.append("Insurance mode is required.")
-    if not settings.foundry_project_endpoint:
+    gateway_problem = model_gateway.configuration_problem(settings)
+    if gateway_problem:
+        reasons.append("The AI Gateway configuration is unavailable; direct fallback is not allowed.")
+    elif model_gateway.gateway_enabled(settings):
+        try:
+            model_gateway.gateway_alias(settings, model_name())
+        except model_gateway.GatewayConfigError:
+            reasons.append("The assistant model must have an AI Gateway alias; direct fallback is not allowed.")
+    elif not settings.foundry_project_endpoint:
         reasons.append("A Foundry project endpoint is required.")
     if not settings.cosmos_endpoint:
         reasons.append("Conversation storage is required.")

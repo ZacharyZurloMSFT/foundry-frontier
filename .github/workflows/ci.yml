@@ -21,23 +21,30 @@ jobs:
           cache: pip
           cache-dependency-path: |
             apps/api/requirements.txt
-            apps/mcp-tech-lookup/requirements.txt
-            apps/mcp-work-order/requirements.txt
-      - run: pip install -r apps/api/requirements.txt -r apps/mcp-tech-lookup/requirements.txt -r apps/mcp-work-order/requirements.txt reportlab==4.2.5 ruff==0.8.4 mypy==1.13.0
+            apps/mcp-policy-lookup/requirements.txt
+            apps/mcp-claim-review/requirements.txt
+      - run: pip install -r apps/api/requirements.txt -r apps/mcp-policy-lookup/requirements.txt -r apps/mcp-claim-review/requirements.txt reportlab==4.2.5 ruff==0.8.4 mypy==1.13.0
       - name: Generate ignored synthetic inputs from tracked sources (offline only)
         run: python data/seed/generate.py --domain insurance
       - name: Check connected business contracts
         run: |
-          ruff check apps/api/app/business apps/api/app/assistants apps/api/tests/test_business_api.py apps/api/tests/test_business_foundation.py \
-            apps/api/tests/test_evidence*.py apps/api/tests/test_assistants*.py apps/api/tests/assistant_fakes.py evals/assistant_eval.py \
-            scripts/configure-insurance-identity.py scripts/tests/test_insurance_identity_setup.py \
-            scripts/publish-customer-help.py scripts/tests/test_publish_customer_help.py scripts/tests/test_create_department_indexes_isolation.py
-          mypy apps/api/app/business apps/api/app/assistants --ignore-missing-imports --follow-imports=silent
+          ruff check apps/api/app/business apps/api/tests/test_business_api.py apps/api/tests/test_business_foundation.py \
+            apps/api/tests/test_evidence*.py scripts/configure-insurance-identity.py scripts/tests/test_insurance_identity_setup.py
+          mypy apps/api/app/business --ignore-missing-imports --follow-imports=silent
+      - name: Check embedded customer assistants (offline only)
+        run: |
+          ruff check apps/api/app/assistants apps/api/app/foundry_client.py apps/api/app/diagnostics.py \
+            apps/api/tests/assistant_fakes.py apps/api/tests/test_assistants*.py apps/api/tests/test_diagnostics.py \
+            evals/assistant_eval.py scripts/publish-customer-help.py scripts/tests/test_publish_customer_help.py
+          mypy apps/api/app/assistants apps/api/app/foundry_client.py apps/api/app/diagnostics.py --ignore-missing-imports --follow-imports=silent
+          python evals/assistant_eval.py --self-check
+          python scripts/publish-customer-help.py
       - name: Compile infrastructure for deployment contract tests
         run: |
           az bicep install --version v0.46.1
           az bicep build --file infra/main.bicep --outfile infra/main.json
           az bicep build --file infra/live/storage-networking.bicep --outfile /tmp/storage-networking.json
+          az bicep build --file infra/live/apim-apis.bicep --outfile /tmp/apim-apis.json
       - name: API and release contracts (no cloud or model calls)
         env:
           APPLICATIONINSIGHTS_CONNECTION_STRING: ""
@@ -45,25 +52,54 @@ jobs:
           python -m pytest apps/api/tests \
             scripts/tests/test_deployment_reuse.py \
             scripts/tests/test_deployment_insurance_bundle.py \
-            scripts/tests/test_bundle_assistant_assets.py \
-            scripts/tests/test_publish_customer_help.py \
-            scripts/tests/test_create_department_indexes_isolation.py \
+            scripts/tests/test_bundle_harness_assets.py \
             scripts/tests/test_release_app.py \
             scripts/tests/test_actions_infra.py \
-            scripts/tests/test_insurance_identity_setup.py -q
+            scripts/tests/test_insurance_identity_setup.py \
+            scripts/tests/test_apim_release.py \
+            scripts/tests/test_apim_definition.py \
+            scripts/tests/test_export_openapi.py \
+            scripts/tests/test_gateway_apps.py \
+            scripts/tests/test_gateway_outputs.py \
+            scripts/tests/test_create_prompt_agents_gateway.py \
+            scripts/tests/test_apim_smoke.py \
+            scripts/tests/test_gateway_identity.py \
+            scripts/tests/test_oidc_apim.py \
+            scripts/tests/test_ai_gateway_common.py \
+            scripts/tests/test_ai_gateway_release.py \
+            scripts/tests/test_ai_gateway_grants.py \
+            scripts/tests/test_ai_gateway_enforce.py \
+            scripts/tests/test_model_gateway_connection.py \
+            scripts/tests/test_mcp_gateway_connection.py \
+            scripts/tests/test_prompt_agents_gateway.py \
+            scripts/tests/test_validate_reuse_gateway.py \
+            scripts/tests/test_deploy_hosted_gateway_grants.py \
+            scripts/tests/test_hosted_agent_bundle.py \
+            scripts/tests/test_agent_deploy_journal.py \
+            scripts/tests/test_department_search_scripts.py \
+            scripts/tests/test_foundry_project_migration.py \
+            scripts/tests/test_publish_prompts.py \
+            scripts/tests/test_publish_adjuster_support.py \
+            scripts/tests/test_publish_customer_help.py \
+            scripts/tests/test_no_legacy_vocabulary.py -q
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: apps/web-tech
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [web-portal, web-voice]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: apps/web-tech/package-lock.json
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
       - run: npm ci --no-audit --no-fund
+        working-directory: apps/${{ matrix.app }}
       - run: npm run build
-      - run: npm run typecheck && npm test
+        working-directory: apps/${{ matrix.app }}
+      - if: matrix.app == 'web-portal'
+        run: npm run typecheck && npm test
+        working-directory: apps/web-portal

@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ("api", "mcp-tech-lookup", "mcp-work-order")
+SERVICES = ("api", "mcp-policy-lookup", "mcp-claim-review")
 CLAIMS_DOCUMENTS = {
     "nw-fnol-demo-2001.pdf", "nw-estimate-demo-2001.pdf",
     "nw-record-clm-2001.pdf", "nw-record-clm-2002.pdf",
@@ -21,6 +21,7 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
         raise ValueError("Insurance assets can only be staged for the API and MCP services.")
     fixture = root / "data" / "northwind" / "insurance-fixtures.json"
     domain = root / "apps" / "api" / "app" / "insurance_domain.py"
+    guard = root / "apps" / "api" / "app" / "gateway_guard.py"
     records = json.loads(fixture.read_text(encoding="utf-8"))
     if (
         not isinstance(records, dict)
@@ -32,9 +33,10 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
         if not isinstance(records.get(collection), list) or not records[collection]:
             raise ValueError("Canonical insurance fixtures require nonempty " + collection + ".")
     ast.parse(domain.read_text(encoding="utf-8"), filename=str(domain))
+    ast.parse(guard.read_text(encoding="utf-8"), filename=str(guard))
     sources = []
     if service == "api":
-        manifest = root / "data" / "northwind" / "departments" / "claims-warranty" / "claims-documents.json"
+        manifest = root / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
         catalog = json.loads(manifest.read_text(encoding="utf-8"))["items"]
         names = [row["source_file"] for row in catalog]
         if len(names) != len(CLAIMS_DOCUMENTS) or set(names) != CLAIMS_DOCUMENTS:
@@ -57,10 +59,11 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
     shutil.copyfile(fixture, fixture_destination / fixture.name)
     if service != "api":
         shutil.copyfile(domain, destination / domain.name)
+        shutil.copyfile(guard, destination / guard.name)
     else:
         document_destination = destination / "_northwind" / "claims-documents"
         document_destination.mkdir(parents=True, exist_ok=True)
-        catalog_destination = destination / "_northwind" / "departments" / "claims-warranty"
+        catalog_destination = destination / "_northwind" / "departments" / "claims-documents"
         catalog_destination.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(manifest, catalog_destination / manifest.name)
         for source in sources:

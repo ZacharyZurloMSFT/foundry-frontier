@@ -3,48 +3,69 @@
 # When you (Copilot) are working in this repo, always follow these rules.
 
 ## What this repo is
-End-to-end Azure AI Foundry demo. Story: Northwind Insurance — a customer portal
-with Microsoft Entra sign-in where policyholders see their own policies and
-claims, adjusters work cases with a human in control, and identity-bound AI
-assistants (Claims Concierge, Help Center) are embedded in the sections where
-the work happens. There is no separate "AI workspace" and no legacy department
-shell; the API is `/api/v1/*` plus `/health` and `/build`. One `azd up`
-deploys everything.
+End-to-end Azure AI Foundry demo. Story: Northwind Insurance, a fictional
+property and casualty insurer. A policyholder reaches the voice front door, the
+claims concierge orchestrator hands the work to four hosted agents (triage,
+policy and claim lookup, policy wording, claim-action draft), and a person
+approves the drafted claim action. Adjuster support, claim-document
+understanding and the Copilot SDK harness sit beside it. Optional read-only
+Claims Concierge and Help Center assistants are embedded in the signed-in
+policyholder portal; they use server-owned identity scope and an isolated
+customer-help corpus, not the staff-wide tools. All data is synthetic.
+`azd` and the release workflows deploy five apps: `api`, `mcp-policy-lookup`,
+`mcp-claim-review`, `web-portal` and `web-voice` (the live `ca-insurance-*`
+Container Apps).
 
 ## Golden rules
-1. **Do not break `azd up`.** Any change to `infra/`, `azure.yaml`, or the
-   `scripts/postprovision.*` files must leave a fresh deploy working end-to-end.
-2. **Preserve the eval tiers that exist.** Never disable, weaken, or bypass an
-   eval. Tier 1 (GitHub Models smoke), Tier 3 (red team against the hosted
-   orchestrator) and the deterministic assistant golden eval stay green. The
-   Tier 2 golden-set runner and the Tier 4 continuous eval were retired with
-   the legacy `/chat`, `/hitl` and `/harness` endpoints they exercised; do not
-   bring them back without a transport that exists. If a regression is
-   legitimate, update `evals/baseline.json` in the same PR.
-3. **Prompt files (`agents/*.yaml`, `.prompty`) are source of truth.** Do
-   not fork them into the code. Changes go through the PR + optimizer loop.
+1. **Do not break the deploy path.** Any change to `infra/`, `azure.yaml`,
+   `scripts/validate-reuse.py` (the azd preprovision/predeploy hook),
+   `scripts/release-app.py` or the `deploy-*.yml` workflows must leave a fresh
+   `azd provision`/`azd deploy` and the app release lane working. Service names
+   must stay in step across `azure.yaml`, `release-app.py` and the workflows.
+   Never rename or delete live Azure resources from code.
+2. **Preserve the four eval tiers and the offline assistant golden gate.** Never
+   disable, weaken, or bypass an eval. If a regression is legitimate, update
+   `evals/baseline.json` in the same PR with reviewer approval.
+3. **Prompt files (`agents/insurance/**/*.yaml`, `data/northwind/departments/*/prompts/*.yaml`,
+   `.prompty`) are source of truth.** Do not fork them into the code. Changes go
+   through the PR + optimizer loop.
 4. **Every new capability must be visible in the UI or a GitHub artifact.**
    No invisible plumbing.
+5. **Insurance only.** Do not add retail, orders, field-service, HR/IT or model
+   bake-off features, routes, data or wording. The retired names survive only as
+   documented deprecated aliases and live Azure identifiers (see
+   `docs/legacy-decommission.md`); `scripts/tests/test_no_legacy_vocabulary.py`
+   enforces the allow-list.
+6. **Agents draft, people decide.** Claim actions are drafts for human review.
+   Never add a path that approves, denies or pays a claim without a person.
 
 ## When fixing an `eval-regression` or `redteam-failure` issue
-- Read the report or trace payload attached to the issue.
-- Compare the current prompt against the SHA stamped in the trace (`/build`
-  reports the prompt SHAs the running API shipped).
+- Read the trace payload attached to the issue.
+- Compare the current prompt against the SHA stamped in the trace.
 - Prefer *prompt* fixes over *code* fixes. If a code fix is needed, add a
   golden-set row that would catch the same failure next time.
 - Do not touch `evals/baseline.json` unless the reviewer explicitly approves
   the new numbers.
 
 ## Testing before opening a PR
-- `ruff check apps/api evals pipelines data/seed`
+- `ruff check apps/api evals pipelines data/seed`  (`apps/api` has known E402/F401/F821 findings: add none)
 - `python evals/smoke_eval.py --self-check`
-- `python evals/assistant_eval.py --self-check`          (if assistants, help articles or `data/golden/assistant.jsonl` touched)
+- `python evals/assistant_eval.py --self-check` (if assistants, customer help or their golden set changed)
+- `python data/seed/generate.py --domain insurance`, then `python -m pytest apps/api/tests` and the
+  `scripts/tests` files listed in `.github/workflows/ci.yml`
+- `python -m pytest agents/tests evals/tests`  (after `pip install -r agents/hosted/requirements.txt -r evals/requirements.txt`)
+- `python scripts/export-openapi.py --check`            (if API routes or docstrings changed)
 - `bicep build infra/main.bicep --stdout > /dev/null`  (if infra touched)
-- `(cd apps/web-tech && npm run build)`                  (if web touched)
+- `(cd apps/web-portal && npm run build)`               (if web touched)
 
-## Docs to read first for context
-- `README.md`
-- `docs/architecture.md`
-- `docs/differentiators.md`   ← the sales pitch this demo defends
-- `docs/genaiops.md`          ← how CI/CD/eval/observability fit together
-- `docs/demo-script.md`       ← the 10-minute story arc
+## Second brain (read on demand)
+- Start at `docs/brain/README.md`; it maps each kind of task to the few pages worth reading (README,
+  architecture, differentiators, genaiops and demo-script are routed from there). Do not read everything.
+- Code wins: if a brain page or doc disagrees with the code, trust the code and fix the page in the same PR.
+- Names changed over time and the earlier demo names survive only as deprecated aliases and live Azure
+  identifiers; check `docs/brain/glossary.md` before assuming what a name means, and read
+  `docs/legacy-decommission.md` for what was retired and how the old stack is wound down.
+- Learned something non-obvious (a trap, a "why")? Add it to the matching page under `docs/brain/gotchas/`
+  (index: `docs/brain/gotchas/README.md`) or to a `docs/brain/decisions/` record. Do not create new top-level
+  notes.
+- Never put secrets, customer data, or internal-only data in the brain; this repo is public.

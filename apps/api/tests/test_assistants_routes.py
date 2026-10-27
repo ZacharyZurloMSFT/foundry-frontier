@@ -9,6 +9,7 @@ import pytest
 from azure.ai.projects.aio import AIProjectClient
 from azure.core.credentials import AccessToken
 
+from app import foundry_client
 from app.assistants import history, profiles, runtime
 from app.assistants import routes as assistant_routes
 from app.assistants.models import EVENTS
@@ -25,7 +26,7 @@ OTHER_CUSTOMER_TEXT = ("hail damage to the insured SUV", "Jordan Sample", "POL-1
 def enabled(identity, monkeypatch):  # noqa: F811
     settings = identity[0].model_copy(update={
         "assistants_enabled": True, "assistant_surfaces": "concierge", "assistant_model": "gpt-test",
-        "foundry_project_endpoint": "https://foundry.unit.test/api/projects/northwind-orders",
+        "foundry_project_endpoint": "https://foundry.unit.test/api/projects/nw-insurance-claims",
         "assistant_timeout": 5, "assistant_max_tool_calls": 3, "assistant_concurrency": 2,
         "assistant_history_ttl_seconds": 900,
     })
@@ -49,7 +50,7 @@ def conversations(monkeypatch):
 
 def install(monkeypatch, *script):
     project = ScriptedProject(*script)
-    monkeypatch.setattr(runtime, "_project_client", project)
+    monkeypatch.setattr(foundry_client, "_project_client", project)
     return project
 
 
@@ -272,17 +273,31 @@ async def test_a_failed_save_never_leaves_the_question_behind(api, enabled, conv
 
 
 @pytest.mark.asyncio
-async def test_no_unauthenticated_route_can_read_or_open_a_conversation(api, enabled, conversations, monkeypatch):  # noqa: F811
-    from app import main, repositories
+async def test_demo_sessions_cannot_read_authenticated_assistant_exchanges(api, enabled, conversations, monkeypatch):  # noqa: F811
+    from app import repositories
     client, _, identity_ = api
     install(monkeypatch, answer("Collision damage may be considered.", human_review=False))
     session = events_of(await post(client, identity_, {"message": "What does my wording say?"}))[0]["session_id"]
     assert [i["sessionId"] for i in conversations.items] == [session]
-    for method, path in (("GET", f"/session/{session}/messages"), ("POST", "/session"), ("GET", "/session")):
-        gone = await client.request(method, path)
-        assert gone.status_code in (404, 405) and "wording" not in gone.text and "ownerKey" not in gone.text, (method, path)
-    assert not any(path.startswith("/session") for path in main.app.openapi()["paths"])
-    assert not hasattr(repositories, "load_conversation")
+    request = client.build_request("GET", f"/session/{session}/messages")
+    request.headers.pop("Authorization", None)
+    denied = await client.send(request)
+    assert denied.status_code == 404 and "wording" not in denied.text and "ownerKey" not in denied.text
+
+    async def container(_):
+        return conversations
+    monkeypatch.setattr(repositories, "_container", container)
+    assert await repositories.load_conversation(session) == []
+    created = await client.post("/session")
+    assert created.status_code == 200 and not created.json()["session_id"].startswith(history.SESSION_PREFIX)
+    public_session = created.json()["session_id"]
+    await repositories.append_message(public_session, "user", "Public synthetic demo question")
+    # Even a misplaced owner-bound exchange in an ordinary partition must not be exposed.
+    conversations.items.append({**conversations.items[0], "sessionId": public_session})
+    visible = await client.get(f"/session/{public_session}/messages")
+    assert visible.status_code == 200 and len(visible.json()["messages"]) == 1
+    assert visible.json()["messages"][0]["content"] == "Public synthetic demo question"
+    assert "wording" not in visible.text and "ownerKey" not in visible.text
 
 
 @pytest.mark.asyncio
@@ -432,7 +447,7 @@ async def test_actual_sdk_wire_carries_function_tools_and_parses_function_calls(
         def get_openai_client(self, **kwargs):
             assert kwargs == {}
             return super().get_openai_client(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    monkeypatch.setattr(runtime, "_project_client", lambda: OfflineProject(
+    monkeypatch.setattr(foundry_client, "_project_client", lambda: OfflineProject(
         endpoint="https://example.services.ai.azure.com/api/projects/offline", credential=Credential(), allow_preview=True))
     events = events_of(await post(client, identity_, {"message": "Where does CLM-2001 stand?"}))
     assert [e["kind"] for e in events] == ["session", "tool", "assistant_delta", "citations", "done"]

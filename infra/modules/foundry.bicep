@@ -1,5 +1,5 @@
-// Azure AI Foundry (AI Services + project) with two model deployments
-// and a single prompt agent for the tech app's simple Q&A tab.
+// Azure AI Foundry (AI Services + project) with the planner, worker, prompt-agent and embedding model deployments
+// for the Northwind Insurance apps.
 param location string
 param tags object
 param aiServicesName string
@@ -37,8 +37,8 @@ resource ai 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
   }
 }
 
-@description('Optional extra Azure-direct model deployments. Only Microsoft first-party models on this Foundry account; no partner MaaS. Each item: { name, version, capacity, sku? }. The Model bake-off screen that raced them was removed.')
-param bakeoffDeployments array = []
+@description('Optional extra Azure-direct model deployments on this Foundry account, for example a partner model offered to adjuster support. Each item: { name, version, capacity, sku?, format? }.')
+param additionalModelDeployments array = []
 
 resource plannerDep 'Microsoft.CognitiveServices/accounts/deployments@2025-04-01-preview' = {
   parent: ai
@@ -89,12 +89,12 @@ resource embeddingDep 'Microsoft.CognitiveServices/accounts/deployments@2025-04-
   dependsOn: [ promptAgentDep ]
 }
 
-// ── Optional bake-off deployments (A1) ─────────────────────────────────────
+// ── Optional additional model deployments ──────────────────────────────────
 // Deployed sequentially after the embedding deployment. Each item can specify
 // its own SKU (defaults to GlobalStandard). Kept as a `batchSize(1)` loop so
 // Azure doesn't reject concurrent capacity requests on the same account.
 @batchSize(1)
-resource bakeoffDeps 'Microsoft.CognitiveServices/accounts/deployments@2025-04-01-preview' = [for (m, i) in bakeoffDeployments: {
+resource additionalModelDeps 'Microsoft.CognitiveServices/accounts/deployments@2025-04-01-preview' = [for (m, i) in additionalModelDeployments: {
   parent: ai
   name: m.name
   sku: {
@@ -116,13 +116,13 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
   identity: { type: 'SystemAssigned' }
   properties: {
     displayName: projectName
-    description: 'Northwind Order Concierge demo Foundry project'
+    description: 'Northwind Insurance claims concierge Foundry project'
   }
   dependsOn: [ plannerDep, workerDep, promptAgentDep, embeddingDep ]
 }
 
 // ── Additional Foundry projects — one per Northwind department ─────────────
-// The Order Concierge project (above) hosts the multi-agent flagship. Every
+// The claims concierge project (above) hosts the multi-agent flagship. Every
 // other department gets its own project inside this same AI Services
 // account so it has its own agents, connections, evaluators, red-team
 // runs, and Foundry Observability lens. Model deployments are shared at
@@ -131,7 +131,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 // Adding/removing a department is a pure change to the `additionalProjects`
 // param in main.bicep — the RBAC and endpoint export loops below scale
 // with it automatically.
-@description('Additional Foundry projects to create alongside the Order Concierge project. Each item: { slug, projectName, displayName, description }.')
+@description('Additional Foundry projects to create alongside the claims concierge project. Each item: { slug, projectName, displayName, description }.')
 param additionalProjects array = []
 
 resource extraProjects 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-preview' = [for p in additionalProjects: {
@@ -148,7 +148,7 @@ resource extraProjects 'Microsoft.CognitiveServices/accounts/projects@2025-04-01
 }]
 
 // ── RBAC ───────────────────────────────────────────────────────────────────
-// Azure AI User (data-plane calls: agents, inference)
+// Azure AI User (data-plane calls: agents, Voice Live, inference)
 var aiUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 // Cognitive Services OpenAI User
 var openAiUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
@@ -219,7 +219,6 @@ output workerDeploymentName string = workerDep.name
 output promptAgentDeploymentName string = promptAgentDep.name
 output embeddingDeploymentName string = embeddingDep.name
 output aiServicesEndpointOpenAI string = 'https://${ai.name}.openai.azure.com/'
-output bakeoffDeploymentNames array = [for (m, i) in bakeoffDeployments: m.name]
 
 // One entry per additional Foundry project. Consumers stitch these into a
 // department -> endpoint map (see main.bicep FOUNDRY_PROJECT_ENDPOINTS output).

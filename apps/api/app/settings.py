@@ -10,8 +10,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AI_GATEWAY_DEFAULT_SCOPE = "https://azure-api.net/aigateway/.default"
 
 # Search repo root and cwd for a .env; harmless if neither exists.
 # In the container the file lives at /app/app/settings.py (only 2 parents),
@@ -40,15 +42,29 @@ class Settings(BaseSettings):
     # Foundry
     foundry_endpoint: str = Field(default="", alias="FOUNDRY_ENDPOINT")
     foundry_project_endpoint: str = Field(default="", alias="FOUNDRY_PROJECT_ENDPOINT")
-    business_domain: Literal["retail", "insurance"] = Field(default="retail", alias="NORTHWIND_BUSINESS_DOMAIN")
+    # Canonical names first; the legacy ORDER_* names stay accepted so deployed configuration keeps working.
+    insurance_project_name: str = Field(
+        default="northwind-orders",
+        validation_alias=AliasChoices("INSURANCE_PROJECT_NAME", "ORDER_PROJECT_NAME"))
+    hosted_agents_enabled: bool = Field(
+        default=False, validation_alias=AliasChoices("HOSTED_AGENTS_ENABLED", "ORDER_AGENTS_HOSTED"))
+    insurance_agents_ready: bool = Field(default=False, alias="NORTHWIND_INSURANCE_AGENTS_READY")
+    insurance_orchestrator_agent_id: str = Field(default="", alias="FOUNDRY_INSURANCE_ORCHESTRATOR_AGENT_ID")
     planner_deployment: str = Field(default="gpt-5.4", alias="FOUNDRY_PLANNER_DEPLOYMENT")
     worker_deployment: str = Field(default="gpt-5.4-mini", alias="FOUNDRY_WORKER_DEPLOYMENT")
 
-    # Search
+    # AI Gateway (Azure API Management AI Gateway tier). Every value is optional and
+    # empty means unset: with no endpoint, model calls keep going straight to Foundry.
+    # See model_gateway.py for how these combine.
+    ai_gateway_required: bool = Field(default=False, alias="AI_GATEWAY_REQUIRED")
+    ai_gateway_model_endpoint: str = Field(default="", alias="AI_GATEWAY_MODEL_ENDPOINT")
+    ai_gateway_scope: str = Field(default=AI_GATEWAY_DEFAULT_SCOPE, alias="AI_GATEWAY_SCOPE")
+    ai_gateway_model_provider: str = Field(default="", alias="AI_GATEWAY_MODEL_PROVIDER")
+    # JSON object: deployment name -> full "<provider>/<registration>" gateway alias.
+    ai_gateway_model_aliases: str = Field(default="", alias="AI_GATEWAY_MODEL_ALIASES")
+
+    # Search (endpoint only: the insurance corpora are addressed by their own index/KB names)
     search_endpoint: str = Field(default="", alias="AZURE_SEARCH_ENDPOINT")
-    search_index: str = Field(default="northwind-knowledge", alias="AZURE_SEARCH_INDEX")
-    search_knowledge_base: str = Field(default="northwind-kb", alias="AZURE_SEARCH_KNOWLEDGE_BASE")
-    search_knowledge_source: str = Field(default="northwind-knowledge-ks", alias="AZURE_SEARCH_KNOWLEDGE_SOURCE")
 
     # Cosmos
     cosmos_endpoint: str = Field(default="", alias="COSMOS_ENDPOINT")
@@ -66,8 +82,15 @@ class Settings(BaseSettings):
     storage_connection_string: str = Field(default="", alias="STORAGE_CONNECTION_STRING")
     azure_search_key: str = Field(default="", alias="AZURE_SEARCH_KEY")
 
-    # Identity-bound assistants embedded in the connected portal. Disabled by default; a surface
-    # must be listed explicitly (comma-separated) before it can be reached.
+    adjuster_support_enabled: bool = Field(default=False, alias="ADJUSTER_SUPPORT_ENABLED")
+    adjuster_support_index: str = Field(default="nw-insurance-adjuster-support", alias="ADJUSTER_SUPPORT_INDEX")
+    adjuster_support_search_endpoint: str = Field(default="", alias="ADJUSTER_SUPPORT_SEARCH_ENDPOINT")
+    adjuster_support_search_auth: Literal["entra_id", "query_key"] = Field(default="entra_id", alias="ADJUSTER_SUPPORT_SEARCH_AUTH")
+    adjuster_support_query_key: SecretStr = Field(default=SecretStr(""), alias="ADJUSTER_SUPPORT_SEARCH_QUERY_KEY")
+    adjuster_support_timeout: int = Field(default=60, ge=1, le=180, alias="ADJUSTER_SUPPORT_TIMEOUT_SECONDS")
+    adjuster_support_concurrency: int = Field(default=4, ge=1, le=16, alias="ADJUSTER_SUPPORT_MAX_CONCURRENT_REQUESTS")
+
+    # Embedded assistants are opt-in, and only explicitly listed surfaces are reachable.
     assistants_enabled: bool = Field(default=False, alias="NORTHWIND_ASSISTANTS_ENABLED")
     assistant_surfaces: str = Field(default="", alias="NORTHWIND_ASSISTANT_SURFACES")
     assistant_model: str = Field(default="", alias="NORTHWIND_ASSISTANT_MODEL")
@@ -75,7 +98,6 @@ class Settings(BaseSettings):
     assistant_max_tool_calls: int = Field(default=6, ge=1, le=12, alias="NORTHWIND_ASSISTANT_MAX_TOOL_CALLS")
     assistant_concurrency: int = Field(default=4, ge=1, le=16, alias="NORTHWIND_ASSISTANT_MAX_CONCURRENT_REQUESTS")
     assistant_history_ttl_seconds: int = Field(default=86400, ge=300, le=604800, alias="NORTHWIND_ASSISTANT_HISTORY_TTL_SECONDS")
-    # Customer help center (extractive Search RAG over an audience-isolated index).
     help_center_index: str = Field(default="nw-insurance-help-customer-v1", alias="NORTHWIND_HELP_CENTER_INDEX")
     help_center_search_endpoint: str = Field(default="", alias="NORTHWIND_HELP_CENTER_SEARCH_ENDPOINT")
     help_center_search_auth: Literal["entra_id", "query_key"] = Field(default="entra_id", alias="NORTHWIND_HELP_CENTER_SEARCH_AUTH")
@@ -102,7 +124,47 @@ class Settings(BaseSettings):
     evidence_worker_batch_size: int = Field(default=5, ge=1, le=20, alias="NORTHWIND_EVIDENCE_WORKER_BATCH_SIZE")
     evidence_worker_max_attempts: int = Field(default=3, ge=1, le=5, alias="NORTHWIND_EVIDENCE_WORKER_MAX_ATTEMPTS")
 
+    voice_live_enabled: bool = Field(default=False, alias="VOICE_LIVE_ENABLED")
+    voice_live_ready: bool = Field(default=False, alias="VOICE_LIVE_READY")
+    voice_live_model: str = Field(default="", alias="VOICE_LIVE_MODEL")
+    voice_live_api_version: str = Field(default="", alias="VOICE_LIVE_API_VERSION")
+    voice_live_transcription_enabled: bool = Field(default=True, alias="VOICE_LIVE_TRANSCRIPTION_ENABLED")
+    voice_live_allowed_origins: str = Field(
+        default="https://ca-insurance-voice.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,https://ca-insurance-portal.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io,http://localhost:5173,http://localhost:5174",
+        alias="VOICE_LIVE_ALLOWED_ORIGINS",
+    )
+
     port: int = Field(default=8000, alias="PORT")
+
+    harness_enabled: bool = Field(default=False, alias="COPILOT_HARNESS_ENABLED")
+    harness_model: str = Field(default="", alias="COPILOT_HARNESS_MODEL")
+    harness_prompt_path: str = Field(default="", alias="COPILOT_HARNESS_PROMPT_PATH")
+    harness_runtime_dir: str = Field(default="", alias="COPILOT_HARNESS_RUNTIME_DIR")
+    harness_claim_review_mcp: str = Field(
+        default="", validation_alias=AliasChoices("MCP_CLAIM_REVIEW_URL", "MCP_WORK_ORDER_URL"))
+    harness_gateway_key: SecretStr = Field(default=SecretStr(""), alias="MCP_GATEWAY_SUBSCRIPTION_KEY")
+    harness_timeout: int = Field(default=180, ge=10, le=900, alias="COPILOT_HARNESS_TIMEOUT_SECONDS")
+    harness_max_tools: int = Field(default=8, ge=1, le=16, alias="COPILOT_HARNESS_MAX_TOOL_CALLS")
+    harness_concurrency: int = Field(default=2, ge=1, le=8, alias="COPILOT_HARNESS_MAX_CONCURRENT_RUNS")
+
+    @field_validator("ai_gateway_required", mode="before")
+    @classmethod
+    def _blank_gateway_required_is_off(cls, value):
+        return False if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("ai_gateway_scope", mode="before")
+    @classmethod
+    def _blank_gateway_scope_is_default(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return AI_GATEWAY_DEFAULT_SCOPE
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator(
+        "ai_gateway_model_endpoint", "ai_gateway_model_provider", "ai_gateway_model_aliases", mode="before",
+    )
+    @classmethod
+    def _strip_gateway_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 @lru_cache

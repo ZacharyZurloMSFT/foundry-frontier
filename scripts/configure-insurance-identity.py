@@ -659,6 +659,7 @@ def summary(
             "frontend": {
                 "VITE_INSURANCE_AUTH_TENANT_ID": config.tenant_id, "VITE_INSURANCE_AUTH_CLIENT_ID": spa_id,
                 "VITE_INSURANCE_AUTH_SCOPE": f"api://{api_id}/{SCOPE}", "VITE_INSURANCE_RUN_ID": config.run_id,
+                "VITE_INSURANCE_BUSINESS_ENABLED": "false",
             },
         },
         "next_steps": [

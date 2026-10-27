@@ -5,8 +5,8 @@
 # Search / Container Apps caused by policy resets, key rotation, or a
 # portal flip to private / AAD-only. Symptoms this repairs:
 #
-#   - Foundry manual-retrieval agent: "Access denied when connecting to
-#     the MCP server ... 403 Forbidden"
+#   - Foundry prompt agent knowledge-base tool: "Access denied when
+#     connecting to the MCP server ... 403 Forbidden"
 #   - fetch-keys returns empty strings (local auth was disabled)
 #   - Any data-plane call from the API / seed scripts returning 401 / 403
 #   - Public endpoints becoming unreachable after a policy sweep
@@ -21,9 +21,12 @@
 #   3. load .env                 -> export those keys so subsequent
 #      Python scripts see them (fills gaps that azd env doesn't mirror
 #      - most notably AZURE_SUBSCRIPTION_ID and every *_KEY).
-#   4. connect-knowledge-base.py -> re-PUT the northwind-kb-mcp Foundry
-#      project connection with the fresh Search admin key so the
-#      manual-retrieval agent's MCP tool keeps working.
+#   4. connect-knowledge-base.py -> re-PUT each department's `<kb>-mcp`
+#      Foundry project connection (for example nw-claims-kb-mcp) with the
+#      fresh Search admin key so the prompt agents' knowledge-base MCP
+#      tools keep working. The isolated insurance connection
+#      nw-insurance-claims-kb-mcp belongs to publish-insurance-knowledge.py
+#      and is not touched.
 #
 # If you only need one of the steps, run the underlying script directly.
 #
@@ -65,7 +68,7 @@ if [[ -z "${AZURE_SUBSCRIPTION_ID:-}" ]]; then
 fi
 
 echo
-echo "==> [4/4] Re-provisioning the Foundry KB MCP project connection with the fresh key..."
+echo "==> [4/4] Re-provisioning the Foundry KB MCP project connections with the fresh key..."
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
   PY="$ROOT/.venv/bin/python"
 else
@@ -75,4 +78,4 @@ fi
 
 echo
 echo "==> Access repaired across Foundry / Storage / Search / Cosmos."
-echo "    Retry the manual-retrieval agent in the Foundry portal, or exercise the API endpoints."
+echo "    Retry the affected agent in the Foundry portal, or exercise the API endpoints."

@@ -15,9 +15,10 @@ classification can use this corpus after authorised rollout and indexing into
 | `intent-taxonomy.md`       | Canonical list of intents the classifier routes to         |
 | `deflection-faq.md`        | Versioned policyholder FAQ with human-review boundaries |
 
-The Contact Center console and its `POST /handoff` cross-project handoff to the
-Claims Concierge were removed with the legacy department shell, so nothing in
-the portal reads this corpus. It remains a content pack for the
-`nw-contact-center` project and index created by the post-provision scripts. No
-claim approval/denial, real assignment, payment or external communication is
-executed anywhere, and no callback or staffing guarantees are implied.
+The **Claims Concierge / adjuster handoff** on the Contact Center console
+posts the running call summary to `POST /handoff` on the API. The API
+starts a converted `northwind-insurance-orchestrator` run in the stable `claims-concierge`
+department (see `department.yaml` handoff_target). The web UI never starts
+voice or sends a handoff until `/insurance/fixtures` reports agent readiness.
+No claim approval/denial, real assignment, payment or external communication
+is executed. No callback or staffing guarantees are implied.

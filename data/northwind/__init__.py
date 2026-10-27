@@ -1,20 +1,18 @@
-"""Northwind Industries manifest loader.
+"""Northwind Insurance manifest loader.
 
-The demo is organized around one company (Northwind Industries) with four
+The demo is organized around one company (Northwind Insurance) with four
 departments, each backed by its own Foundry project inside the shared
 AI Services account. This module is the single Python entry point for
-resolving that structure — every script that used to hard-code
-`data/seed` or `agents/triage.yaml` should route through here so the same
-code works for Order Concierge today and the other three departments once
-they land.
+resolving that structure — every script that needs a department's seed
+data, prompts or Foundry project should route through here.
 
 Usage:
 
     from data.northwind import load_company, load_department, list_departments
 
     company = load_company()
-    fs = load_department("order-concierge")
-    print(fs.seed_dir, fs.foundry_project)
+    claims = load_department("claims-concierge")
+    print(claims.seed_dir, claims.foundry_project)
 
 All paths on the returned dataclasses are absolute — the loader anchors
 them at the repo root regardless of the caller's cwd.
@@ -32,6 +30,13 @@ _MANIFEST = Path(__file__).resolve().parent / "company.yaml"
 
 
 @dataclass(frozen=True)
+class PlatformTab:
+    id: str
+    label: str
+    hosted_in_project: str
+
+
+@dataclass(frozen=True)
 class Department:
     slug: str
     name: str
@@ -42,6 +47,7 @@ class Department:
     foundry_project: str
     search_index: str
     cu_inbox_prefix: str
+    enabled_tabs: tuple[str, ...]
     seed_dir: Path
     golden_path: Path
     prompts_dir: Path
@@ -56,6 +62,7 @@ class Company:
     tagline: str
     brand_color: str
     hero: str
+    platform_tabs: tuple[PlatformTab, ...]
     departments: tuple[Department, ...]
 
     def department(self, slug: str) -> Department:
@@ -83,6 +90,7 @@ def _department(raw: dict[str, Any]) -> Department:
         foundry_project=raw["foundry_project"],
         search_index=raw["search_index"],
         cu_inbox_prefix=raw.get("cu_inbox_prefix", raw["slug"]),
+        enabled_tabs=tuple(raw.get("enabled_tabs", [])),
         seed_dir=_abs(raw["seed_dir"]),  # type: ignore[arg-type]
         golden_path=_abs(raw["golden_path"]),  # type: ignore[arg-type]
         prompts_dir=_abs(raw["prompts_dir"]),  # type: ignore[arg-type]
@@ -98,6 +106,7 @@ def load_company(path: Path | None = None) -> Company:
         raw = yaml.safe_load(fh)
 
     company_raw = raw["company"]
+    tabs = tuple(PlatformTab(**t) for t in raw.get("platform_tabs", []))
     departments = tuple(_department(d) for d in raw["departments"])
     return Company(
         slug=company_raw["slug"],
@@ -105,6 +114,7 @@ def load_company(path: Path | None = None) -> Company:
         tagline=company_raw["tagline"],
         brand_color=company_raw.get("brand_color", ""),
         hero=company_raw.get("hero", ""),
+        platform_tabs=tabs,
         departments=departments,
     )
 
@@ -120,6 +130,7 @@ def list_departments() -> list[str]:
 __all__ = [
     "Company",
     "Department",
+    "PlatformTab",
     "load_company",
     "load_department",
     "list_departments",

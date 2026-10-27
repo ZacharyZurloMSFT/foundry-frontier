@@ -17,7 +17,7 @@ TENANT = "043c812b-d828-4850-8da0-cfda17c314d4"
 DEPLOYMENT = "4a734aae-a0fc-488c-b0b3-3f364a95813d"
 PERSON = "dbe3b91b-cb1d-4421-8d7b-f06aad032380"
 OTHER_PERSON = "db1ddbbc-f413-4fa7-9d91-69860ab6143e"
-REDIRECT = "https://ca-web-tech.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/"
+REDIRECT = "https://ca-insurance-portal.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/"
 SECRET = "sensitive-fake-credential-never-print"
 
 
@@ -186,6 +186,7 @@ def test_preview_is_fully_offline_and_does_not_write_or_disclose_people(configur
     assert output["redirect_uri"] == REDIRECT
     assert output["participant_mapping_counts"] == {"total": 1, "by_role": {"policyholder": 1}}
     assert not output["ready_for_participants"]
+    assert output["configuration_to_review_not_applied"]["frontend"]["VITE_INSURANCE_BUSINESS_ENABLED"] == "false"
     assert output["configuration_to_review_not_applied"]["api"]["NORTHWIND_BUSINESS_API_ENABLED"] == "false"
     permissions = output["operator_permissions_to_review"]
     assert permissions["credential"] == "AzureCliCredential"

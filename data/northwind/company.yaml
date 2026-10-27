@@ -1,18 +1,17 @@
-# Northwind Insurance — fictional P&C insurer; stable legacy resource identifiers.
+# Northwind Insurance — fictional P&C insurer; stable live resource identifiers.
 #
 # This manifest is the top of the "one company, four Foundry projects" story.
 # Each department listed here becomes:
 #   - a Foundry project inside the shared AI Services account
-#     (see infra/modules/foundry.bicep once the multi-project change lands)
-#   - an AI Search index (nw-<slug>)
+#     (see infra/modules/foundry.bicep)
+#   - a landing-page tile in the portal web app
+#   - an AI Search index
 #   - a Cosmos partition (department = <slug>)
-#   - a `cu-inbox/<slug>/` blob prefix
 #
-# Paths under each department are relative to the repo root. During the phased
-# rollout, the Order Concierge department reuses the pre-existing top-level
-# `data/seed/`, `data/golden/`, and `agents/` paths so `azd up` never breaks;
-# the three new departments start with their own subtrees under
-# `data/northwind/departments/<slug>/`.
+# Paths under each department are relative to the repo root. The Claims
+# Concierge flagship reuses the top-level `data/seed/`, `data/golden/` and
+# `agents/` paths so `azd up` never breaks; the other departments keep their
+# own subtrees under `data/northwind/departments/<slug>/`.
 
 schema_version: 1
 
@@ -27,55 +26,64 @@ company:
     and a human-reviewed action draft. All records and policy forms are
     synthetic; the demo never approves or denies coverage or executes payments.
     Four departments share Azure AI Foundry capabilities: grounded retrieval,
-    document intelligence, Voice Live, orchestration, safety and observability.
+    document intelligence, Voice Live, orchestration, human review and observability.
 
-# Departments. The order here is the order the bootstrap scripts process them.
+# Cross-cutting Foundry capabilities that live in the platform header nav
+# regardless of which department the SE is demoing.
+platform_tabs:
+  - id: agent_harness
+    label: "Agent Harness"
+    hosted_in_project: nw-insurance-claims
+
+# Departments — order here is the order of tiles on the landing page.
 departments:
-  - slug: order-concierge
+  - slug: claims-concierge
     name: "Claims Concierge"
     tagline: "Auto claims and policy records with safe, human-reviewed action drafts."
     pillar: multi_agent
     icon: "🚘"
     brand_color: "#0b6bcb"
-    foundry_project: northwind-orders
+    foundry_project: nw-insurance-claims
     search_index: northwind-insurance-knowledge
-    cu_inbox_prefix: order-concierge
-    # Order Concierge is the flagship — it reuses the existing top-level dirs
-    # until the physical move happens in a later phase.
+    cu_inbox_prefix: claims-concierge
+    enabled_tabs: [insurance_records, agent_chat, reviewed_drafts, hitl]
+    # Claims Concierge is the flagship — it reuses the existing top-level dirs.
     seed_dir: data/seed
     golden_path: data/golden/dataset.jsonl
     prompts_dir: agents
-    cu_analyzer_dir: pipelines/content-understanding
+    cu_analyzer_dir: null
     customer_archetype: "Claims leaders, adjusters, policyholder servicing teams."
 
-  - slug: employee-help-desk
-    name: "Employee & Adjuster Support"
-    tagline: "Grounded HR and IT support plus adjuster procedures and review boundaries."
+  - slug: adjuster-support
+    name: "Adjuster Support"
+    tagline: "Grounded adjuster procedures, evidence handling and review boundaries."
     pillar: rag
     icon: "📚"
     brand_color: "#2e7d32"
-    foundry_project: nw-employee-help-desk
-    search_index: nw-hr
-    cu_inbox_prefix: employee-help-desk
-    seed_dir: data/northwind/departments/employee-help-desk/seed
-    golden_path: data/northwind/departments/employee-help-desk/golden/dataset.jsonl
-    prompts_dir: data/northwind/departments/employee-help-desk/prompts
+    foundry_project: nw-insurance-support
+    search_index: nw-insurance-adjuster-support
+    cu_inbox_prefix: adjuster-support
+    enabled_tabs: [adjuster_support]
+    seed_dir: data/northwind/departments/adjuster-support/seed
+    golden_path: data/northwind/departments/adjuster-support/golden/dataset.jsonl
+    prompts_dir: data/northwind/departments/adjuster-support/prompts
     cu_analyzer_dir: null
-    customer_archetype: "HR ops, IT service desk, adjuster enablement teams."
+    customer_archetype: "Claims supervisors, adjuster enablement and quality teams."
 
-  - slug: claims-warranty
+  - slug: claims-documents
     name: "Claims Document Intelligence"
     tagline: "FNOL reports, repair estimates, supporting invoices and damage evidence."
     pillar: content_understanding
     icon: "📄"
     brand_color: "#ef6c00"
-    foundry_project: nw-claims-warranty
+    foundry_project: nw-insurance-documents
     search_index: nw-claims
-    cu_inbox_prefix: claims-warranty
-    seed_dir: data/northwind/departments/claims-warranty/seed
-    golden_path: data/northwind/departments/claims-warranty/golden/dataset.jsonl
-    prompts_dir: data/northwind/departments/claims-warranty/prompts
-    cu_analyzer_dir: data/northwind/departments/claims-warranty/cu-analyzers
+    cu_inbox_prefix: claims-documents
+    enabled_tabs: [claims_inbox]
+    seed_dir: data/northwind/departments/claims-documents/seed
+    golden_path: data/northwind/departments/claims-documents/golden/dataset.jsonl
+    prompts_dir: data/northwind/departments/claims-documents/prompts
+    cu_analyzer_dir: data/northwind/departments/claims-documents/cu-analyzers
     customer_archetype: "Claims processing, compliance, intake operations."
 
   - slug: contact-center
@@ -84,9 +92,10 @@ departments:
     pillar: voice_live
     icon: "📞"
     brand_color: "#6a1b9a"
-    foundry_project: nw-contact-center
+    foundry_project: nw-insurance-contact-center
     search_index: nw-contact-center
     cu_inbox_prefix: contact-center
+    enabled_tabs: [voice_console]
     seed_dir: data/northwind/departments/contact-center/seed
     golden_path: data/northwind/departments/contact-center/golden/dataset.jsonl
     prompts_dir: data/northwind/departments/contact-center/prompts

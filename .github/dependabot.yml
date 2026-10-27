@@ -16,31 +16,31 @@ updates:
       azure-sdk:
         patterns: ["azure-*"]
   - package-ecosystem: "pip"
-    directory: "/pipelines/content-understanding"
-    schedule: { interval: "weekly" }
-  - package-ecosystem: "pip"
     directory: "/pipelines/red-team"
     schedule: { interval: "weekly" }
   - package-ecosystem: "pip"
     directory: "/pipelines/optimizer"
     schedule: { interval: "weekly" }
   - package-ecosystem: "pip"
-    directory: "/agents/orchestrator"
+    directory: "/agents/hosted"
     schedule: { interval: "weekly" }
   - package-ecosystem: "npm"
-    directory: "/apps/web-tech"
+    directory: "/apps/web-portal"
     schedule: { interval: "weekly" }
     groups:
       react:
         patterns: ["react", "react-dom", "@types/react*"]
+  - package-ecosystem: "npm"
+    directory: "/apps/web-voice"
+    schedule: { interval: "weekly" }
   - package-ecosystem: "docker"
     directory: "/apps/api"
     schedule: { interval: "weekly" }
   - package-ecosystem: "docker"
-    directory: "/apps/mcp-tech-lookup"
+    directory: "/apps/mcp-policy-lookup"
     schedule: { interval: "weekly" }
   - package-ecosystem: "docker"
-    directory: "/apps/mcp-work-order"
+    directory: "/apps/mcp-claim-review"
     schedule: { interval: "weekly" }
   - package-ecosystem: "github-actions"
     directory: "/"

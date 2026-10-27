@@ -21,16 +21,18 @@ SOURCE_SHA = "a" * 40
 DIGEST = "b" * 64
 
 
-def arguments(app="ca-api", **overrides):
+def arguments(app="ca-insurance-api", **overrides):
+    service = release_app.APPS.get(app, "unknown")
+    api = service == "api"
     values = {
         "subscription": release_app.SUBSCRIPTION, "tenant": release_app.TENANT,
         "resource_group": release_app.RESOURCE_GROUP, "app": app,
-        "image": f"{release_app.REGISTRY}/{app.removeprefix('ca-')}@sha256:{DIGEST}",
+        "image": f"{release_app.REGISTRY}/{service}@sha256:{DIGEST}",
         "expected_revision": f"{app}--previous", "revision": f"gha-123456-1-{SOURCE_SHA[:12]}",
         "rollback_file": ROOT / ".release-test-state" / "rollback.json",
-        "git_sha": SOURCE_SHA if app == "ca-api" else None,
-        "deployed_at": "2026-10-15T21:00:00Z" if app == "ca-api" else None,
-        "github_repository": release_app.REPOSITORY if app == "ca-api" else None,
+        "git_sha": SOURCE_SHA if api else None,
+        "deployed_at": "2026-10-15T21:00:00Z" if api else None,
+        "github_repository": release_app.REPOSITORY if api else None,
         "timeout": 600, "apply": True,
     }
     return argparse.Namespace(**(values | overrides))
@@ -53,7 +55,7 @@ def live_app(args):
             "template": {
                 "revisionSuffix": "previous",
                 "containers": [{
-                    "name": args.app, "image": f"{release_app.REGISTRY}/{args.app.removeprefix('ca-')}:previous",
+                    "name": args.app, "image": f"{release_app.REGISTRY}/{release_app.APPS.get(args.app, 'unknown')}:previous",
                     "resources": {"cpu": 1, "memory": "2Gi"},
                     "probes": [{"type": "Readiness", "httpGet": {"path": "/health", "port": 8000}}],
                     "env": [
@@ -198,7 +200,36 @@ def test_other_apps_change_only_image_and_revision_never_environment(app, record
     expected["containers"][0]["image"] = args.image
     assert arm.patches[0]["properties"]["template"] == expected
     assert "previous_build_metadata" not in json.loads(record["text"])
-    assert arm.requests[-1].url.path == ("/healthz" if "mcp-" in app else "/")
+    service = release_app.APPS[app]
+    assert arm.requests[-1].url.path == ("/healthz" if service.startswith("mcp-") else "/")
+
+
+def test_every_service_is_released_to_its_live_insurance_app():
+    assert release_app.SERVICE_APPS == {
+        "api": "ca-insurance-api", "mcp-policy-lookup": "ca-insurance-lookup", "mcp-claim-review": "ca-insurance-review",
+        "web-portal": "ca-insurance-portal", "web-voice": "ca-insurance-voice",
+    }
+    assert release_app.SERVICES == tuple(release_app.SERVICE_APPS)
+    assert release_app.APPS == {app: service for service, app in release_app.SERVICE_APPS.items()}
+
+
+@pytest.mark.parametrize("service,app", sorted(release_app.SERVICE_APPS.items()))
+def test_app_name_command_resolves_the_container_app_for_a_service(service, app, capsys, monkeypatch):
+    monkeypatch.setattr(release_app.sys, "argv", ["release-app.py", "app-name", "--service", service])
+    assert release_app.main() == 0
+    assert capsys.readouterr().out.strip() == app
+    with pytest.raises(SystemExit):
+        release_app.parser().parse_args(["app-name", "--service", "agents"])
+
+
+@pytest.mark.parametrize("legacy", ["ca-api", "ca-mcp-tech-lookup", "ca-mcp-work-order", "ca-web-tech", "ca-web-voice"])
+def test_the_retired_northwind_stack_is_no_longer_releasable(legacy, record):
+    args = arguments(app="ca-insurance-api", expected_revision=f"{legacy}--previous")
+    args.app = legacy
+    arm = Arm(arguments())
+    with pytest.raises(ValueError, match="Unknown Container App"):
+        execute(args, arm)
+    assert not arm.requests and not record
 
 
 def test_rollback_is_secret_free_and_contains_only_previous_approved_values(record):
@@ -207,7 +238,7 @@ def test_rollback_is_secret_free_and_contains_only_previous_approved_values(reco
     execute(args, arm)
     rollback = json.loads(record["text"])
     assert rollback == {
-        "app": "ca-api", "previous_revision": args.expected_revision,
+        "app": "ca-insurance-api", "previous_revision": args.expected_revision,
         "previous_image": f"{release_app.REGISTRY}/api:previous",
         "previous_build_metadata": {"GIT_SHA": "c" * 40, "BUILD_ENV": "local",
                                     "DEPLOYED_AT": None, "GITHUB_REPOSITORY": None},
@@ -236,11 +267,11 @@ def test_default_cli_is_dry_run_and_does_not_write_or_mutate(record):
     ("image", f"{release_app.REGISTRY}/api:latest"),
     ("image", f"{release_app.REGISTRY}/api@sha256:short"),
     ("image", f"evil.azurecr.io/api@sha256:{DIGEST}"),
-    ("image", f"{release_app.REGISTRY}/web-tech@sha256:{DIGEST}"),
+    ("image", f"{release_app.REGISTRY}/web-portal@sha256:{DIGEST}"),
     ("image", f"{release_app.REGISTRY}/api@sha256:{DIGEST};echo injected"),
     ("revision", "gha-0-1-aaaaaaaaaaaa"), ("revision", "gha-123-0-aaaaaaaaaaaa"),
     ("revision", "gha-123-1-BBBBBBBBBBBB"), ("revision", "gha-123-1-bbbbbbbbbbbb"),
-    ("expected_revision", "ca-web-tech--previous"), ("expected_revision", "ca-api--previous/escape"),
+    ("expected_revision", "ca-insurance-portal--previous"), ("expected_revision", "ca-insurance-api--previous/escape"),
     ("git_sha", "main"), ("deployed_at", "2026-10-15T00:00:00"),
     ("github_repository", "untrusted/repo"),
 ])
@@ -253,14 +284,14 @@ def test_scope_digest_run_and_metadata_allowlists_reject_before_http(field, valu
 
 
 def test_non_api_cannot_receive_build_environment(record):
-    args = arguments("ca-web-tech", git_sha=SOURCE_SHA)
+    args = arguments("ca-insurance-portal", git_sha=SOURCE_SHA)
     with pytest.raises(ValueError, match="Only the API"):
         execute(args, Arm(args))
     assert not record
 
 
 @pytest.mark.parametrize("field,value", [
-    ("latestReadyRevisionName", "ca-api--newer"), ("latestRevisionName", "ca-api--pending"),
+    ("latestReadyRevisionName", "ca-insurance-api--newer"), ("latestRevisionName", "ca-insurance-api--pending"),
     ("provisioningState", "InProgress"),
 ])
 def test_stale_revision_or_pending_deployment_refuses_before_record(field, value, record):
@@ -433,18 +464,18 @@ def test_existing_rollback_is_never_overwritten(record):
 
 @pytest.mark.parametrize("paths,expected", [
     (["README.md", "infra/main.bicep"], []),
-    (["apps/web-tech/package-lock.json"], ["web-tech"]),
+    (["apps/web-portal/package-lock.json"], ["web-portal"]),
+    (["apps/web-voice/src/App.tsx"], ["web-voice"]),
     (["apps/api/app/main.py"], ["api"]),
-    (["apps/api/app/insurance_domain.py"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
-    (["data/northwind/insurance-fixtures.json"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
-    (["data/seed/generated/nw-fnol-demo-2001.pdf"], ["api", "mcp-tech-lookup", "mcp-work-order"]),
-    (["apps/mcp-work-order/app/main.py"], ["mcp-work-order"]),
-    (["scripts/bundle-assistant-assets.py"], list(release_app.SERVICES)),
-    (["agents/insurance/assistants/concierge.yaml"], ["api"]),
-    (["agents/insurance/assistants/help-center.yaml", "apps/web-tech/src/business/HelpCenter.tsx"], ["api", "web-tech"]),
-    (["agents/insurance/other/notes.yaml"], []),
+    (["apps/api/app/insurance_domain.py"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
+    (["apps/api/app/gateway_guard.py"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
+    (["data/northwind/insurance-fixtures.json"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
+    (["data/seed/generated/nw-fnol-demo-2001.pdf"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
+    (["apps/mcp-claim-review/app/main.py"], ["mcp-claim-review"]),
+    (["scripts/bundle-harness-assets.py"], list(release_app.SERVICES)),
+    (["agents/copilot-harness/instructions.prompty"], list(release_app.SERVICES)),
     ([".github/workflows/deploy-apps.yml"], list(release_app.SERVICES)),
-    (["apps/web-tech-evil/anything"], []),
+    (["apps/web-portal-evil/anything"], []),
 ])
 def test_changed_service_paths_cover_actual_build_dependencies(paths, expected):
     assert release_app.changed_services(paths) == expected
@@ -462,23 +493,26 @@ def test_plan_uses_nul_delimited_ancestor_diff_and_does_not_execute_paths(monkey
     def run(command, **kwargs):
         calls.append(command)
         assert kwargs["capture_output"]
-        return SimpleNamespace(returncode=0, stdout=b"apps/web-tech/src/a\nb.ts\0apps/api/app/main.py\0")
+        return SimpleNamespace(returncode=0, stdout=b"apps/web-portal/src/a\nb.ts\0apps/api/app/main.py\0")
 
     monkeypatch.setattr(release_app.subprocess, "run", run)
-    assert release_app.plan(SOURCE_SHA, "c" * 40) == ["api", "web-tech"]
+    assert release_app.plan(SOURCE_SHA, "c" * 40) == ["api", "web-portal"]
     assert calls[-1] == ["git", "diff", "--no-renames", "--name-only", "-z", "c" * 40, SOURCE_SHA, "--"]
 
 
 def test_manual_service_allowlist_and_no_unchecked_sha():
-    assert release_app.plan(SOURCE_SHA, None, "web-tech") == ["web-tech"]
+    assert release_app.plan(SOURCE_SHA, None, "web-portal") == ["web-portal"]
     for sha, service in [("main", "all"), (SOURCE_SHA, "agents"), ("$(echo injected)", "api")]:
         with pytest.raises(ValueError):
             release_app.plan(sha, None, service)
 
 
-def test_business_frontend_identity_must_be_complete_once_any_setting_is_present():
+def test_business_frontend_defaults_disabled_but_enabled_configuration_must_be_complete():
     release_app.validate_frontend_environment({})
+    release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "false"})
+    release_app.validate_frontend_environment({"VITE_INSURANCE_BUSINESS_ENABLED": "true"})
     valid = {
+        "VITE_INSURANCE_BUSINESS_ENABLED": "true",
         "VITE_INSURANCE_AUTH_TENANT_ID": release_app.TENANT,
         "VITE_INSURANCE_AUTH_CLIENT_ID": release_app.TENANT,
         "VITE_INSURANCE_AUTH_SCOPE": "api://explicit-api/business",
@@ -523,6 +557,19 @@ def test_workflow_has_environment_scoped_oidc_shared_lock_and_immutable_builds()
     assert artifact["with"]["include-hidden-files"] == "true"
     assert artifact["with"]["if-no-files-found"] == "error"
     assert artifact["with"]["retention-days"] == "14"
+
+
+def test_workflow_targets_only_the_insurance_stack_through_the_single_app_name_mapping():
+    data = workflow()
+    options = data["on"]["workflow_dispatch"]["inputs"]["service"]["options"]
+    assert options == ["all", *release_app.SERVICES]
+    text = (ROOT / ".github" / "workflows" / "deploy-apps.yml").read_text(encoding="utf-8")
+    assert text.count("scripts/release-app.py app-name --service") == 3
+    for retired in ("ca-api", "ca-web", "ca-mcp", 'ca-$service', '$NORTHWIND_GATEWAY_URL/northwind'):
+        assert retired not in text
+    assert 'VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/insurance"' in text
+    allow_list = "|".join(release_app.SERVICES)
+    assert f'case "$service" in {allow_list})' in text
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="Node unavailable for GitHub script execution")
@@ -573,3 +620,12 @@ def test_actual_workflow_trust_gate_against_untrusted_and_unverified_sources(cas
     assert (result.returncode == 0) is allowed, result.stdout + result.stderr
     if allowed:
         assert json.loads(result.stdout)["sha"] == SOURCE_SHA
+
+
+@pytest.mark.parametrize("app", sorted(release_app.APPS))
+def test_every_live_app_validates_against_exactly_its_own_image_repository(app):
+    release_app.validate_release(arguments(app))
+    other = "web-voice" if release_app.APPS[app] != "web-voice" else "api"
+    wrong = f"{release_app.REGISTRY}/{other}@sha256:{DIGEST}"
+    with pytest.raises(ValueError, match="approved ACR repository"):
+        release_app.validate_release(arguments(app, image=wrong))

@@ -497,4 +497,4 @@ def require_training_approval(manifest: dict, budget: dict | None = None) -> Non
     if manifest.get("business_domain") == "insurance":
         raise ValueError("Insurance candidate packs are evaluation_only/no_training. A separate reviewed "
                          "training release, explicit user training consent, insurance model admission "
-                         "and hash-bound approved training budget are required; retail fine-tunes are incompatible.")
+                         "and hash-bound approved training budget are required.")

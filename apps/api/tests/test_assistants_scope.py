@@ -338,7 +338,7 @@ async def test_an_exchange_is_one_write_so_a_failed_save_leaves_nothing_behind(m
 def test_surface_registry_is_opt_in_and_prompt_is_canonical(monkeypatch):
     from types import SimpleNamespace
     settings = SimpleNamespace(assistants_enabled=False, assistant_surfaces="concierge,unknown",
-                               business_domain="insurance", foundry_project_endpoint="https://f.test/api/projects/p",
+                               foundry_project_endpoint="https://f.test/api/projects/p",
                                cosmos_endpoint="https://c.test", assistant_model="", planner_deployment="gpt-5.4")
     monkeypatch.setattr(profiles, "get_settings", lambda: settings)
     assert profiles.enabled_surfaces() == frozenset()
@@ -352,5 +352,5 @@ def test_surface_registry_is_opt_in_and_prompt_is_canonical(monkeypatch):
     assert profiles.unavailable_reason(concierge) is None
     settings.foundry_project_endpoint = ""
     assert "Foundry project endpoint" in (profiles.unavailable_reason(concierge) or "")
-    settings.business_domain = "retail"
-    assert "Insurance mode" in (profiles.unavailable_reason(concierge) or "")
+    assert concierge.department == "claims-concierge"
+    assert PROFILES["help_center"].department == "claims-concierge"

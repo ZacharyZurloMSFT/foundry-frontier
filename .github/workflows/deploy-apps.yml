@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: Existing app to release
+        description: Live insurance app to release, by service name (api, mcp-policy-lookup, mcp-claim-review, web-portal, web-voice map to ca-insurance-api, -lookup, -review, -portal, -voice)
         type: choice
-        options: [all, api, mcp-tech-lookup, mcp-work-order, web-tech]
+        options: [all, api, mcp-policy-lookup, mcp-claim-review, web-portal, web-voice]
         default: all
         required: true
       expected_sha:
@@ -132,10 +132,13 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_APPS_RESOURCE_GROUP: ${{ vars.AZURE_APPS_RESOURCE_GROUP }}
       ACR_NAME: ${{ vars.ACR_NAME }}
-      VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID }}
-      VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID }}
-      VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE }}
-      VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID }}
+      NORTHWIND_GATEWAY_URL: ${{ vars.NORTHWIND_GATEWAY_URL }}
+      VITE_INSURANCE_BUSINESS_ENABLED: ${{ vars.VITE_INSURANCE_BUSINESS_ENABLED || 'true' }}
+      # Defaults for the live insurance sign-in app registration (identifiers, not secrets); repository variables override them.
+      VITE_INSURANCE_AUTH_TENANT_ID: ${{ vars.VITE_INSURANCE_AUTH_TENANT_ID || vars.AZURE_TENANT_ID }}
+      VITE_INSURANCE_AUTH_CLIENT_ID: ${{ vars.VITE_INSURANCE_AUTH_CLIENT_ID || '0d7bda00-80e1-4004-a78d-9072bc8f836d' }}
+      VITE_INSURANCE_AUTH_SCOPE: ${{ vars.VITE_INSURANCE_AUTH_SCOPE || 'api://02f5b350-4ab2-4297-af8d-672034fa81b0/access_as_user' }}
+      VITE_INSURANCE_RUN_ID: ${{ vars.VITE_INSURANCE_RUN_ID || 'northwind-demo' }}
     steps:
       - name: Recheck source after environment approval and validate exact Azure scope
         shell: bash
@@ -172,13 +175,20 @@ jobs:
           mkdir -p .release-state
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           export GITHUB_SHA="$SOURCE_SHA"
-          api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
-            --name ca-api --query properties.configuration.ingress.fqdn -o tsv)"
-          [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
-          export VITE_API_BASE_URL="https://$api_fqdn"
+          if [[ -n "${NORTHWIND_GATEWAY_URL:-}" ]]; then
+            [[ "$NORTHWIND_GATEWAY_URL" =~ ^https://[a-z0-9-]+\.azure-api\.net$ ]]
+            export VITE_API_BASE_URL="$NORTHWIND_GATEWAY_URL/insurance"
+          else
+            api_app="$(python scripts/release-app.py app-name --service api)"
+            api_fqdn="$(az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" \
+              --name "$api_app" --query properties.configuration.ingress.fqdn -o tsv)"
+            [[ "$api_fqdn" =~ ^[a-z0-9][a-z0-9.-]*\.azurecontainerapps\.io$ ]]
+            export VITE_API_BASE_URL="https://$api_fqdn"
+          fi
           while IFS= read -r service; do
-            case "$service" in api|mcp-tech-lookup|mcp-work-order|web-tech) ;; *) exit 1 ;; esac
-            az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "ca-$service" \
+            case "$service" in api|mcp-policy-lookup|mcp-claim-review|web-portal|web-voice) ;; *) exit 1 ;; esac
+            app="$(python scripts/release-app.py app-name --service "$service")"
+            az containerapp show --resource-group "$AZURE_APPS_RESOURCE_GROUP" --name "$app" \
               --query '{revision:properties.latestReadyRevisionName,image:properties.template.containers[0].image}' \
               -o json > ".release-state/before-$service.json"
             jq -e '.revision and .image' ".release-state/before-$service.json" > /dev/null
@@ -187,13 +197,13 @@ jobs:
                 python data/seed/generate.py --domain insurance
                 python -c 'import shutil; dest = "apps/api/app/_northwind"; shutil.rmtree(dest, ignore_errors=True); shutil.copytree("data/northwind", dest)'
                 python scripts/bundle-insurance-assets.py --service api
-                python scripts/bundle-assistant-assets.py
+                python scripts/bundle-harness-assets.py
                 ;;
               mcp-*)
                 python scripts/bundle-insurance-assets.py --service "$service"
                 ;;
               web-*)
-                if [[ "$service" == web-tech ]]; then python scripts/release-app.py check-frontend; fi
+                if [[ "$service" == web-portal ]]; then python scripts/release-app.py check-frontend; fi
                 (cd "apps/$service" && npm ci --no-audit --no-fund && npm run build)
                 ;;
             esac
@@ -207,7 +217,7 @@ jobs:
           echo "DEPLOYED_AT=$deployed_at" >> "$GITHUB_ENV"
           while IFS= read -r service; do
             tag="$ACR_NAME.azurecr.io/$service:$SOURCE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-            # No Vite build args: web-tech's default preserves the validated prebuilt dist.
+            # No Vite build args: web-portal's default preserves the validated prebuilt dist.
             docker buildx build --platform linux/amd64 --push --tag "$tag" \
               --label "org.opencontainers.image.revision=$SOURCE_SHA" \
               --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
@@ -224,8 +234,9 @@ jobs:
           revision="gha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${SOURCE_SHA:0:12}"
           while IFS= read -r service; do
             test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$SOURCE_SHA"
+            app="$(python scripts/release-app.py app-name --service "$service")"
             args=(release --subscription "$AZURE_SUBSCRIPTION_ID" --tenant "$AZURE_TENANT_ID"
-              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "ca-$service"
+              --resource-group "$AZURE_APPS_RESOURCE_GROUP" --app "$app"
               --image "$(cat ".release-state/image-$service")" --revision "$revision"
               --expected-revision "$(jq -er .revision ".release-state/before-$service.json")"
               --rollback-file ".release-state/rollback-$service.json" --apply)

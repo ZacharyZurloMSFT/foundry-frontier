@@ -1,9 +1,3 @@
-# Seed generator + indexer runtime deps (installed on the machine that runs `azd up`)
+# Insurance seed generator (`python data/seed/generate.py --domain insurance`) runtime dependency.
+# Keep the pin in step with .github/workflows/ci.yml and deploy-apps.yml.
 reportlab==4.2.5
-Pillow>=11
-openai>=1.58
-azure-identity>=1.19
-azure-search-documents>=11.6.0b8
-azure-cosmos>=4.9
-azure-storage-blob>=12.24
-httpx>=0.28

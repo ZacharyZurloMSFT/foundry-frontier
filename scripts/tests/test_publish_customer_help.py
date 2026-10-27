@@ -16,7 +16,7 @@ SPEC = importlib.util.spec_from_file_location("publish_customer_help", ROOT / "s
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 
-SEED = Path("data") / "northwind" / "departments" / "employee-help-desk" / "seed" / "customer"
+SEED = Path("data") / "northwind" / "customer-help"
 KEY = "explicit-memory-only"
 HOST = "srch-zurlo-northwind.search.windows.net"
 ARTICLES = {

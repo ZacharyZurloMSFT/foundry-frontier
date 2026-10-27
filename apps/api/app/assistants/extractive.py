@@ -15,7 +15,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..foundry_client import _async_credential, _extract_output_text, _project_client
+from .. import model_gateway
+from ..foundry_client import _async_credential, _extract_output_text, model_client
 from ..settings import get_settings
 from .guards import GuardFailure, strip_fence, unsafe_determination
 from .models import Contract, DeltaEvent, DoneEvent, HelpSource, Provenance, SourcesEvent
@@ -165,9 +166,9 @@ async def select_evidence(
             }, ensure_ascii=False)),
         ],
     }
-    async with _project_client() as project:
-        async with project.get_openai_client() as client:
-            response = await client.responses.create(**request)
+    async with model_client(get_settings(), model) as (client, outbound_model):
+        request["model"] = outbound_model
+        response = await client.responses.create(**request)
     require_completed(response)
     return parse_selection(_extract_output_text(response))
 
@@ -209,6 +210,7 @@ async def run_help_turn(
     try:
         instructions, prompt_sha = load_prompt(profile)
         model = model_name()
+        model_gateway.stamp_span(turn.span, settings, model)
         async with asyncio.timeout(settings.assistant_timeout):
             stage = "search_retrieval"
             with turn.active():

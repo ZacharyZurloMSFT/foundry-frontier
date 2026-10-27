@@ -1,8 +1,8 @@
 name: "foundry-redteam"
-description: "Run the Foundry AI Red Team Agent (PyRIT-backed) against a hosted Foundry agent, publish results, and file an issue on failure."
+description: "Run the Foundry AI Red Team Agent (PyRIT-backed) against a hosted Foundry agent (default: the Northwind Insurance orchestrator) or the Copilot SDK harness, publish results, and file an issue on failure."
 inputs:
   target_agent:
-    description: "Hosted agent name to attack"
+    description: "Hosted agent name to attack, e.g. northwind-insurance-orchestrator, or copilot-sdk for the harness HTTP target"
     required: true
   strategies:
     description: "Comma-separated attack strategies (jailbreak,harm,pii-exfil,tool-abuse,indirect-injection)"
@@ -24,6 +24,9 @@ inputs:
     required: true
   foundry_project_endpoint:
     required: true
+  api_uri:
+    description: "API base URL for the copilot-sdk HTTP target"
+    required: false
 
 outputs:
   pass_rate:
@@ -51,6 +54,7 @@ runs:
       shell: bash
       env:
         FOUNDRY_PROJECT_ENDPOINT: ${{ inputs.foundry_project_endpoint }}
+        API_URI: ${{ inputs.api_uri }}
       run: |
         python pipelines/red-team/run_redteam.py \
           --agent      "${{ inputs.target_agent }}" \

@@ -1,0 +1,18 @@
+    <!-- Gateway trust: backends reject direct calls once NORTHWIND_GATEWAY_AUTH_REQUIRED=true. The caller's own
+         Authorization header (Entra user token for /api/v1) is captured first and restored afterwards, so it can
+         never be replaced by the gateway token whatever authentication-managed-identity does with the header. -->
+    <set-variable name="northwind-original-authorization" value='@(context.Request.Headers.GetValueOrDefault("Authorization", ""))' />
+    <authentication-managed-identity resource="__GATEWAY_AUDIENCE__" output-token-variable-name="northwind-gateway-token" ignore-error="false" />
+    <set-header name="X-Northwind-Gateway-Token" exists-action="override">
+      <value>@((string)context.Variables["northwind-gateway-token"])</value>
+    </set-header>
+    <choose>
+      <when condition='@(!string.IsNullOrEmpty((string)context.Variables["northwind-original-authorization"]))'>
+        <set-header name="Authorization" exists-action="override">
+          <value>@((string)context.Variables["northwind-original-authorization"])</value>
+        </set-header>
+      </when>
+      <otherwise>
+        <set-header name="Authorization" exists-action="delete" />
+      </otherwise>
+    </choose>

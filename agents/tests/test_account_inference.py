@@ -15,20 +15,21 @@ from agents.hosted.scope import RequestScope, current_scope
 
 ENDPOINT = "https://aisvc-zurlo-northwind.openai.azure.com/openai/v1/"
 RESULT = {
-    "order_id": None, "customer_hint": None, "intent": "OTHER", "sentiment": "calm",
-    "urgency": "P4", "problem_summary": "Customer asks a general question.",
+    "claim_id": None, "policy_id": None, "policyholder_id": None, "intent": "OTHER", "sentiment": "calm",
+    "urgency": "P4", "problem_summary": "Policyholder asks a general question.",
 }
+CANDIDATE = "northwind-insurance-triage-ft-candidate"
 
 
 def config(**extra):
     return Settings.from_env({
-        "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/northwind-orders",
-        "ORDER_AGENT_ROLE": "triage", "MODEL_DEPLOYMENT_NAME": "baseline",
-        "ORDERS_OPENAI_ENDPOINT": ENDPOINT, **extra,
+        "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/nw-insurance-claims",
+        "AGENT_ROLE": "triage", "MODEL_DEPLOYMENT_NAME": "baseline",
+        "AGENT_OPENAI_ENDPOINT": ENDPOINT, "NORTHWIND_INSURANCE_TRIAGE_MODEL_VERIFIED": "true", **extra,
     })
 
 
-@pytest.mark.parametrize("override,expected", [("", "baseline"), ("candidate-triage-ft", "candidate-triage-ft")])
+@pytest.mark.parametrize("override,expected", [("", "baseline"), (CANDIDATE, CANDIDATE)])
 def test_account_chat_inference_uses_identity_selected_model_and_no_storage(override, expected):
     async def run():
         calls = []
@@ -73,9 +74,23 @@ def test_account_chat_inference_uses_identity_selected_model_and_no_storage(over
 
 
 def test_triage_cannot_silently_fall_back_to_project_inference():
-    with pytest.raises(ValueError, match="ORDERS_OPENAI_ENDPOINT"):
+    with pytest.raises(ValueError, match="AGENT_OPENAI_ENDPOINT"):
         build_agent(config(), None)
-    with pytest.raises(ValueError, match="ORDERS_OPENAI_ENDPOINT"):
-        account_openai_client(config(ORDERS_OPENAI_ENDPOINT=""), None)
+    with pytest.raises(ValueError, match="AGENT_OPENAI_ENDPOINT"):
+        account_openai_client(config(AGENT_OPENAI_ENDPOINT=""), None)
     with pytest.raises(ValueError, match="openai/v1"):
-        account_openai_client(config(ORDERS_OPENAI_ENDPOINT="https://account.openai.azure.com/"), None)
+        account_openai_client(config(AGENT_OPENAI_ENDPOINT="https://account.openai.azure.com/"), None)
+
+
+def test_the_deprecated_account_endpoint_name_still_selects_the_account_endpoint():
+    legacy = {"ORDERS_OPENAI_ENDPOINT": ENDPOINT}
+    env = {
+        "FOUNDRY_PROJECT_ENDPOINT": "https://account.services.ai.azure.com/api/projects/nw-insurance-claims",
+        "ORDER_AGENT_ROLE": "triage", "MODEL_DEPLOYMENT_NAME": "baseline", **legacy,
+    }
+    settings = Settings.from_env(env)
+    client = account_openai_client(settings, None)
+    assert str(client.base_url) == ENDPOINT and settings.role == "triage"
+    asyncio.run(client.close())
+    with pytest.raises(ValueError, match="AGENT_OPENAI_ENDPOINT"):
+        account_openai_client(Settings.from_env({**env, "ORDERS_OPENAI_ENDPOINT": ""}), None)

@@ -1,0 +1,70 @@
+name: PR Evals
+# Tier 2: the insurance golden set (data/golden/dataset.jsonl) is posted to
+# POST /insurance/chat on the deployed API and scored with Foundry evaluators,
+# the claim-action draft completeness check and the triage / safety rubrics.
+# STAGING_API_URI must point at the insurance API (ca-insurance-api).
+on:
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - "agents/**"
+      - "evals/**"
+      - "data/golden/**"
+      - "apps/mcp-claim-review/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Azure login (federated)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install eval deps
+        run: pip install -r evals/requirements.txt
+
+      - name: Run golden-set evaluation
+        env:
+          API_URI: ${{ secrets.STAGING_API_URI }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
+          FOUNDRY_WORKER_DEPLOYMENT: gpt-4o
+        run: |
+          python evals/run_evals.py \
+            --dataset data/golden/dataset.jsonl \
+            --output evals/results.json \
+            --baseline evals/baseline.json
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-results
+          path: evals/results.json
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('evals/results.json', 'utf8'));
+            const rows = Object.entries(results.aggregates)
+              .map(([k,v]) => `| ${k} | ${v} |`).join('\n');
+            const body = `### Eval results (insurance golden set)\n\n| Metric | Score |\n|---|---|\n${rows}`;
+            github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body
+            });
