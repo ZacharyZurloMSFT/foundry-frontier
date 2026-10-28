@@ -1,6 +1,6 @@
 """Plan, apply and verify the AI Gateway tool servers owned by this repository.
 
-The desired state lives in infra/live/ai-gateway.json. `plan` reads the live gateway and emits a
+The desired state lives in infra/live/ai-gateway-managed-identity.json. `plan` reads the live gateway and emits a
 deterministic, secret-free JSON plan. `apply` re-reads the gateway, refuses when the diff no longer
 matches the reviewed plan, and only creates or updates the managed tool servers named in the manifest.
 `verify` lists the tools each managed server publishes through the gateway. Models and every other tool
@@ -33,7 +33,8 @@ def _load_common():
 
 common = _load_common()
 
-DEFAULT_MANIFEST = common.ROOT / "infra" / "live" / "ai-gateway.json"
+ROLLBACK_MANIFEST = common.ROOT / "infra" / "live" / "ai-gateway.json"
+DEFAULT_MANIFEST = common.ROOT / "infra" / "live" / "ai-gateway-managed-identity.json"
 MCP_PROTOCOL_VERSION = "2025-06-18"
 MCP_ACCEPT = "application/json, text/event-stream"
 MCP_PAGE_LIMIT = 10
@@ -42,8 +43,8 @@ RECEIPT_KIND = "ai-gateway-release-receipt"
 HASHED_KEYS = ("schemaVersion", "kind", "gateway", "manifestSha256", "refreshSecrets", "actions")
 TOP_LEVEL_KEYS = {"schemaVersion", "description", "gateway", "modelProvider", "expectedModels", "toolServers",
                   "observed", "stale", "deferred", "migration"}
-MIGRATION_MANIFEST = DEFAULT_MANIFEST.with_name("ai-gateway-managed-identity.staged.json")
-MIGRATION = {"kind": "direct-mcp-managed-identity", "compatibility": "unverified"}
+MIGRATION_MANIFEST = DEFAULT_MANIFEST
+MIGRATION = {"kind": "direct-mcp-managed-identity", "compatibility": "requires-attestation"}
 ATTESTATION_KIND = "ai-gateway-compatibility-attestation"
 COMPATIBILITY_CHECKS = (
     "managedIdentityRoundTrip", "backendTokenAudienceAndOid", "unauthorizedCallersRejected",
@@ -80,8 +81,8 @@ Sign in with `az login` first. The Azure CLI acquires every token; this script n
 
 typical flow:
   python scripts/ai-gateway-release.py plan --out plan.json
-  (set SEARCH_QUERY_KEY and INSURANCE_AGENTS_KEY in the environment of the next command only)
-  python scripts/ai-gateway-release.py apply --plan plan.json --yes
+  (set secret environment values only if the reviewed plan requires a credential refresh)
+  python scripts/ai-gateway-release.py apply --plan plan.json --compatibility-attestation compatibility.json --yes
   python scripts/ai-gateway-release.py verify
 """
 
@@ -286,7 +287,7 @@ def validate_manifest(manifest) -> dict:
              "The unsafe northwind-api facade must remain observed, never managed by this release unit.")
     if requires_compatibility(manifest):
         _require(manifest.get("migration") == MIGRATION,
-                 "Managed-identity MCP routing requires the unverified staged migration declaration.")
+                 "Managed-identity MCP routing requires the review-gated migration declaration.")
         review = manifest["toolServers"].get("northwind-insurance-review")
         if review:
             _require(review["expectedTools"] == ["review_draft_claim_action"]

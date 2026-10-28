@@ -28,12 +28,16 @@ cite a source.
   puts required query parameters into the URL template. Source:
   [api-management.md](../../api-management.md#findings-that-shaped-the-design-verified-live-on-scratch-apis).
 - **Changing the MCP URL is not enough to migrate claim-review.** AI Gateway drops workflow headers.
-  The staged route uses an application-signed, short-lived, exact-draft proof, plus independent gateway managed
+  The live route uses an application-signed, short-lived, exact-draft proof, plus independent gateway managed
   identity authentication. Missing or invalid proof must fail before storage; never remove workflow binding
-  or pass the private signing key to a model. Backend managed-identity support on the deployed preview is still
-  unverified, so keep current APIM routing until the separate compatibility/cutover gate passes. For one hosted
+  or pass the private signing key to a model. Managed identity and signed drafting were verified on
+  `2025-09-01-preview` on 2026-10-28; future changes still require plan-bound live evidence. For one hosted
   role, `MCP_GATEWAY_CONNECTION` and `AGENT_MCP_GATEWAY` remain mutually exclusive. Source:
-  [staged separation](../../ai-gateway.md#staged-separation-repository-preparation-not-deployed).
+  [live separation](../../ai-gateway.md#live-separation-verified-2026-10-28).
+- **Give temporary AI Gateway verifiers unique display names.** Reusing the production tool server's friendly
+  display name produced ARM HTTP 502 with no created resource; changing only the verifier display name made
+  creation succeed. Verify state after a failed mutation, and never retry it blindly. Source:
+  [2026-10-28 rollout](../../ai-gateway.md#live-separation-verified-2026-10-28).
 - **AI Gateway model names are `<provider>/<registration>`.** The registration is the deployment name lowercased
   with every character outside `[a-z0-9-]` replaced by `-` (`gpt-5.4` becomes `gpt-5-4`); bare deployment names
   return 404, and `AGENT_MODEL_GATEWAY_DEPLOYMENT` must match the selected deployment. Prompt agents cannot use

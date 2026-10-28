@@ -39,7 +39,8 @@ MCP_PATH = re.compile(r"/default/toolservers/([a-z0-9-]+)/mcp")
 
 @pytest.fixture(name="manifest")
 def manifest_fixture():
-    return release.load_manifest(release.DEFAULT_MANIFEST)
+    # Keep historical header-routing regression coverage explicit; the CLI default is tested separately.
+    return release.load_manifest(release.ROLLBACK_MANIFEST)
 
 
 def live_models(manifest):
@@ -165,7 +166,10 @@ class FakeGateway:
 
 
 def run(gateway, *args, environ=None):
-    return release.main(list(args), runner=gateway, environ=environ if environ is not None else {}, now=NOW)
+    arguments = list(args)
+    if arguments and arguments[0] in ("plan", "apply", "verify") and "--manifest" not in arguments:
+        arguments.extend(["--manifest", str(release.ROLLBACK_MANIFEST)])
+    return release.main(arguments, runner=gateway, environ=environ if environ is not None else {}, now=NOW)
 
 
 def make_plan(gateway, tmp_path, *extra):
@@ -181,7 +185,7 @@ def actions_by_name(plan):
 # --- manifest -------------------------------------------------------------------------------------
 
 
-def test_repository_manifest_defines_the_managed_boundary(manifest):
+def test_rollback_manifest_defines_the_historical_managed_boundary(manifest):
     assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE}
     lookup, knowledge = manifest["toolServers"][LOOKUP], manifest["toolServers"][KNOWLEDGE]
     assert lookup["endpoints"][0]["namespace"] == "lookup" and knowledge["endpoints"][0]["namespace"] == "knowledge"
@@ -201,7 +205,7 @@ def test_repository_manifest_defines_the_managed_boundary(manifest):
     assert manifest["stale"] == {} and manifest["deferred"] == {}
 
 
-def test_review_server_is_observed_not_managed_because_the_gateway_cannot_forward_its_headers(manifest):
+def test_rollback_manifest_retains_the_historical_header_bound_review_exception(manifest):
     assert REVIEW not in manifest["toolServers"]
     reason = manifest["observed"][REVIEW]["reason"]
     assert "workflow-binding header" in reason and "apim-northwind" in reason
@@ -228,13 +232,13 @@ def test_manifest_models_match_the_verified_registrations(manifest):
 def test_manifest_urls_are_https_and_placeholders_only_hold_secrets(manifest):
     urls = [endpoint["mcp"]["url"] for entry in manifest["toolServers"].values() for endpoint in entry["endpoints"]]
     assert urls and all(urlsplit(url).scheme == "https" for url in urls)
-    text = release.DEFAULT_MANIFEST.read_text(encoding="utf-8")
+    text = release.ROLLBACK_MANIFEST.read_text(encoding="utf-8")
     assert sorted(re.findall(r"\$\{[A-Z0-9_]+\}", text)) == [
         "${INSURANCE_AGENTS_KEY}", "${SEARCH_QUERY_KEY}"]
     assert manifest["gateway"]["url"] == common.GATEWAY_URL
 
 
-def test_the_locked_insurance_apps_are_registered_only_through_api_management(manifest):
+def test_rollback_manifest_routes_the_insurance_apps_through_api_management(manifest):
     # ca-insurance-lookup accepts only API Management's gateway token (a direct call is a 401).
     endpoint = manifest["toolServers"][LOOKUP]["endpoints"][0]
     assert urlsplit(endpoint["mcp"]["url"]).hostname == "apim-northwind.azure-api.net"
@@ -404,10 +408,10 @@ def attestation_for(manifest, plan):
     }
 
 
-def test_staged_manifest_uses_direct_identity_and_draft_only_tools():
+def test_current_manifest_uses_direct_identity_and_draft_only_tools():
     manifest = staged_manifest()
     assert manifest["toolServers"][KNOWLEDGE] == release.load_manifest(
-        release.DEFAULT_MANIFEST)["toolServers"][KNOWLEDGE]
+        release.ROLLBACK_MANIFEST)["toolServers"][KNOWLEDGE]
     assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE, REVIEW}
     for name in (LOOKUP, REVIEW):
         endpoint = manifest["toolServers"][name]["endpoints"][0]
@@ -457,12 +461,24 @@ def test_managed_identity_needs_explicit_staging_and_an_audience_not_scope(manif
     endpoint = manifest["toolServers"][LOOKUP]["endpoints"][0]
     endpoint["credentials"] = {"type": "managedIdentity", "managedIdentity": {
         "resource": "api://0940b5c3-18ec-46f0-8962-7894247c2710"}}
-    with pytest.raises(release.ManifestError, match="staged"):
+    with pytest.raises(release.ManifestError, match="review-gated"):
         release.validate_manifest(manifest)
     manifest["migration"] = release.MIGRATION
     endpoint["credentials"]["managedIdentity"]["resource"] += "/.default"
     with pytest.raises(release.ManifestError, match="not a token scope"):
         release.validate_manifest(manifest)
+
+
+def test_cli_default_preserves_the_verified_direct_mcp_route():
+    for command in (["plan"], ["verify"], ["apply", "--plan", "plan.json", "--yes"]):
+        assert release.build_parser().parse_args(command).manifest == release.DEFAULT_MANIFEST
+    manifest = release.load_manifest(release.DEFAULT_MANIFEST)
+    gateway = FakeGateway(manifest)
+    for name in manifest["toolServers"]:
+        gateway.add(name)
+    plan, _ = release.build_plan(gateway, manifest)
+    assert all(action["action"] == "noop" for action in plan["actions"])
+    assert plan["applyGate"]["status"] == "blocked-until-reviewed-compatibility-attestation"
 
 
 def test_manifest_errors_never_echo_secret_looking_values(manifest):
