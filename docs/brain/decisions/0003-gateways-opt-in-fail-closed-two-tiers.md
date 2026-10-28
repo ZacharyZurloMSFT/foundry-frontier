@@ -4,13 +4,14 @@
 > [api-management.md](../../api-management.md), [ai-gateway.md](../../ai-gateway.md),
 > [architecture.md](../../architecture.md#api-gateway-opt-in)
 
-> **2026-10-28 repository revision (not a live cutover):** the intended split is now by
+> **2026-10-28 verified live revision:** the split is now by
 > traffic ownership, not header forwarding: REST/voice APIs on classic APIM, supported models
-> and remote MCP tools on AI Gateway. The staged migration replaces claim-review workflow
+> and remote MCP tools on AI Gateway. The migration replaces claim-review workflow
 > headers with application-signed, short-lived, exact-draft proofs and pins MCP backends to
-> AI Gateway managed identity. The old decision below describes the current compatibility
-> deployment until gateway-version support is verified and cutover is separately approved.
-> See [staged separation](../../ai-gateway.md#staged-separation-repository-preparation-not-deployed).
+> AI Gateway managed identity. The old decision below now describes only the retained rollback
+> deployment. Direct identity, proof tampering rejection and a real hosted pending-only draft
+> were verified before selecting the new route.
+> See [live separation](../../ai-gateway.md#live-separation-verified-2026-10-28).
 
 ## Context
 

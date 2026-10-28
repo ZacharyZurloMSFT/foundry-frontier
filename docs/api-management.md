@@ -7,12 +7,11 @@ the repository ships the definition, the guarded release pipeline and the cut-ov
 tooling, but nothing changes in Azure until an operator runs the steps in
 [Rollout runbook](#rollout-runbook).
 
-**Target separation (not deployed):** classic APIM owns application REST and voice WebSocket
-traffic; the [staged AI Gateway migration](./ai-gateway.md#staged-separation-repository-preparation-not-deployed)
-moves remote insurance MCP backends directly behind AI Gateway with managed identity and
-signed claim-draft workflow binding. The legacy-named insurance MCP APIs stay declared for rollback;
-their presence does not mean they remain the intended post-cutover agent route. Never delete or rename
-live resources as part of this preparation.
+**Live separation (verified 2026-10-28):** classic APIM owns application REST and voice WebSocket
+traffic; [AI Gateway now fronts remote insurance MCP backends directly](./ai-gateway.md#live-separation-verified-2026-10-28)
+with managed identity and signed claim-draft workflow binding. The legacy-named insurance MCP APIs
+stay declared for rollback, but are no longer the app's agent route; their backend calls fail closed
+under the new MCP trust settings. Never delete or rename live resources as part of this separation.
 
 > **Repository scope.** The repository now manages, releases and tests only the `insurance`
 > stack. The earlier `northwind` stack (`ca-api`, `ca-mcp-tech-lookup`, `ca-mcp-work-order`,

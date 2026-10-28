@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "description": "Review-only direct MCP migration. Not the default release manifest. Apply requires a plan-bound compatibility attestation; no Azure cutover has been verified.",
-  "migration": {"kind": "direct-mcp-managed-identity", "compatibility": "unverified"},
+  "description": "Current desired MCP routing, verified live on 2026-10-28. Lookup and review use AI Gateway managed identity directly; future apply still requires plan-bound compatibility evidence.",
+  "migration": {"kind": "direct-mcp-managed-identity", "compatibility": "requires-attestation"},
   "gateway": {
     "subscriptionId": "137c905b-7734-479e-acc5-ab8222462936",
     "resourceGroup": "rg-northwind-ai",
