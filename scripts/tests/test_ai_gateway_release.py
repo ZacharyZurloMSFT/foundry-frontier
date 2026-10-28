@@ -406,6 +406,8 @@ def attestation_for(manifest, plan):
 
 def test_staged_manifest_uses_direct_identity_and_draft_only_tools():
     manifest = staged_manifest()
+    assert manifest["toolServers"][KNOWLEDGE] == release.load_manifest(
+        release.DEFAULT_MANIFEST)["toolServers"][KNOWLEDGE]
     assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE, REVIEW}
     for name in (LOOKUP, REVIEW):
         endpoint = manifest["toolServers"][name]["endpoints"][0]

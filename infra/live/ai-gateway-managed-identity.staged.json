@@ -47,7 +47,7 @@
     },
     "northwind-insurance-knowledge": {
       "displayName": "Northwind insurance knowledge",
-      "description": "Insurance-only Search knowledge MCP; existing read-only query credential unchanged.",
+      "description": "Foundry IQ knowledge base northwind-insurance-kb (Azure AI Search MCP endpoint) exposed through the AI Gateway, which injects a read-only Search query key.",
       "failureMode": "failClosed",
       "policies": [{"type": "requestRateLimit", "scope": "resource", "callsPerPeriod": 120, "periodSeconds": 60, "counterKey": ["identity"]}],
       "endpoints": [{
