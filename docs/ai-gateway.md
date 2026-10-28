@@ -61,6 +61,8 @@ Use the existing configuration tool's `--ai-gateway-backend` with `--guard enabl
 action. The script preserves unrelated environment and secrets and records previous public configuration.
 The hosted deployment accepts `--workflow-signing-key-env <variable-name>` for the private PEM;
 never put it in config JSON, source ZIP, command-line values or receipt. Supply it only for the draft role.
+Use `--stage-only` while validating a new hosted version: it creates/grants that version without
+changing the current endpoint selector. Select it only after the backend and workflow gates pass.
 Rotate by deploying a new keypair and matching runtime/backend configuration in a maintenance window;
 do not reuse gateway identity signing keys or give MCP backends the private key.
 

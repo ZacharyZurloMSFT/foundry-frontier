@@ -229,6 +229,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--stage-only", action="store_true",
+                        help="Create and grant the version without changing the current agent endpoint selector")
     parser.add_argument("--grant-runtime-roles", action="store_true",
                         help="Explicit opt-in to RBAC writes: OpenAI User on the account by default; "
                              "AI_GATEWAY_REQUIRED in the config swaps it for AI Gateway Models User on the "
@@ -389,15 +391,17 @@ def deploy(args):
                 if "ai_gateway" in report:
                     report["ai_gateway"]["runtime_grants"] = [{"scope": scope, "role_id": role_id}
                                                               for scope, role_id in grants]
-            project.agents.update_details(
-                agent_name=name,
-                agent_endpoint=AgentEndpointConfig(
-                    version_selector=VersionSelector(version_selection_rules=[
-                        FixedRatioVersionSelectionRule(agent_version=version.version, traffic_percentage=100),
-                    ]),
-                    protocol_configuration=ProtocolConfiguration(responses=ResponsesProtocolConfiguration()),
-                ),
-            )
+            if not getattr(args, "stage_only", False):
+                project.agents.update_details(
+                    agent_name=name,
+                    agent_endpoint=AgentEndpointConfig(
+                        version_selector=VersionSelector(version_selection_rules=[
+                            FixedRatioVersionSelectionRule(agent_version=version.version, traffic_percentage=100),
+                        ]),
+                        protocol_configuration=ProtocolConfiguration(responses=ResponsesProtocolConfiguration()),
+                    ),
+                )
+            report["endpoint_selected"] = not getattr(args, "stage_only", False)
             report.update({"version": version.version, "state": state, "principal_id": principal})
             native = version.as_dict()
             report["native_version"] = {

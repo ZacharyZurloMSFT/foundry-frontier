@@ -352,7 +352,7 @@ class Http:
 
 
 def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, grant_runtime_roles=True,
-                     document=None, signing_key_env=None):
+                     document=None, signing_key_env=None, stage_only=False):
     agents, calls = Agents(), []
 
     class Project:
@@ -375,6 +375,7 @@ def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, gr
         (tmp_path / "config.json").write_text(json.dumps(document), encoding="utf-8")
     arguments = deploy_arguments(tmp_path, role, apply=True, grant_runtime_roles=grant_runtime_roles)
     arguments.workflow_signing_key_env = signing_key_env
+    arguments.stage_only = stage_only
     module.deploy(arguments)
     return agents, calls, json.loads(arguments.output.read_text())
 
@@ -416,6 +417,14 @@ def test_private_key_cannot_be_stored_in_deployment_config(tmp_path, no_azure):
     write_config(tmp_path, "claim-action-draft", {"CLAIM_WORKFLOW_SIGNING_KEY": "not-allowed"})
     with pytest.raises(ValueError, match="must not be stored"):
         module.deploy(deploy_arguments(tmp_path, "claim-action-draft", apply=False))
+
+
+def test_staged_version_does_not_change_live_agent_selector(tmp_path, monkeypatch):
+    agents, calls, report = apply_deployment(tmp_path, monkeypatch, "triage", stage_only=True)
+    assert len(agents.created) == 1
+    assert agents.updated == []
+    assert report["endpoint_selected"] is False
+    assert granted(calls) == DIRECT
 
 
 def granted(calls):
