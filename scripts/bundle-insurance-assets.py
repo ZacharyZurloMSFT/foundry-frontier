@@ -34,6 +34,9 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
             raise ValueError("Canonical insurance fixtures require nonempty " + collection + ".")
     ast.parse(domain.read_text(encoding="utf-8"), filename=str(domain))
     ast.parse(guard.read_text(encoding="utf-8"), filename=str(guard))
+    binding = root / "apps" / "api" / "app" / "workflow_binding.py" if service == "mcp-claim-review" else None
+    if binding is not None:
+        ast.parse(binding.read_text(encoding="utf-8"), filename=str(binding))
     sources = []
     if service == "api":
         manifest = root / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
@@ -60,6 +63,8 @@ def bundle(service: str, root: Path = ROOT) -> dict[str, str]:
     if service != "api":
         shutil.copyfile(domain, destination / domain.name)
         shutil.copyfile(guard, destination / guard.name)
+        if binding is not None:
+            shutil.copyfile(binding, destination / binding.name)
     else:
         document_destination = destination / "_northwind" / "claims-documents"
         document_destination.mkdir(parents=True, exist_ok=True)

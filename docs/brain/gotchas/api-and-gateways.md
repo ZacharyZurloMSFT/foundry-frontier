@@ -27,11 +27,13 @@ cite a source.
 - **A missing required query parameter returns 404 through APIM**, not the backend's 422, because OpenAPI import
   puts required query parameters into the URL template. Source:
   [api-management.md](../../api-management.md#findings-that-shaped-the-design-verified-live-on-scratch-apis).
-- **The claim-review MCP cannot go through the AI Gateway.** The gateway drops client headers, and the claim-review
-  server binds `x-workflow-id` to the workflow. Route it through `apim-northwind`; it can stay direct only while its
-  app is not locked behind the gateway guard, and a locked app rejects direct calls with 401. For one hosted role,
-  `MCP_GATEWAY_CONNECTION` and an `AGENT_MCP_GATEWAY` entry are mutually exclusive (startup error). Sources:
-  [ai-gateway.md](../../ai-gateway.md#two-gateways), [ai-gateway.md](../../ai-gateway.md#findings-to-act-on).
+- **Changing the MCP URL is not enough to migrate claim-review.** AI Gateway drops workflow headers.
+  The staged route uses an application-signed, short-lived, exact-draft proof, plus independent gateway managed
+  identity authentication. Missing or invalid proof must fail before storage; never remove workflow binding
+  or pass the private signing key to a model. Backend managed-identity support on the deployed preview is still
+  unverified, so keep current APIM routing until the separate compatibility/cutover gate passes. For one hosted
+  role, `MCP_GATEWAY_CONNECTION` and `AGENT_MCP_GATEWAY` remain mutually exclusive. Source:
+  [staged separation](../../ai-gateway.md#staged-separation-repository-preparation-not-deployed).
 - **AI Gateway model names are `<provider>/<registration>`.** The registration is the deployment name lowercased
   with every character outside `[a-z0-9-]` replaced by `-` (`gpt-5.4` becomes `gpt-5-4`); bare deployment names
   return 404, and `AGENT_MODEL_GATEWAY_DEPLOYMENT` must match the selected deployment. Prompt agents cannot use

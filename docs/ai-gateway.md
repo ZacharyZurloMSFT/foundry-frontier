@@ -6,6 +6,102 @@ How Northwind sends model inference and MCP traffic through the Azure API Manage
 
 The repo keeps AI Gateway rollout opt-in; a fresh `azd up` is unchanged. The runbook and historical inventory below retain dated deployment evidence. Azure writes are deliberately separate from ordinary deployment and use reviewed plan/apply scripts.
 
+## Staged separation (repository preparation, not deployed)
+
+The target ownership is **application REST/WebSocket APIs -> classic APIM** and
+**supported model inference / remote agent MCP tools -> AI Gateway**, with AI Gateway
+calling the insurance MCP Container Apps directly rather than chaining through APIM.
+The existing live paths and default release manifest are unchanged until review and cutover.
+Do not delete or rename the compatibility MCP APIs in classic APIM.
+
+`infra/live/ai-gateway-managed-identity.staged.json` is a separate, explicitly selected
+migration manifest. It points lookup and review directly at their existing Container Apps,
+uses system-assigned gateway identity with the existing gateway application audience, keeps
+the insurance Search MCP route unchanged, and expects only `review_draft_claim_action` from
+review. The unsafe REST tool facade must remain blocked: agents never approve, deny or pay claims.
+
+**Identity compatibility verified; production workflow cutover still pending.** The public
+[tool-server specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/apimanagement/resource-manager/Microsoft.ApiManagement/AIGateway/AIGatewayToolServer.tsp)
+defines `credentials.type=managedIdentity` and `managedIdentity.resource`, but marks that schema
+with version `2026-11-01`, which alone was not evidence of support on the deployed preview.
+An isolated live canary on **2026-10-28** proved `2025-09-01-preview` preserves the managed-identity
+configuration and sends a valid token with the existing gateway audience and AI Gateway principal
+`47816336-79ee-4e60-9ab4-7c03e5e4d2b0`. A temporary JWT-validating MCP probe returned a successful
+read-only identity result through the gateway; direct unauthenticated and malformed-token calls
+returned 401. Both temporary canary registrations were removed and production routes were unchanged.
+This proves gateway-to-verifier identity, not yet the direct Container App or signed-draft end-to-end
+flow. Those must still pass before production cutover. Do not silently downgrade to a key,
+unauthenticated backend, or permanent APIM hop if any remaining check fails.
+
+### Draft workflow binding and backend trust
+
+The AI Gateway still need not forward arbitrary headers. A trusted hosted draft wrapper signs
+a 120-second RS256 capability over the application-owned workflow ID and SHA-256 of the exact
+canonical draft. It injects `workflow_proof` only into its outbound MCP call; neither the private
+key nor this argument is exposed in the model's `draft_claim_action` function schema.
+The backend verifies issuer, audience, signature, lifetime, workflow and payload before storage.
+Existing pending-only idempotence remains: replay can only return the identical pending draft,
+never replace a draft or reopen a decided one. Both gateway authentication and workflow proof are
+required, independently. Treat proofs as short-lived credentials; do not capture raw request bodies
+in debug logs or attach private keys/proofs to review artifacts.
+
+Runtime configuration for a **reviewed later deployment**:
+
+| Surface | Required configuration |
+|---|---|
+| API app | Keep APIM guard/header and API/voice routing unchanged. |
+| Both MCP apps | Enable gateway guard; tenant and existing gateway audience; allow only the verified AI Gateway principal; `NORTHWIND_GATEWAY_TOKEN_HEADER=authorization`. The default remains `x-northwind-gateway-token`; no fallback accepts both. |
+| Review MCP | `CLAIM_WORKFLOW_BINDING=signed` and `CLAIM_WORKFLOW_PUBLIC_KEY` containing only public RSA PEM (>=2048 bits). Missing proof/key, wrong payload or expiry fails closed before storage; legacy headers cannot bypass signed mode. |
+| Hosted draft runtime | `AGENT_MCP_GATEWAY` draft entry with the review URL, `tool_prefix=review_`, a syntactically valid connection label, and `workflow_binding=signed`; `AI_GATEWAY_MCP_REQUIRED=true`; private PEM in `CLAIM_WORKFLOW_SIGNING_KEY` only. Draft uses fresh Entra bearer tokens, not the connection's runtime key. |
+| Hosted draft permissions | AI Gateway Tools User on the gateway, in addition to the existing model/project grants. This role is gateway-wide: keep unsafe registrations blocked. Other roles do not receive it. |
+
+Use the existing configuration tool's `--ai-gateway-backend` with `--guard enable`, one
+`--allowed-oid`, tenant and audience, selecting each MCP app explicitly. Review additionally needs
+`--workflow-public-key` pointing to the public PEM. Preview first; `--apply` is a separate authorized
+action. The script preserves unrelated environment and secrets and records previous public configuration.
+The hosted deployment accepts `--workflow-signing-key-env <variable-name>` for the private PEM;
+never put it in config JSON, source ZIP, command-line values or receipt. Supply it only for the draft role.
+Use `--stage-only` while validating a new hosted version: it creates/grants that version without
+changing the current endpoint selector. Select it only after the backend and workflow gates pass.
+Rotate by deploying a new keypair and matching runtime/backend configuration in a maintenance window;
+do not reuse gateway identity signing keys or give MCP backends the private key.
+
+### Review and cutover gate
+
+First approve the repository changes. Later, separately authorize an isolated canary deployment:
+prove managed-identity configuration readback on the exact API version, expected token audience/OID,
+rejection of direct/wrong-identity calls, signed workflow round-trip and tampering rejection,
+draft-only tool discovery, and a synthetic draft remaining pending with no execution. Review rollback
+before switching production callers. These checks cannot be inferred from offline tests or `tools/list`.
+
+The release script can plan the staged manifest, but `apply --yes` alone is rejected.
+`--compatibility-attestation <json>` must reference that exact gateway/API version, manifest hash
+and plan hash. Required fields: `schemaVersion: 1`,
+`kind: ai-gateway-compatibility-attestation`, the plan's `gateway`, `manifestSha256`, `planSha256`,
+`reviewedBy`, timezone-aware `reviewedAt`/`expiresAt` (maximum 24 hours), verified
+`gatewayPrincipalId`, an HTTPS `evidence` link without credentials/query, and `checks` with every
+one of these names explicitly `true`: `managedIdentityRoundTrip`, `backendTokenAudienceAndOid`,
+`unauthorizedCallersRejected`, `workflowProofRoundTrip`, `workflowProofTamperingRejected`,
+`draftOnlyToolSurface`, `syntheticDraftPendingApproval`, `unsafeFacadeBlocked`, `rollbackReviewed`.
+This is operator-reviewed evidence, not cryptographic proof or permission to perform a cutover.
+The script rechecks live drift before writing and requires staged readback convergence.
+
+Roll back in a maintenance window: stop draft traffic, restore previous backend guard/header and
+workflow configuration, restore prior gateway registrations/default manifest from the reviewed plan,
+and restore previous hosted selectors/configuration. Retain the old public/private pair securely until
+rollback is no longer needed. Do not run classic APIM MCP success probes against backends now pinned to
+AI Gateway; those old paths should fail after separation. API/voice probes must still pass.
+
+### Explicit remaining boundaries
+
+This preparation does **not** make every operation traverse AI Gateway. Prompt-agent model inference,
+Voice Live, Content Understanding, Search planner/vectorizer inference, evaluations, and Agent Service
+agent-to-agent calls remain the platform exceptions below. The Copilot harness's bundled read-only
+policy/claim functions are local tools, not network MCP requests. Its draft delegates to the hosted
+specialist when hosted agents are enabled; the native prompt-agent/header-bound drafting path is a
+legacy compatibility path and cannot use signed proof safely. Use the hosted specialist for the staged
+cutover; do not give a prompt model the signing key or pretend URL replacement migrates native drafting.
+
 ## Current demo readiness (verified 2026-10-26)
 
 | Area | Live evidence | Demo status |
@@ -207,7 +303,7 @@ All optional; empty means unset and keeps the current direct behaviour (fresh `a
 | `AI_GATEWAY_REQUIRED` | models must use the gateway (hosted agents, API app); fail closed. It does not apply to prompt-agent models, which stay direct (finding 9): `create-prompt-agents.py` (a manual script; no azd hook runs it any more) validates the flag but ignores it, so setting the flag does not stop prompt-agent creation. Whenever the flag is set in the azd environment, `scripts/validate-reuse.py` (the `preprovision` / `predeploy` hook) checks that the hosted-agent gateway settings are present and well formed, and the hosted agents fail closed on their next deploy, so set it there only after the gateway route is verified |
 | `AI_GATEWAY_MCP_REQUIRED` | hosted `policy-claim-lookup` and `policy-wording` MCP and prompt-agent knowledge-base MCP must use the gateway; fail closed |
 | `AGENT_MODEL_GATEWAY_ENDPOINT/_MODEL/_DEPLOYMENT/_SCOPE` | existing hosted-agent contract |
-| `AGENT_MCP_GATEWAY` | hosted agents: JSON keyed by role (`policy-claim-lookup`, `policy-wording`): `url`, `tool_prefix`, `connection`, optional `forwards_headers` (a `claim-action-draft` entry is accepted only with `forwards_headers: true`) |
+| `AGENT_MCP_GATEWAY` | hosted agents: JSON keyed by role (`policy-claim-lookup`, `policy-wording`, `claim-action-draft`): `url`, `tool_prefix`, `connection`; drafting requires `workflow_binding: signed` and the private signing key. The legacy `forwards_headers` boolean never substitutes for signed binding. |
 | `MCP_GATEWAY_CONNECTION` | hosted agents routing `policy-claim-lookup` / `claim-action-draft` through `apim-northwind` (the [API Management](./api-management.md) contract); mutually exclusive with `AGENT_MCP_GATEWAY` for the same role |
 | `AI_GATEWAY_MODEL_ENDPOINT`, `AI_GATEWAY_SCOPE`, `AI_GATEWAY_MODEL_PROVIDER`, `AI_GATEWAY_MODEL_ALIASES` | API app |
 | `AI_GATEWAY_MODEL_CONNECTION` | Foundry model connection for prompt agents; **not usable with the AI Gateway tier** (finding 9), leave it unset |

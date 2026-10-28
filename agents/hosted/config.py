@@ -79,11 +79,9 @@ ENV_KEYS = (
 # connection name's shape.
 MCP_GATEWAY_ROLES = ("policy-claim-lookup", "claim-action-draft")
 CONNECTION_NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
-# Roles whose MCP server may be routed through an AI Gateway tool server (AGENT_MCP_GATEWAY), and the two
-# of them whose MCP traffic the provider executes, which AI_GATEWAY_MCP_REQUIRED therefore constrains.
+# AI_GATEWAY_MCP_REQUIRED constrains provider-executed and application-bound MCP alike.
 AI_GATEWAY_MCP_ROLES = ("policy-claim-lookup", "policy-wording", "claim-action-draft")
-PROVIDER_MCP_ROLES = ("policy-claim-lookup", "policy-wording")
-MCP_GATEWAY_FIELDS = {"url", "tool_prefix", "connection", "forwards_headers"}
+MCP_GATEWAY_FIELDS = {"url", "tool_prefix", "connection", "forwards_headers", "workflow_binding"}
 GATEWAY_MCP_PATH = re.compile(r"(?:/[^/]+)*/default/toolservers/(?P<server>[A-Za-z0-9][A-Za-z0-9_-]*)/mcp")
 GATEWAY_TOOL_PREFIX = re.compile(r"[a-z0-9_]*")
 GATEWAY_KNOWLEDGE_SERVER = "northwind-insurance-knowledge"
@@ -138,6 +136,7 @@ class McpGateway:
     tool_prefix: str
     connection: str
     forwards_headers: bool = False
+    workflow_binding: str | None = None
 
     @property
     def server(self) -> str:
@@ -163,9 +162,11 @@ def parse_mcp_gateway(raw: str) -> dict[str, McpGateway]:
             raise ValueError(f"AGENT_MCP_GATEWAY names the {role} role more than once")
         entry = expect_type(entry, dict, f"{name} must be a JSON object")
         forwards = entry.get("forwards_headers", False)
-        if role == "claim-action-draft" and forwards is not True:
-            raise ValueError(f"{name} requires forwards_headers: true; claim-review MCP needs "
-                             "application-bound headers that the AI gateway does not forward")
+        binding = entry.get("workflow_binding")
+        if role == "claim-action-draft" and binding != "signed":
+            raise ValueError(f"{name} requires workflow_binding: signed; AI Gateway does not forward workflow headers")
+        if binding is not None and (role != "claim-action-draft" or binding != "signed"):
+            raise ValueError(f"{name}.workflow_binding is only supported as signed for claim-action-draft")
         unknown = sorted(set(entry) - MCP_GATEWAY_FIELDS)
         if unknown:
             raise ValueError(f"{name} has unsupported fields: {', '.join(unknown)}")
@@ -184,7 +185,7 @@ def parse_mcp_gateway(raw: str) -> dict[str, McpGateway]:
         if not isinstance(connection, str) or not re.fullmatch(CONNECTION_NAME, connection):
             raise ValueError(f"{name}.connection must name a project connection")
         entries[role] = McpGateway(url, prefix, connection, expect_type(
-            forwards, bool, f"{name}.forwards_headers must be a boolean"))
+            forwards, bool, f"{name}.forwards_headers must be a boolean"), binding)
     return entries
 
 
@@ -238,7 +239,7 @@ class Settings:
         elif gateway_model or gateway_deployment or env.get("AGENT_MODEL_GATEWAY_SCOPE"):
             raise ValueError("AGENT_MODEL_GATEWAY_ENDPOINT is required for gateway configuration")
         mcp_gateway = parse_mcp_gateway(env.get("AGENT_MCP_GATEWAY", ""))
-        if (env_flag(env, "AI_GATEWAY_MCP_REQUIRED") and role in PROVIDER_MCP_ROLES
+        if (env_flag(env, "AI_GATEWAY_MCP_REQUIRED") and role in AI_GATEWAY_MCP_ROLES
                 and role not in mcp_gateway):
             raise ValueError(f"AI_GATEWAY_MCP_REQUIRED is set but AGENT_MCP_GATEWAY has no {role} entry; "
                              "direct MCP traffic is not permitted")

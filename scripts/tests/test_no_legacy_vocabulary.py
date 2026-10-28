@@ -90,7 +90,6 @@ ALLOWED: dict[str, set[str]] = {
     "infra/main.bicepparam": {"orders setting"},
     "infra/modules/containerapps.bicep": {"tech lookup", "work order"},
     "pipelines/insurance-learning/insurance_learning.py": {"orders project"},
-    "scripts/ai-gateway-enforce.py": {"orders project"},
     "scripts/apim-release.py": {"tech lookup", "work order"},
     "scripts/apim-smoke.py": {"tech lookup", "work order"},
     "scripts/configure-gateway-apps.py": {"tech lookup", "work order"},

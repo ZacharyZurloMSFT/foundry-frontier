@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -40,7 +41,16 @@ PLAN_KIND = "ai-gateway-release-plan"
 RECEIPT_KIND = "ai-gateway-release-receipt"
 HASHED_KEYS = ("schemaVersion", "kind", "gateway", "manifestSha256", "refreshSecrets", "actions")
 TOP_LEVEL_KEYS = {"schemaVersion", "description", "gateway", "modelProvider", "expectedModels", "toolServers",
-                  "observed", "stale", "deferred"}
+                  "observed", "stale", "deferred", "migration"}
+MIGRATION_MANIFEST = DEFAULT_MANIFEST.with_name("ai-gateway-managed-identity.staged.json")
+MIGRATION = {"kind": "direct-mcp-managed-identity", "compatibility": "unverified"}
+ATTESTATION_KIND = "ai-gateway-compatibility-attestation"
+COMPATIBILITY_CHECKS = (
+    "managedIdentityRoundTrip", "backendTokenAudienceAndOid", "unauthorizedCallersRejected",
+    "workflowProofRoundTrip", "workflowProofTamperingRejected", "draftOnlyToolSurface",
+    "syntheticDraftPendingApproval", "unsafeFacadeBlocked", "rollbackReviewed",
+)
+GUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 SERVER_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 NAMESPACE = re.compile(r"[a-z][a-z0-9]{0,31}")
 TOOL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
@@ -134,8 +144,22 @@ def _check_models(models) -> None:
 
 
 def _check_credentials(credentials, where: str) -> None:
-    _require(isinstance(credentials, dict) and credentials.get("type") in ("none", "header"),
-             f"{where}.type must be none or header; managedIdentity and oauth2 are not managed by this unit.")
+    _require(isinstance(credentials, dict) and credentials.get("type") in ("none", "header", "managedIdentity"),
+             f"{where}.type must be none, header or managedIdentity.")
+    if credentials["type"] == "managedIdentity":
+        _require(set(credentials) == {"type", "managedIdentity"},
+                 f"{where} must define exactly type and managedIdentity.")
+        identity = credentials["managedIdentity"]
+        _require(isinstance(identity, dict) and {"resource"} <= set(identity) <= {"resource", "clientId"},
+                 f"{where}.managedIdentity must define resource and optionally clientId only.")
+        resource = identity["resource"]
+        # This release unit targets the Northwind Entra application audience, not arbitrary OAuth resources/scopes.
+        _require(isinstance(resource, str) and GUID.fullmatch(resource.removeprefix("api://")),
+                 f"{where}.managedIdentity.resource must be a GUID or api://GUID audience, not a token scope.")
+        if "clientId" in identity:
+            _require(isinstance(identity["clientId"], str) and GUID.fullmatch(identity["clientId"]),
+                     f"{where}.managedIdentity.clientId must be a UAMI client GUID (omit for system identity).")
+        return
     if credentials["type"] == "none":
         _require(set(credentials) == {"type"}, f"{where} must not define headers with type none.")
         return
@@ -243,6 +267,12 @@ def _check_secret_placement(manifest: dict) -> None:
             _require("${" not in value, f"{where}: environment placeholders are only allowed in credential header values.")
 
 
+def requires_compatibility(manifest: dict) -> bool:
+    return "migration" in manifest or "northwind-insurance-review" in manifest["toolServers"] or any(
+        endpoint["credentials"]["type"] == "managedIdentity"
+        for entry in manifest["toolServers"].values() for endpoint in entry["endpoints"])
+
+
 def validate_manifest(manifest) -> dict:
     _require(isinstance(manifest, dict), "Manifest must be a JSON object.")
     _require(manifest.get("schemaVersion") == 1, "Manifest schemaVersion must be 1.")
@@ -252,6 +282,18 @@ def validate_manifest(manifest) -> dict:
     _check_provider(manifest.get("modelProvider"))
     _check_models(manifest.get("expectedModels"))
     _check_tool_servers(manifest.get("toolServers"))
+    _require("northwind-api" not in manifest["toolServers"],
+             "The unsafe northwind-api facade must remain observed, never managed by this release unit.")
+    if requires_compatibility(manifest):
+        _require(manifest.get("migration") == MIGRATION,
+                 "Managed-identity MCP routing requires the unverified staged migration declaration.")
+        review = manifest["toolServers"].get("northwind-insurance-review")
+        if review:
+            _require(review["expectedTools"] == ["review_draft_claim_action"]
+                     and review["failureMode"] == "failClosed" and len(review["endpoints"]) == 1
+                     and review["endpoints"][0]["required"]
+                     and review["endpoints"][0]["credentials"]["type"] == "managedIdentity",
+                     "The staged review server must require managed identity and publish only review_draft_claim_action.")
     groups = {"toolServers": set(manifest["toolServers"])}
     for section in NAMED_SECTIONS:
         groups[section] = _check_named(manifest, section)
@@ -285,6 +327,8 @@ def desired_properties(entry: dict, environ=None) -> dict:
     endpoints = []
     for endpoint in entry["endpoints"]:
         credentials = {"type": endpoint["credentials"]["type"]}
+        if credentials["type"] == "managedIdentity":
+            credentials["managedIdentity"] = copy.deepcopy(endpoint["credentials"]["managedIdentity"])
         if credentials["type"] == "header":
             credentials["headers"] = {
                 name: [value if environ is None else common.resolve_placeholders(value, environ) for value in values]
@@ -311,6 +355,8 @@ def comparable(properties: dict) -> dict:
             "required": endpoint.get("required", True), "url": mcp.get("url"),
             "transport": mcp.get("transport") or "streamableHttp", "credentialType": credentials.get("type"),
             "headerNames": sorted(str(name).lower() for name in headers) if isinstance(headers, dict) else None,
+            "managedIdentity": {key: (credentials.get("managedIdentity") or {}).get(key)
+                                for key in ("resource", "clientId")},
         })
     return {"type": properties.get("type"), "displayName": properties.get("displayName"),
             "description": properties.get("description"), "failureMode": properties.get("failureMode"),
@@ -323,6 +369,9 @@ def _endpoint_differences(want: dict, have: dict) -> list[str]:
              if want[field] != have[field]]
     if have["headerNames"] is not None and want["headerNames"] is not None and want["headerNames"] != have["headerNames"]:
         found.append(f"{label}.headerNames")
+    for key in ("resource", "clientId"):
+        if want["managedIdentity"][key] != have["managedIdentity"][key]:
+            found.append(f"{label}.managedIdentity.{key}")
     return found
 
 
@@ -471,6 +520,12 @@ def plan_from_live(manifest: dict, live_servers: dict, live_models: list, *, ref
         "manifestSha256": common.sha256_json(manifest), "refreshSecrets": refresh, "actions": actions,
     }
     plan["planSha256"] = common.sha256_json({key: plan[key] for key in HASHED_KEYS})
+    if requires_compatibility(manifest):
+        plan["applyGate"] = {
+            "status": "blocked-until-reviewed-compatibility-attestation",
+            "armApiVersion": gateway["armApiVersion"], "requiredChecks": list(COMPATIBILITY_CHECKS),
+            "reason": "Direct managed-identity MCP routing requires reviewed live identity and workflow-proof evidence.",
+        }
     reports = _report_sections(manifest, live_servers)
     models = model_findings(manifest, live_models)
     counts = {kind: sum(1 for action in actions if action["action"] == kind) for kind in ("create", "update", "noop", "conflict")}
@@ -507,9 +562,54 @@ def _scrub(message: str, secrets: list[str]) -> str:
     return message
 
 
-def apply_plan(runner, manifest: dict, document: dict, environ, *, now=None) -> dict:
+def check_compatibility_attestation(manifest: dict, document: dict, attestation, now) -> str | None:
+    if not requires_compatibility(manifest):
+        _require(attestation is None, "Compatibility attestations are only valid for staged migrations.")
+        return None
+    _require(isinstance(attestation, dict),
+             "Staged migration apply is blocked: supply --compatibility-attestation after independent reviewed "
+             "gateway compatibility verification; --yes alone cannot authorize cutover.")
+    _require(set(attestation) == {
+        "schemaVersion", "kind", "gateway", "manifestSha256", "planSha256", "reviewedBy", "reviewedAt",
+        "expiresAt", "gatewayPrincipalId", "evidence", "checks",
+    }, "Compatibility attestation must contain exactly the documented fields.")
+    _require(type(attestation["schemaVersion"]) is int and attestation["schemaVersion"] == 1
+             and attestation["kind"] == ATTESTATION_KIND, "Invalid compatibility attestation kind or version.")
+    _require(attestation["gateway"] == document["gateway"] == {
+        key: manifest["gateway"][key] for key in document["gateway"]
+    } and attestation["manifestSha256"] == document["manifestSha256"] == common.sha256_json(manifest)
+             and attestation["planSha256"] == document["planSha256"],
+             "Compatibility attestation does not match this exact gateway, API version, manifest and reviewed plan.")
+    reviewer = attestation["reviewedBy"]
+    _require(isinstance(reviewer, str) and reviewer == reviewer.strip() and 3 <= len(reviewer) <= 200
+             and not any(ord(char) < 32 for char in reviewer), "Attestation reviewedBy must identify the reviewer.")
+    principal = attestation["gatewayPrincipalId"]
+    _require(isinstance(principal, str) and GUID.fullmatch(principal),
+             "Attestation gatewayPrincipalId must identify the verified gateway managed-identity object ID.")
+    evidence = attestation["evidence"]
+    _https(evidence, "Attestation evidence")
+    _require(not urlsplit(evidence).query, "Attestation evidence must not contain a query or credentials.")
+    checks = attestation["checks"]
+    _require(isinstance(checks, dict) and set(checks) == set(COMPATIBILITY_CHECKS)
+             and all(value is True for value in checks.values()),
+             "Every required compatibility check must be explicitly true with reviewed evidence.")
+    try:
+        reviewed = datetime.fromisoformat(attestation["reviewedAt"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(attestation["expiresAt"].replace("Z", "+00:00"))
+        valid = (reviewed.utcoffset() is not None and expires.utcoffset() is not None
+                 and reviewed <= now() < expires <= reviewed + timedelta(hours=24))
+    except (ValueError, TypeError, AttributeError):
+        valid = False
+    _require(valid, "Compatibility attestation must be timezone-aware, not future-dated or expired, "
+                    "and valid for at most 24 hours after review.")
+    return common.sha256_json(attestation)
+
+
+def apply_plan(runner, manifest: dict, document: dict, environ, *, now=None, attestation=None) -> dict:
+    validate_manifest(manifest)
     check_plan_document(document)
     now = now or common.utc_now
+    attestation_sha = check_compatibility_attestation(manifest, document, attestation, now)
     current, live = build_plan(runner, manifest, refresh=document.get("refreshSecrets") or [])
     if current["planSha256"] != document["planSha256"]:
         raise common.GatewayError(
@@ -545,8 +645,13 @@ def apply_plan(runner, manifest: dict, document: dict, environ, *, now=None) -> 
         for result in results:
             result["converged"] = not remaining.get(result["name"])
             result["remainingDifferences"] = remaining.get(result["name"], [])
-    return {"schemaVersion": 1, "kind": RECEIPT_KIND, "planSha256": document["planSha256"],
-            "appliedAt": common.iso(now()), "complete": not failed, "results": results}
+        if attestation_sha and any(not result["converged"] for result in results):
+            failed = True
+    receipt = {"schemaVersion": 1, "kind": RECEIPT_KIND, "planSha256": document["planSha256"],
+               "appliedAt": common.iso(now()), "complete": not failed, "results": results}
+    if attestation_sha:
+        receipt["compatibilityAttestationSha256"] = attestation_sha
+    return receipt
 
 
 def sse_messages(text: str) -> list:
@@ -621,6 +726,7 @@ def list_tools(runner, url: str) -> tuple[dict, list[str]]:
 
 def verify_servers(runner, manifest: dict, *, include_observed: bool = False, strict: bool = False) -> dict:
     gateway_url = manifest["gateway"]["url"]
+    strict = strict or requires_compatibility(manifest)
     servers = []
     for name in sorted(manifest["toolServers"]):
         expected = manifest["toolServers"][name]["expectedTools"]
@@ -670,6 +776,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--plan", type=Path, required=True, help="Plan file produced by `plan`.")
     apply.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     apply.add_argument("--yes", action="store_true", help="Required to change the gateway.")
+    apply.add_argument("--compatibility-attestation", type=Path,
+                       help="Reviewed compatibility evidence bound to this plan; mandatory for staged managed-identity MCP.")
     apply.add_argument("--receipt", type=Path, help="Also write the redacted receipt here (never overwritten).")
     verify = commands.add_parser("verify", help="List the tools each managed server publishes through the gateway.")
     verify.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
@@ -695,7 +803,8 @@ def main(argv=None, *, runner=None, environ=None, now=None) -> int:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
                 common.replace_json(args.out, result)
         elif args.command == "apply":
-            result = apply_plan(runner, manifest, common.read_json(args.plan), environ, now=now)
+            attestation = common.read_json(args.compatibility_attestation) if args.compatibility_attestation else None
+            result = apply_plan(runner, manifest, common.read_json(args.plan), environ, now=now, attestation=attestation)
             if args.receipt:
                 common.write_json_exclusive(args.receipt, result)
         else:
@@ -703,7 +812,7 @@ def main(argv=None, *, runner=None, environ=None, now=None) -> int:
         print(common.pretty_json(result), end="")
         if args.command == "apply":
             if not result["complete"]:
-                print("AI Gateway release stopped after a failed write; see the receipt. "
+                print("AI Gateway release has a failed write or unverified staged convergence; see the receipt. "
                       "Nothing was retried or rolled back.", file=sys.stderr)
             return 0 if result["complete"] else 1
         return 0 if args.command == "plan" or result["ok"] else 1

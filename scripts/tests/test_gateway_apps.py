@@ -95,6 +95,30 @@ def enable(app):
     return module.build_changes(args(guard="enable"), app)
 
 
+def test_direct_ai_gateway_backend_is_mcp_only_and_pins_one_identity(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    public = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    path = tmp_path / "public.pem"
+    path.write_text(public, encoding="utf-8")
+    options = args(guard="enable", ai_gateway_backend=True, workflow_public_key=path)
+    review = module.build_changes(options, "ca-insurance-review")
+    assert review["NORTHWIND_GATEWAY_TOKEN_HEADER"] == "authorization"
+    assert review["NORTHWIND_GATEWAY_ALLOWED_OIDS"] == OID
+    assert review["CLAIM_WORKFLOW_BINDING"] == "signed"
+    assert review["CLAIM_WORKFLOW_PUBLIC_KEY"] == public
+    module.validate("ca-insurance-review", review, restoring=True)
+    for bad in (args(guard="enable", ai_gateway_backend=True, allowed_oid=[OID, OID]),
+                args(guard="disable", ai_gateway_backend=True)):
+        with pytest.raises(module.ConfigError):
+            module.build_changes(bad, "ca-insurance-lookup")
+    with pytest.raises(module.ConfigError):
+        module.build_changes(options, "ca-insurance-api")
+    with pytest.raises(module.ConfigError, match="workflow-public-key"):
+        module.build_changes(args(guard="enable", ai_gateway_backend=True), "ca-insurance-review")
+
+
 def records(tmp_path, app):
     return sorted(tmp_path.glob(f"gateway-rollback-{app}-gw*.json"))
 

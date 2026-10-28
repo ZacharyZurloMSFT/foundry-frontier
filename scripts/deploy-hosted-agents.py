@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
+import os
 import re
 import time
 import uuid
@@ -62,9 +64,10 @@ FOUNDRY_USER = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
 AGENT_CONSUMER = "eed3b665-ab3a-47b6-8f48-c9382fb1dad6"
 MODELS_USER = "a6b68e3d-a1f0-4c60-8678-237c050cf4ea"
+TOOLS_USER = "dce03f8d-857f-4e40-a90d-67770fa6ecd2"
 GATEWAY_RESOURCE_GROUP = "rg-northwind-ai"
 GATEWAY_NAME = "ai-gateway-northwind"
-MCP_GATEWAY_ROLES = ("policy-claim-lookup", "policy-wording")
+MCP_GATEWAY_ROLES = ("policy-claim-lookup", "policy-wording", "claim-action-draft")
 # The live insurance fleet runs in nw-insurance-claims; northwind-orders is the original native project.
 INSURANCE_PROJECTS = ("northwind-orders", "nw-insurance-claims")
 # The live knowledge connection is project-derived; the original connection name stays accepted.
@@ -158,6 +161,8 @@ def validate_gateway_environment(environment, role: str) -> None:
         if not isinstance(entry, dict) or not str(entry.get("url") or "").strip():
             raise ValueError(f"AI_GATEWAY_MCP_REQUIRED is set but AGENT_MCP_GATEWAY has no {role} entry with a url; "
                              "direct MCP traffic is not permitted")
+        if role == "claim-action-draft" and entry.get("workflow_binding") != "signed":
+            raise ValueError("Gateway claim-action-draft requires workflow_binding: signed")
 
 
 def runtime_grants(environment, role: str, project_arm_id: str, account_scope: str) -> list[tuple[str, str]]:
@@ -165,19 +170,25 @@ def runtime_grants(environment, role: str, project_arm_id: str, account_scope: s
 
     Default: Cognitive Services OpenAI User on the account, Foundry User on the project and, for
     the orchestrator, Agent Consumer. With AI_GATEWAY_REQUIRED, AI Gateway Models User on the gateway
-    replaces the OpenAI User grant. Gateway MCP needs no role: provider-executed MCP authenticates
-    with the runtime key of the tool server connection, so no agent holds AI Gateway Tools User
-    (which would let it call every published tool server).
+    replaces the OpenAI User grant. Provider-executed MCP authenticates with the runtime key
+    of the tool server connection. Only the application-bound draft wrapper
+    uses Entra and needs AI Gateway Tools User (gateway-wide; keep unsafe servers blocked).
     """
     models_via_gateway = env_flag(environment, "AI_GATEWAY_REQUIRED")
     gateway = None
-    if models_via_gateway:
+    draft_gateway = (ROLE_ALIASES.get(role, role) == "claim-action-draft"
+                     and bool(setting(environment, "AGENT_MCP_GATEWAY")))
+    if models_via_gateway or draft_gateway:
         subscription = re.match(r"/subscriptions/([^/]+)/", account_scope, re.IGNORECASE)
         if subscription is None:
             raise ValueError("Cannot derive the gateway subscription from the Foundry account scope.")
         gateway = gateway_scope(subscription.group(1))
     grants = [(gateway, MODELS_USER) if models_via_gateway else (account_scope, OPENAI_USER),
               (project_arm_id, FOUNDRY_USER)]
+    if draft_gateway:
+        routes = json.loads(setting(environment, "AGENT_MCP_GATEWAY"))
+        if any(ROLE_ALIASES.get(key, key) == "claim-action-draft" for key in routes):
+            grants.append((gateway, TOOLS_USER))
     if ROLE_ALIASES.get(role, role) == "orchestrator":
         grants.append((project_arm_id, AGENT_CONSUMER))
     return grants
@@ -213,9 +224,13 @@ def main():
     parser.add_argument("--subscription", required=True)
     parser.add_argument("--requirements", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path, help="Non-secret per-role environment JSON")
+    parser.add_argument("--workflow-signing-key-env",
+                        help="Environment variable holding the draft runtime private PEM; never put it in config JSON")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--stage-only", action="store_true",
+                        help="Create and grant the version without changing the current agent endpoint selector")
     parser.add_argument("--grant-runtime-roles", action="store_true",
                         help="Explicit opt-in to RBAC writes: OpenAI User on the account by default; "
                              "AI_GATEWAY_REQUIRED in the config swaps it for AI Gateway Models User on the "
@@ -243,6 +258,8 @@ def deploy(args):
     configuration = json.loads(args.config.read_text(encoding="utf-8"))
     environment = canonical_environment({**configuration.get("common", {}), **role_section(configuration, role)})
     environment["AGENT_ROLE"] = role
+    if "CLAIM_WORKFLOW_SIGNING_KEY" in environment:
+        raise ValueError("Private signing keys must not be stored in deployment config JSON")
     # The domain flag was removed: the runtime is insurance-only, so a stale insurance value is dropped.
     if str(environment.pop("NORTHWIND_BUSINESS_DOMAIN", "") or "").strip().lower() not in ("", "insurance"):
         raise ValueError("NORTHWIND_BUSINESS_DOMAIN was removed; only the insurance fleet can be deployed")
@@ -293,6 +310,19 @@ def deploy(args):
         journal.atomic_json(args.output, report)
         print(json.dumps(report, indent=2))
         return
+    routes = json.loads(setting(environment, "AGENT_MCP_GATEWAY") or "{}")
+    draft_gateway = role == "claim-action-draft" and any(
+        ROLE_ALIASES.get(key, key) == role for key in routes)
+    if draft_gateway:
+        key_env = getattr(args, "workflow_signing_key_env", None)
+        pem = os.environ.get(key_env, "") if key_env else ""
+        spec = importlib.util.spec_from_file_location("claim_workflow_binding", root / "apps" / "api" / "app" / "workflow_binding.py")
+        binding = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(binding)
+        binding.signing_key(pem)
+        environment["CLAIM_WORKFLOW_SIGNING_KEY"] = pem
+    elif getattr(args, "workflow_signing_key_env", None):
+        raise ValueError("Workflow signing key is permitted only for the gateway claim-action-draft runtime")
     definition = HostedAgentDefinition(
         cpu="0.5", memory="1Gi", environment_variables=environment,
         protocol_versions=[ProtocolVersionRecord(protocol="responses", version="2.0.0")],
@@ -343,7 +373,8 @@ def deploy(args):
                 if state == "active":
                     break
                 if state in {"failed", "deleted", "deleting"}:
-                    raise RuntimeError(f"Hosted version {name}:{version.version} is {state}: {version.as_dict().get('error')}")
+                    raise RuntimeError(f"Hosted version {name}:{version.version} is {state}; "
+                                       "inspect Foundry deployment diagnostics before retrying")
                 time.sleep(5)
             else:
                 raise TimeoutError(f"Hosted version {name}:{existing.version} did not become active")
@@ -360,17 +391,24 @@ def deploy(args):
                 if "ai_gateway" in report:
                     report["ai_gateway"]["runtime_grants"] = [{"scope": scope, "role_id": role_id}
                                                               for scope, role_id in grants]
-            project.agents.update_details(
-                agent_name=name,
-                agent_endpoint=AgentEndpointConfig(
-                    version_selector=VersionSelector(version_selection_rules=[
-                        FixedRatioVersionSelectionRule(agent_version=version.version, traffic_percentage=100),
-                    ]),
-                    protocol_configuration=ProtocolConfiguration(responses=ResponsesProtocolConfiguration()),
-                ),
-            )
+            if not getattr(args, "stage_only", False):
+                project.agents.update_details(
+                    agent_name=name,
+                    agent_endpoint=AgentEndpointConfig(
+                        version_selector=VersionSelector(version_selection_rules=[
+                            FixedRatioVersionSelectionRule(agent_version=version.version, traffic_percentage=100),
+                        ]),
+                        protocol_configuration=ProtocolConfiguration(responses=ResponsesProtocolConfiguration()),
+                    ),
+                )
+            report["endpoint_selected"] = not getattr(args, "stage_only", False)
             report.update({"version": version.version, "state": state, "principal_id": principal})
-            report["native_version"] = version.as_dict()
+            native = version.as_dict()
+            report["native_version"] = {
+                field: native[field] for field in
+                ("id", "name", "version", "status", "instance_identity", "created_at", "updated_at")
+                if field in native
+            }
             journal.atomic_json(args.output, report)
             print(json.dumps(report, indent=2))
     finally:

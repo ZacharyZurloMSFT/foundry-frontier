@@ -14,8 +14,9 @@ Foundry sees a successful tool call returning the queue item; the actual
 approval loop lives outside the agent runtime. Nothing here can approve a
 claim, decide coverage or execute a payment.
 
-The application-owned workflow id must match the `x-workflow-id` request
-header (the deprecated `x-orders-workflow` name is still accepted).
+In default compatibility mode the workflow matches the `x-workflow-id` header.
+CLAIM_WORKFLOW_BINDING=signed instead requires a short-lived RSA-signed workflow_proof
+bound to the workflow and exact canonical draft. No header fallback is allowed.
 
 No auth on the MCP endpoint itself by default — it's a public demo. Setting
 NORTHWIND_GATEWAY_AUTH_REQUIRED=true (see gateway_guard.py) makes it accept only
@@ -56,6 +57,16 @@ else:
         if exc.name != f"{__package__}.gateway_guard":
             raise
         from apps.api.app.gateway_guard import GatewayGuardMiddleware
+
+if not __package__:
+    from apps.api.app.workflow_binding import verify_workflow
+else:
+    try:
+        from .workflow_binding import verify_workflow
+    except ModuleNotFoundError as exc:
+        if exc.name != f"{__package__}.workflow_binding":
+            raise
+        from apps.api.app.workflow_binding import verify_workflow
 
 logger = logging.getLogger("mcp-insurance-review")
 
@@ -102,22 +113,29 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-async def draft_claim_action(workflow_id: str, draft: ClaimActionDraft, ctx: Context) -> str:
+async def draft_claim_action(workflow_id: str, draft: ClaimActionDraft, ctx: Context,
+                             workflow_proof: str | None = None) -> str:
     """Persist a synthetic claim-action draft for HUMAN review only.
 
-    Application-owned workflow_id must match the x-workflow-id request header
-    (the deprecated x-orders-workflow header is still accepted).
+    Workflow binding is required: request headers in compatibility mode, or a
+    trusted application-signed workflow_proof in signed mode. The model never signs.
     Allowed actions request evidence, assign adjuster, update customer, escalate
     review, or recommend settlement. No coverage denial/claim approval/payment
     execution is available. Missing storage or validation errors fail the tool.
     """
     if not re.fullmatch(r"wf-[A-Za-z0-9][A-Za-z0-9_-]{0,123}", workflow_id):
         raise ValueError("Invalid application-owned workflow ID")
-    request = ctx.request_context.request
-    bound = {request.headers.get(name) for name in WORKFLOW_HEADERS} - {None} if request is not None else set()
-    if bound != {workflow_id}:
-        raise ValueError("Insurance workflow does not match the application-bound request.")
     proposed = action_payload(ClaimActionDraft.model_validate(draft))
+    binding = os.environ.get("CLAIM_WORKFLOW_BINDING", "headers").strip().lower()
+    if binding == "signed":
+        verify_workflow(workflow_proof, workflow_id, proposed, os.environ.get("CLAIM_WORKFLOW_PUBLIC_KEY", ""))
+    elif binding == "headers" and workflow_proof is None:
+        request = ctx.request_context.request
+        bound = {request.headers.get(name) for name in WORKFLOW_HEADERS} - {None} if request is not None else set()
+        if bound != {workflow_id}:
+            raise ValueError("Insurance workflow does not match the application-bound request.")
+    else:
+        raise ValueError("Claim workflow binding configuration does not match the caller.")
     container = _cosmos_container()
     if container is None:
         raise RuntimeError("Cosmos approval storage is not configured; no draft was saved.")

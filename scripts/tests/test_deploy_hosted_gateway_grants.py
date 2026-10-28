@@ -3,6 +3,7 @@ import importlib
 import importlib.util
 import json
 import sys
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -52,7 +53,7 @@ def test_role_ids_and_gateway_resource_match_the_shared_contract():
     assert module.FOUNDRY_USER == FOUNDRY == common.ROLE_FOUNDRY_USER
     assert module.OPENAI_USER == OPENAI == common.ROLE_OPENAI_USER
     assert module.MODELS_USER == MODELS == common.ROLE_MODELS_USER
-    assert not hasattr(module, "TOOLS_USER") and TOOLS == common.ROLE_TOOLS_USER
+    assert module.TOOLS_USER == TOOLS == common.ROLE_TOOLS_USER
     assert module.GATEWAY_NAME == common.GATEWAY_NAME and module.GATEWAY_RESOURCE_GROUP == common.RESOURCE_GROUP
     assert module.gateway_scope(SUBSCRIPTION) == GATEWAY
 
@@ -174,9 +175,23 @@ def test_the_deprecated_gateway_setting_and_role_keys_satisfy_the_mcp_requiremen
         module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": both}, role)
 
 
-@pytest.mark.parametrize("role", ["triage", "claim-action-draft", "orchestrator"])
+@pytest.mark.parametrize("role", ["triage", "orchestrator"])
 def test_required_mcp_is_not_checked_for_roles_without_gateway_mcp(role):
     module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true"}, role)
+
+
+def test_draft_requires_signed_gateway_and_gets_tools_role_only_when_routed():
+    route = {**LOOKUP_ROUTE, "workflow_binding": "signed"}
+    environment = {"AI_GATEWAY_MCP_REQUIRED": "true",
+                   "AGENT_MCP_GATEWAY": json.dumps({"claim-action-draft": route})}
+    module.validate_gateway_environment(environment, "claim-action-draft")
+    assert module.runtime_grants(environment, "claim-action-draft", PROJECT, ACCOUNT) == [
+        *DIRECT, (GATEWAY, TOOLS)]
+    with pytest.raises(ValueError, match="AGENT_MCP_GATEWAY"):
+        module.validate_gateway_environment({"AI_GATEWAY_MCP_REQUIRED": "true"}, "claim-action-draft")
+    with pytest.raises(ValueError, match="workflow_binding"):
+        module.validate_gateway_environment({**environment, "AGENT_MCP_GATEWAY": json.dumps(
+            {"claim-action-draft": LOOKUP_ROUTE})}, "claim-action-draft")
 
 
 def deploy_arguments(tmp_path, role, *, apply, grant_runtime_roles=False):
@@ -337,7 +352,7 @@ class Http:
 
 
 def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, grant_runtime_roles=True,
-                     document=None):
+                     document=None, signing_key_env=None, stage_only=False):
     agents, calls = Agents(), []
 
     class Project:
@@ -359,8 +374,57 @@ def apply_deployment(tmp_path, monkeypatch, role, *, common_environment=None, gr
     else:
         (tmp_path / "config.json").write_text(json.dumps(document), encoding="utf-8")
     arguments = deploy_arguments(tmp_path, role, apply=True, grant_runtime_roles=grant_runtime_roles)
+    arguments.workflow_signing_key_env = signing_key_env
+    arguments.stage_only = stage_only
     module.deploy(arguments)
     return agents, calls, json.loads(arguments.output.read_text())
+
+
+def test_signed_draft_deployment_injects_key_without_packaging_or_reporting_it(tmp_path, monkeypatch, capsys):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    monkeypatch.setenv("UNIT_WORKFLOW_KEY", private)
+    original = Version.as_dict
+    monkeypatch.setattr(Version, "as_dict", lambda self: {
+        **original(self), "definition": {"environment_variables": {"CLAIM_WORKFLOW_SIGNING_KEY": private}},
+    })
+    route = {**LOOKUP_ROUTE, "workflow_binding": "signed"}
+    environment = {"AI_GATEWAY_MCP_REQUIRED": "true",
+                   "AGENT_MCP_GATEWAY": json.dumps({"claim-action-draft": route})}
+    agents, calls, report = apply_deployment(
+        tmp_path, monkeypatch, "claim-action-draft", common_environment=environment,
+        signing_key_env="UNIT_WORKFLOW_KEY")
+    sent = agents.created[0]["definition"].as_dict()["environment_variables"]
+    assert sent["CLAIM_WORKFLOW_SIGNING_KEY"] == private
+    assert granted(calls) == [*DIRECT, (GATEWAY, TOOLS)]
+    assert private not in json.dumps(report) + capsys.readouterr().out
+    assert "PRIVATE KEY" not in (tmp_path / "config.json").read_text()
+    with zipfile.ZipFile(tmp_path / "claim-action-draft.zip") as archive:
+        assert all(private.encode() not in archive.read(name) for name in archive.namelist())
+
+
+def test_signed_draft_deployment_rejects_missing_key_before_azure(tmp_path, no_azure):
+    write_config(tmp_path, "claim-action-draft", {
+        "AI_GATEWAY_MCP_REQUIRED": "true", "AGENT_MCP_GATEWAY": json.dumps({
+            "claim-action-draft": {**LOOKUP_ROUTE, "workflow_binding": "signed"}})})
+    with pytest.raises(ValueError, match="private RSA"):
+        module.deploy(deploy_arguments(tmp_path, "claim-action-draft", apply=True))
+
+
+def test_private_key_cannot_be_stored_in_deployment_config(tmp_path, no_azure):
+    write_config(tmp_path, "claim-action-draft", {"CLAIM_WORKFLOW_SIGNING_KEY": "not-allowed"})
+    with pytest.raises(ValueError, match="must not be stored"):
+        module.deploy(deploy_arguments(tmp_path, "claim-action-draft", apply=False))
+
+
+def test_staged_version_does_not_change_live_agent_selector(tmp_path, monkeypatch):
+    agents, calls, report = apply_deployment(tmp_path, monkeypatch, "triage", stage_only=True)
+    assert len(agents.created) == 1
+    assert agents.updated == []
+    assert report["endpoint_selected"] is False
+    assert granted(calls) == DIRECT
 
 
 def granted(calls):
@@ -433,7 +497,7 @@ def test_a_deprecated_config_is_sent_to_the_agent_with_canonical_names_only(tmp_
 
 
 @pytest.mark.parametrize("role,mcp_routed", [
-    ("policy-claim-lookup", True), ("policy-wording", True), ("triage", False), ("claim-action-draft", False),
+    ("policy-claim-lookup", True), ("policy-wording", True), ("triage", False),
 ])
 def test_apply_with_gateway_mcp_grants_no_tools_role_to_any_agent(tmp_path, monkeypatch, role, mcp_routed):
     environment = {"AI_GATEWAY_REQUIRED": "true", "AI_GATEWAY_MCP_REQUIRED": "true",

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "description": "Review-only direct MCP migration. Not the default release manifest. Apply requires a plan-bound compatibility attestation; no Azure cutover has been verified.",
+  "migration": {"kind": "direct-mcp-managed-identity", "compatibility": "unverified"},
+  "gateway": {
+    "subscriptionId": "137c905b-7734-479e-acc5-ab8222462936",
+    "resourceGroup": "rg-northwind-ai",
+    "name": "ai-gateway-northwind",
+    "url": "https://ai-gateway-northwind.azure-api.net",
+    "workspace": "default",
+    "armApiVersion": "2025-09-01-preview",
+    "tokenScope": "https://azure-api.net/aigateway/.default"
+  },
+  "modelProvider": {"name": "aisvc-zurlo-northwind", "kind": "Foundry"},
+  "expectedModels": {
+    "gpt-4o": {"modelName": "gpt-4o", "endpoints": ["chat/completions", "responses"]},
+    "gpt-5-4": {"modelName": "gpt-5.4", "endpoints": ["chat/completions", "responses"]},
+    "gpt-5-4-mini": {"modelName": "gpt-5.4-mini", "endpoints": ["chat/completions", "responses"]},
+    "gpt-5-6-luna": {"modelName": "gpt-5.6-luna", "endpoints": ["chat/completions", "responses"]},
+    "kimi-k2-6": {"modelName": "Kimi-K2.6", "endpoints": ["chat/completions"]},
+    "text-embedding-3-small": {"modelName": "text-embedding-3-small", "endpoints": ["embeddings"]}
+  },
+  "toolServers": {
+    "northwind-insurance-lookup": {
+      "displayName": "Northwind insurance lookup",
+      "description": "Read-only synthetic policy and claim tools, directly behind AI Gateway with managed identity.",
+      "failureMode": "failClosed",
+      "policies": [{"type": "requestRateLimit", "scope": "resource", "callsPerPeriod": 120, "periodSeconds": 60, "counterKey": ["identity"]}],
+      "endpoints": [{
+        "kind": "mcp", "namespace": "lookup", "required": true,
+        "mcp": {"transport": "streamableHttp", "url": "https://ca-insurance-lookup.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"},
+        "credentials": {"type": "managedIdentity", "managedIdentity": {"resource": "api://0940b5c3-18ec-46f0-8962-7894247c2710"}}
+      }],
+      "expectedTools": ["lookup_lookup_policy", "lookup_lookup_claim"]
+    },
+    "northwind-insurance-review": {
+      "displayName": "Northwind insurance review",
+      "description": "Synthetic claim-action drafts for human review only. Requires gateway identity and signed application workflow proof.",
+      "failureMode": "failClosed",
+      "policies": [{"type": "requestRateLimit", "scope": "resource", "callsPerPeriod": 120, "periodSeconds": 60, "counterKey": ["identity"]}],
+      "endpoints": [{
+        "kind": "mcp", "namespace": "review", "required": true,
+        "mcp": {"transport": "streamableHttp", "url": "https://ca-insurance-review.gentlemushroom-296b38f8.canadacentral.azurecontainerapps.io/mcp/"},
+        "credentials": {"type": "managedIdentity", "managedIdentity": {"resource": "api://0940b5c3-18ec-46f0-8962-7894247c2710"}}
+      }],
+      "expectedTools": ["review_draft_claim_action"]
+    },
+    "northwind-insurance-knowledge": {
+      "displayName": "Northwind insurance knowledge",
+      "description": "Foundry IQ knowledge base northwind-insurance-kb (Azure AI Search MCP endpoint) exposed through the AI Gateway, which injects a read-only Search query key.",
+      "failureMode": "failClosed",
+      "policies": [{"type": "requestRateLimit", "scope": "resource", "callsPerPeriod": 120, "periodSeconds": 60, "counterKey": ["identity"]}],
+      "endpoints": [{
+        "kind": "mcp", "namespace": "knowledge", "required": true,
+        "mcp": {"transport": "streamableHttp", "url": "https://srch-zurlo-northwind.search.windows.net/knowledgebases/northwind-insurance-kb/mcp?api-version=2026-05-01-preview"},
+        "credentials": {"type": "header", "headers": {"api-key": ["${SEARCH_QUERY_KEY}"]}}
+      }],
+      "expectedTools": ["knowledge_knowledge_base_retrieve"]
+    }
+  },
+  "observed": {
+    "northwind-api": {"reason": "Unsafe REST facade must remain blocked; never publish approve, decide, delete or payment as agent tools.", "forbiddenToolPatterns": ["decide", "delete"]},
+    "northwind-claims-knowledge": {"reason": "Pre-existing knowledge registration, unmanaged."},
+    "northwind-contact-center-knowledge": {"reason": "Pre-existing knowledge registration, unmanaged."}
+  },
+  "stale": {},
+  "deferred": {}
+}

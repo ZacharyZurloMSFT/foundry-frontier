@@ -33,7 +33,7 @@ KEY_HEADER = {"type": "header", "headers": {"Ocp-Apim-Subscription-Key": ["${INS
 LOOKUP = "northwind-insurance-lookup"
 KNOWLEDGE = "northwind-insurance-knowledge"
 REVIEW = "northwind-insurance-review"
-MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge))")
+MANAGED_PATH = re.compile(r"/workspaces/default/toolServers/(northwind-insurance-(?:lookup|knowledge|review))")
 MCP_PATH = re.compile(r"/default/toolservers/([a-z0-9-]+)/mcp")
 
 
@@ -373,7 +373,7 @@ def _bad_name(manifest):
     (_overlap_with_stale, "more than one manifest section"),
     (_gateway_changed, "gateway coordinates"),
     (_unknown_section, "Unknown manifest sections"),
-    (_managed_identity, "not managed by this unit"),
+    (_managed_identity, "exactly type and managedIdentity"),
     (_openapi_kind, "other source kinds are not managed"),
     (_bad_failure_mode, "failureMode"),
     (_duplicate_namespace, "repeats a namespace"),
@@ -386,6 +386,83 @@ def test_invalid_manifests_are_rejected(manifest, mutation, fragment):
     mutation(candidate)
     with pytest.raises(release.ManifestError, match=re.escape(fragment)):
         release.validate_manifest(candidate)
+
+
+def staged_manifest():
+    return release.load_manifest(release.MIGRATION_MANIFEST)
+
+
+def attestation_for(manifest, plan):
+    return {
+        "schemaVersion": 1, "kind": release.ATTESTATION_KIND, "gateway": plan["gateway"],
+        "manifestSha256": plan["manifestSha256"], "planSha256": plan["planSha256"],
+        "reviewedBy": "reviewer", "reviewedAt": "2026-10-22T11:00:00Z",
+        "expiresAt": "2026-10-22T13:00:00Z",
+        "gatewayPrincipalId": common.GATEWAY_IDENTITY_PRINCIPAL_ID,
+        "evidence": "https://github.com/ZacharyZurloMSFT/foundry-frontier/issues/1",
+        "checks": dict.fromkeys(release.COMPATIBILITY_CHECKS, True),
+    }
+
+
+def test_staged_manifest_uses_direct_identity_and_draft_only_tools():
+    manifest = staged_manifest()
+    assert manifest["toolServers"][KNOWLEDGE] == release.load_manifest(
+        release.DEFAULT_MANIFEST)["toolServers"][KNOWLEDGE]
+    assert set(manifest["toolServers"]) == {LOOKUP, KNOWLEDGE, REVIEW}
+    for name in (LOOKUP, REVIEW):
+        endpoint = manifest["toolServers"][name]["endpoints"][0]
+        assert ".azurecontainerapps.io/mcp/" in endpoint["mcp"]["url"]
+        assert endpoint["credentials"]["type"] == "managedIdentity"
+    assert manifest["toolServers"][REVIEW]["expectedTools"] == ["review_draft_claim_action"]
+    gateway = FakeGateway(manifest)
+    plan, _ = release.build_plan(gateway, manifest)
+    assert plan["applyGate"]["status"] == "blocked-until-reviewed-compatibility-attestation"
+    with pytest.raises(release.ManifestError, match="blocked"):
+        release.apply_plan(gateway, manifest, plan, ENVIRON, now=NOW)
+    assert not gateway.puts()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("expiresAt", "2026-10-22T11:59:59Z"), ("reviewedAt", "2026-10-22T12:01:00Z"),
+    ("expiresAt", "2026-10-24T12:00:00Z"), ("reviewedAt", "2026-10-22T11:00:00"),
+    ("planSha256", "wrong"), ("manifestSha256", "wrong"), ("checks", {}),
+    ("gatewayPrincipalId", "bad"), ("reviewedBy", ""), ("evidence", "http://unsafe.invalid"),
+])
+def test_staged_attestation_rejects_stale_unbound_or_incomplete_evidence(field, value):
+    manifest = staged_manifest()
+    gateway = FakeGateway(manifest)
+    plan, _ = release.build_plan(gateway, manifest)
+    attestation = {**attestation_for(manifest, plan), field: value}
+    with pytest.raises(release.ManifestError):
+        release.apply_plan(gateway, manifest, plan, ENVIRON, now=NOW, attestation=attestation)
+    assert not gateway.puts()
+
+
+def test_staged_identity_apply_requires_readback_convergence():
+    manifest = staged_manifest()
+    gateway = FakeGateway(manifest)
+    plan, _ = release.build_plan(gateway, manifest)
+    receipt = release.apply_plan(gateway, manifest, plan, ENVIRON, now=NOW,
+                                 attestation=attestation_for(manifest, plan))
+    assert receipt["complete"] is True
+    assert receipt["compatibilityAttestationSha256"]
+    assert all(result["converged"] for result in receipt["results"])
+    properties = gateway.servers[LOOKUP]["properties"]
+    properties["endpoints"][0]["credentials"]["managedIdentity"]["resource"] = "api://11111111-1111-4111-8111-111111111111"
+    drift, _ = release.build_plan(gateway, manifest)
+    assert "endpoints[lookup].managedIdentity.resource" in actions_by_name(drift)[LOOKUP]["differences"]
+
+
+def test_managed_identity_needs_explicit_staging_and_an_audience_not_scope(manifest):
+    endpoint = manifest["toolServers"][LOOKUP]["endpoints"][0]
+    endpoint["credentials"] = {"type": "managedIdentity", "managedIdentity": {
+        "resource": "api://0940b5c3-18ec-46f0-8962-7894247c2710"}}
+    with pytest.raises(release.ManifestError, match="staged"):
+        release.validate_manifest(manifest)
+    manifest["migration"] = release.MIGRATION
+    endpoint["credentials"]["managedIdentity"]["resource"] += "/.default"
+    with pytest.raises(release.ManifestError, match="not a token scope"):
+        release.validate_manifest(manifest)
 
 
 def test_manifest_errors_never_echo_secret_looking_values(manifest):

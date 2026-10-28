@@ -40,7 +40,7 @@ def test_route_names_tell_the_two_gateways_apart():
 
 @pytest.mark.parametrize("role,gateway_entry", [
     ("policy-claim-lookup", entry(LOOKUP, "lookup_")),
-    ("claim-action-draft", entry(REVIEW, "review_", forwards_headers=True)),
+    ("claim-action-draft", entry(REVIEW, "review_", workflow_binding="signed")),
 ])
 def test_one_role_cannot_be_routed_by_both_gateways(role, gateway_entry):
     with pytest.raises(ValueError, match="configure only one"):

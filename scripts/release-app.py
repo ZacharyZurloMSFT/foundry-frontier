@@ -50,6 +50,8 @@ def changed_services(paths: list[str]) -> list[str]:
             selected.update(("api", "mcp-policy-lookup", "mcp-claim-review"))
         if path in ("apps/api/app/insurance_domain.py", "apps/api/app/gateway_guard.py"):
             selected.update(("mcp-policy-lookup", "mcp-claim-review"))
+        if path == "apps/api/app/workflow_binding.py":
+            selected.add("mcp-claim-review")
         for service in SERVICES:
             if path.startswith(f"apps/{service}/"):
                 selected.add(service)

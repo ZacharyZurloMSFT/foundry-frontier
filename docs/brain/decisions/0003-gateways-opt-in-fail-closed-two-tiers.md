@@ -4,6 +4,14 @@
 > [api-management.md](../../api-management.md), [ai-gateway.md](../../ai-gateway.md),
 > [architecture.md](../../architecture.md#api-gateway-opt-in)
 
+> **2026-10-28 repository revision (not a live cutover):** the intended split is now by
+> traffic ownership, not header forwarding: REST/voice APIs on classic APIM, supported models
+> and remote MCP tools on AI Gateway. The staged migration replaces claim-review workflow
+> headers with application-signed, short-lived, exact-draft proofs and pins MCP backends to
+> AI Gateway managed identity. The old decision below describes the current compatibility
+> deployment until gateway-version support is verified and cutover is separately approved.
+> See [staged separation](../../ai-gateway.md#staged-separation-repository-preparation-not-deployed).
+
 ## Context
 
 Governance (CORS, rate limits, keys, token-based access) was wanted in front of the apps' REST, WebSocket and
