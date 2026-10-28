@@ -47,6 +47,7 @@ def test_bundle_is_reproducible_and_excludes_local_configuration(tmp_path):
     shared = root / "apps" / "api" / "app" / "insurance_domain.py"
     shared.parent.mkdir(parents=True)
     shared.write_text("# canonical shared insurance implementation\n", encoding="utf-8")
+    (shared.parent / "workflow_binding.py").write_text("# canonical workflow binding\n", encoding="utf-8")
     (root / ".env").write_text("DO_NOT_PACKAGE=fixture\n", encoding="utf-8")
     (hosted / ".env").write_text("DO_NOT_PACKAGE=fixture\n", encoding="utf-8")
     (root / "agents" / "unlisted.yaml").write_text("name: not-packaged\n", encoding="utf-8")
@@ -59,7 +60,8 @@ def test_bundle_is_reproducible_and_excludes_local_configuration(tmp_path):
     second = tmp_path / "second.zip"
     assert module.bundle(root, requirements, first) == module.bundle(root, requirements, second)
     with zipfile.ZipFile(first) as archive:
-        assert set(archive.namelist()) == {"main.py", "requirements.txt", "agents/insurance/domain.py", *module.PACKAGE_SOURCES}
+        assert set(archive.namelist()) == {"main.py", "requirements.txt", "agents/insurance/domain.py",
+                                         "agents/insurance/workflow_binding.py", *module.PACKAGE_SOURCES}
         assert archive.read("agents/insurance/domain.py") == shared.read_bytes()
 
 
@@ -76,7 +78,7 @@ def test_the_deploy_tables_match_the_runtime_tables():
     assert set(module.ROLES) == set(runtime.PROMPTS)
     assert module.ROLE_ALIASES == runtime.ROLE_ALIASES
     assert module.SETTING_ALIASES == runtime.SETTING_ALIASES
-    assert set(module.MCP_GATEWAY_ROLES) == set(runtime.PROVIDER_MCP_ROLES)
+    assert set(module.MCP_GATEWAY_ROLES) == set(runtime.AI_GATEWAY_MCP_ROLES)
     for role, name in module.ROLES.items():
         assert yaml.safe_load((ROOT / "agents" / runtime.PROMPTS[role]).read_text(encoding="utf-8"))["name"] == name
     specialists = {agent for agent, _ in runtime.SPECIALISTS.values()}

@@ -22,6 +22,7 @@ def entries(root: Path, requirements: Path) -> dict[str, bytes]:
         "requirements.txt": requirements.read_bytes(),
         **{name: root.joinpath(*name.split("/")).read_bytes() for name in PACKAGE_SOURCES},
         "agents/insurance/domain.py": (root / "apps" / "api" / "app" / "insurance_domain.py").read_bytes(),
+        "agents/insurance/workflow_binding.py": (root / "apps" / "api" / "app" / "workflow_binding.py").read_bytes(),
     }
 
 

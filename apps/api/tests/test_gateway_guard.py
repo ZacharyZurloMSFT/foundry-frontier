@@ -149,6 +149,22 @@ def call(client, token_value=None, path="/data"):
     return client.get(path, headers={} if token_value is None else {HEADER: token_value})
 
 
+def test_ai_gateway_identity_uses_only_configured_bearer_header(token):
+    with client_for({**ENABLED, "NORTHWIND_GATEWAY_TOKEN_HEADER": "authorization"}) as client:
+        assert call(client, token()).status_code == 401
+        assert client.get("/data", headers={"Authorization": token()}).status_code == 401
+        assert client.get("/data", headers={"Authorization": "Bearer " + token()}).status_code == 200
+        assert client.get("/data", headers={"Authorization": "Bearer " + token(oid=OTHER)}).status_code == 401
+        assert client.get("/data", headers=[
+            ("Authorization", "Bearer " + token()), ("Authorization", "Bearer " + token()),
+        ]).status_code == 401
+
+
+def test_unknown_token_header_fails_closed():
+    with client_for({**ENABLED, "NORTHWIND_GATEWAY_TOKEN_HEADER": "other"}) as client:
+        assert call(client).status_code == 503
+
+
 def assert_denied(response, status=401, code="gateway_required"):
     assert response.status_code == status
     assert response.json()["error"]["code"] == code

@@ -35,6 +35,8 @@ def test_only_canonical_assets_enter_the_selected_service_build_context(service,
     if service != "api":
         expected[app / "insurance_domain.py"] = (ROOT / "apps" / "api" / "app" / "insurance_domain.py").read_bytes()
         expected[app / "gateway_guard.py"] = (ROOT / "apps" / "api" / "app" / "gateway_guard.py").read_bytes()
+        if service == "mcp-claim-review":
+            expected[app / "workflow_binding.py"] = (ROOT / "apps" / "api" / "app" / "workflow_binding.py").read_bytes()
     else:
         manifest = ROOT / "data" / "northwind" / "departments" / "claims-documents" / "claims-documents.json"
         expected[app / "_northwind" / "departments" / "claims-documents" / manifest.name] = manifest.read_bytes()
@@ -96,7 +98,7 @@ def test_incomplete_fixture_fails_before_staging(collection, monkeypatch, staged
     assert not staged_files
 
 
-@pytest.mark.parametrize("shared", ["insurance_domain.py", "gateway_guard.py"])
+@pytest.mark.parametrize("shared", ["insurance_domain.py", "gateway_guard.py", "workflow_binding.py"])
 def test_invalid_shared_code_fails_before_staging(shared, monkeypatch, staged_files):
     original = Path.read_text
     monkeypatch.setattr(

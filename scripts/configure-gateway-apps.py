@@ -35,6 +35,8 @@ APPS = {
 HEALTH = {"api": "/health", "tech-lookup": "/healthz", "work-order": "/healthz"}
 GUARD = ("NORTHWIND_GATEWAY_AUTH_REQUIRED", "NORTHWIND_GATEWAY_TENANT_ID", "NORTHWIND_GATEWAY_AUDIENCE",
          "NORTHWIND_GATEWAY_ALLOWED_OIDS")
+MCP_GUARD = ("NORTHWIND_GATEWAY_TOKEN_HEADER",)
+REVIEW_ONLY = ("CLAIM_WORKFLOW_BINDING", "CLAIM_WORKFLOW_PUBLIC_KEY")
 API_ONLY = ("MCP_POLICY_LOOKUP_URL", "MCP_CLAIM_REVIEW_URL", "MCP_GATEWAY_SUBSCRIPTION_KEY")
 # Deprecated aliases that older images and rollback records still use: restore-only, never written.
 LEGACY_API_ONLY = ("MCP_TECH_LOOKUP_URL", "MCP_WORK_ORDER_URL")
@@ -53,7 +55,7 @@ class SecretRef:
 
 def allowed_names(app: str, *, restoring: bool = False) -> tuple[str, ...]:
     if APPS[app][1] != "api":
-        return GUARD
+        return GUARD + MCP_GUARD + (REVIEW_ONLY if app == "ca-insurance-review" else ())
     return GUARD + API_ONLY + (LEGACY_API_ONLY if restoring else ())
 
 
@@ -67,7 +69,8 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
         if value is None or isinstance(value, SecretRef):
             continue
         if restoring:
-            if not isinstance(value, str) or len(value) > 2048 or "\n" in value:
+            if (not isinstance(value, str) or len(value) > 2048
+                    or ("\n" in value and name != "CLAIM_WORKFLOW_PUBLIC_KEY")):
                 raise ConfigError(f"Invalid previous value for {name}")
             continue
         ok = {
@@ -75,6 +78,9 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
             "NORTHWIND_GATEWAY_TENANT_ID": lambda v: re.fullmatch(GUID, v),
             "NORTHWIND_GATEWAY_AUDIENCE": lambda v: re.fullmatch(rf"(?:api://)?{GUID}", v),
             "NORTHWIND_GATEWAY_ALLOWED_OIDS": lambda v: re.fullmatch(rf"{GUID}(?:,{GUID})*", v),
+            "NORTHWIND_GATEWAY_TOKEN_HEADER": lambda v: v in ("authorization", "x-northwind-gateway-token"),
+            "CLAIM_WORKFLOW_BINDING": lambda v: v in ("signed", "headers"),
+            "CLAIM_WORKFLOW_PUBLIC_KEY": valid_public_key,
             "MCP_POLICY_LOOKUP_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/tech-lookup", v),
             "MCP_CLAIM_REVIEW_URL": lambda v: re.fullmatch(rf"https://[a-z0-9-]+\.azure-api\.net/{stack}/mcp/work-order", v),
         }.get(name)
@@ -88,6 +94,16 @@ def validate(app: str, changes: dict, *, restoring: bool = False) -> None:
         raise ConfigError("MCP settings apply to the API apps only")
 
 
+def valid_public_key(value: str) -> bool:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    try:
+        key = serialization.load_pem_public_key(value.encode())
+        return isinstance(key, rsa.RSAPublicKey) and key.key_size >= 2048
+    except (ValueError, TypeError):
+        return False
+
+
 def build_changes(args: argparse.Namespace, app: str, environ=os.environ) -> dict:
     stack, kind = APPS[app]
     changes: dict = {}
@@ -97,6 +113,20 @@ def build_changes(args: argparse.Namespace, app: str, environ=os.environ) -> dic
                        NORTHWIND_GATEWAY_ALLOWED_OIDS=",".join(o.lower() for o in args.allowed_oid or []))
     elif args.guard == "disable":
         changes["NORTHWIND_GATEWAY_AUTH_REQUIRED"] = "false"
+    if getattr(args, "ai_gateway_backend", False):
+        if kind == "api" or args.guard != "enable" or len(args.allowed_oid or []) != 1:
+            raise ConfigError("AI Gateway backend requires one explicit gateway OID, guard enable and an MCP app")
+        changes["NORTHWIND_GATEWAY_TOKEN_HEADER"] = "authorization"
+        if kind != "work-order" and getattr(args, "workflow_public_key", None):
+            raise ConfigError("--workflow-public-key applies only to the review app")
+        if kind == "work-order":
+            public_file = getattr(args, "workflow_public_key", None)
+            if public_file is None:
+                raise ConfigError("AI Gateway review backend requires --workflow-public-key")
+            changes.update(CLAIM_WORKFLOW_BINDING="signed",
+                           CLAIM_WORKFLOW_PUBLIC_KEY=public_file.read_text(encoding="utf-8"))
+    elif getattr(args, "workflow_public_key", None):
+        raise ConfigError("--workflow-public-key requires --ai-gateway-backend on the review app")
     if args.mcp_gateway_base and kind == "api":
         base = args.mcp_gateway_base.rstrip("/")
         if not base.endswith(f"/{stack}"):
@@ -237,6 +267,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--tenant-id", default=TENANT)
     result.add_argument("--gateway-audience", help="the northwind-gateway application (client) ID")
     result.add_argument("--allowed-oid", action="append", help="object ID allowed to call, e.g. the APIM managed identity")
+    result.add_argument("--ai-gateway-backend", action="store_true",
+                        help="MCP only: require AI Gateway Bearer identity instead of the APIM-injected header")
+    result.add_argument("--workflow-public-key", type=Path, help="Public RSA PEM for the signed review backend")
     result.add_argument("--mcp-gateway-base", help="e.g. https://apim-northwind.azure-api.net/insurance (API apps only)")
     result.add_argument("--mcp-key-env", default="NORTHWIND_MCP_KEY", help="environment variable holding the agents subscription key")
     result.add_argument("--rollback-dir", type=Path, default=Path("release"))

@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from agents.hosted import main as hosted_main
 from agents.hosted import tools
@@ -49,6 +51,9 @@ ROLES = ("orchestrator", "triage", "policy-claim-lookup", "policy-wording", "cla
 def no_telemetry(monkeypatch):
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
     monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setenv("CLAIM_WORKFLOW_SIGNING_KEY", key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode())
 
 
 def entry(url, prefix, **extra):
@@ -63,7 +68,7 @@ def mcp_settings(role, entries=None, **env):
 
 def claim_review_settings(**env):
     return mcp_settings("claim-action-draft",
-                        {"claim-action-draft": entry(REVIEW, "review_", forwards_headers=True)}, **env)
+                        {"claim-action-draft": entry(REVIEW, "review_", workflow_binding="signed")}, **env)
 
 
 def connection_for(config, **changes):
@@ -173,10 +178,10 @@ def test_an_invalid_shared_value_fails_every_role_not_only_the_mcp_roles():
     {}, {"forwards_headers": False}, {"forwards_headers": None}, {"forwards_headers": "true"},
     {"forwards_headers": 1},
 ], ids=["absent", "false", "null", "string", "number"])
-def test_claim_review_entry_is_rejected_unless_header_forwarding_is_exactly_true(extra):
+def test_claim_review_entry_requires_signed_binding_regardless_of_header_forwarding(extra):
     entries = {"claim-action-draft": entry(REVIEW, "review_", **extra)}
     for role in ("claim-action-draft", "orchestrator"):
-        with pytest.raises(ValueError, match="application-bound headers that the AI gateway does not forward"):
+        with pytest.raises(ValueError, match="workflow_binding: signed"):
             mcp_settings(role, entries)
 
 
@@ -195,12 +200,13 @@ def test_mcp_required_demands_a_gateway_entry_for_the_provider_executed_roles(ro
 
 
 @pytest.mark.parametrize("value", ["true", "1", "yes"])
-def test_mcp_required_leaves_other_roles_and_the_claim_review_direct(value):
-    for role in ("orchestrator", "triage", "claim-action-draft"):
+def test_mcp_required_constrains_claim_review_but_not_roles_without_mcp(value):
+    for role in ("orchestrator", "triage"):
         config = mcp_settings(role, None, AI_GATEWAY_MCP_REQUIRED=value)
         assert config.metadata.get("mcp_route", "direct") == "direct"
-    assert mcp_settings("claim-action-draft", None, AI_GATEWAY_MCP_REQUIRED=value).mcp_spec()["server_url"] == (
-        BASE["MCP_CLAIM_REVIEW_URL"])
+    with pytest.raises(ValueError, match="AI_GATEWAY_MCP_REQUIRED.*claim-action-draft"):
+        mcp_settings("claim-action-draft", None, AI_GATEWAY_MCP_REQUIRED=value)
+    assert claim_review_settings(AI_GATEWAY_MCP_REQUIRED=value).mcp_route == "ai-gateway"
 
 
 @pytest.mark.parametrize("value", [None, "", "  ", "false", "FALSE", "0", "no", "off"])
@@ -339,12 +345,12 @@ def test_connection_name_resolution_follows_the_role_and_the_route():
 LEGACY_ROUTES = {
     "orderlookup": entry(LOOKUP, "lookup_"),
     "policylookup": entry(KB, "knowledge_"),
-    "resolutiondraft": entry(REVIEW, "review_", forwards_headers=True),
+    "resolutiondraft": entry(REVIEW, "review_", workflow_binding="signed"),
 }
 CANONICAL_ROUTES = {
     "policy-claim-lookup": entry(LOOKUP, "lookup_"),
     "policy-wording": entry(KB, "knowledge_"),
-    "claim-action-draft": entry(REVIEW, "review_", forwards_headers=True),
+    "claim-action-draft": entry(REVIEW, "review_", workflow_binding="signed"),
 }
 
 
@@ -524,7 +530,7 @@ def test_direct_mcp_never_receives_a_gateway_key():
 
 
 def test_claim_review_stays_direct_unless_it_explicitly_opts_in():
-    for env in ({}, {"AI_GATEWAY_MCP_REQUIRED": "true"}, {"AI_GATEWAY_REQUIRED": "true", **MODEL_GATEWAY}):
+    for env in ({}, {"AI_GATEWAY_REQUIRED": "true", **MODEL_GATEWAY}):
         config = settings("claim-action-draft", **env)
         assert config.mcp_route == "direct" and config.metadata["mcp_route"] == "direct"
         assert config.mcp_spec()["server_url"] == BASE["MCP_CLAIM_REVIEW_URL"]
@@ -561,13 +567,16 @@ def test_claim_review_opt_in_calls_the_gateway_with_the_prefixed_tool_and_entra_
         mcp.assert_awaited_once()
         url, workflow, _payload, name = mcp.await_args.args
         assert (url, workflow, name) == (REVIEW, "wf-owned", "review_draft_claim_action")
+        assert mcp.await_args.kwargs["workflow_proof"]
+        assert "workflow_proof" not in proposal.parameters()["properties"]
         request = httpx.Request("POST", REVIEW)
         await mcp.await_args.kwargs["auth"].async_auth_flow(request).__anext__()
         assert request.headers["authorization"] == "Bearer " + "unit-entra-token"
     asyncio.run(run())
 
 
-def test_claim_review_gateway_call_reaches_the_wire_with_bearer_and_application_headers(monkeypatch):
+@pytest.mark.parametrize("signed", [False, True])
+def test_claim_review_gateway_call_reaches_the_wire_with_bearer_and_workflow_binding(monkeypatch, signed):
     requests = []
 
     def gateway(request):
@@ -594,18 +603,20 @@ def test_claim_review_gateway_call_reaches_the_wire_with_bearer_and_application_
     async def run():
         provider = AsyncMock(return_value="unit-entra-token")
         result = await tools.call_proposal_mcp(
-            REVIEW, "wf-owned", DRAFT, "review_draft_claim_action", auth=tools.GatewayBearerAuth(provider))
+            REVIEW, "wf-owned", DRAFT, "review_draft_claim_action", auth=tools.GatewayBearerAuth(provider),
+            **({"workflow_proof": "unit-signed-proof"} if signed else {}))
         assert result["status"] == "pending_approval"
         calls = [json.loads(r.content) for r in requests if r.method == "POST"]
         assert calls[0]["method"] == "initialize" and calls[1]["method"] == "notifications/initialized"
         invocation = next(c for c in calls if c["method"] == "tools/call")
         assert invocation["params"] == {"name": "review_draft_claim_action",
-                                        "arguments": {"workflow_id": "wf-owned", "draft": DRAFT}}
+                                        "arguments": {"workflow_id": "wf-owned", "draft": DRAFT,
+                                                      **({"workflow_proof": "unit-signed-proof"} if signed else {})}}
         assert all(str(r.url) == REVIEW for r in requests)
         assert all(r.headers["authorization"] == "Bearer " + "unit-entra-token" for r in requests)
         # The canonical workflow header and the deprecated one that already-deployed MCP builds still require.
-        assert all(r.headers["x-workflow-id"] == "wf-owned" for r in requests)
-        assert all(r.headers["x-orders-workflow"] == "wf-owned" for r in requests)
+        assert all(r.headers.get("x-workflow-id") == (None if signed else "wf-owned") for r in requests)
+        assert all(r.headers.get("x-orders-workflow") == (None if signed else "wf-owned") for r in requests)
         assert all("x-harness-workflow" not in r.headers for r in requests)
     asyncio.run(run())
 
@@ -722,7 +733,7 @@ def test_main_gives_the_provider_executed_agent_its_gateway_runtime_key(monkeypa
 
 def test_main_gives_the_claim_review_opt_in_the_agent_identity_not_a_stored_key(monkeypatch):
     async def run():
-        entries = {"claim-action-draft": entry(REVIEW, "review_", forwards_headers=True)}
+        entries = {"claim-action-draft": entry(REVIEW, "review_", workflow_binding="signed")}
         host, seen, providers = run_main(monkeypatch, "claim-action-draft", entries, {}, AI_GATEWAY_REQUIRED="true")
         assert not (seen.credentials or seen.projects or seen.gets)
         (provider, scope), = providers["main"]

@@ -34,7 +34,10 @@ def test_canonical_insurance_prompts_and_packaging(role):
 
 def test_the_package_is_exactly_the_runtime_the_insurance_prompts_and_their_fixtures():
     archive = entries(ROOT, ROOT / "agents" / "hosted" / "requirements.txt")
-    assert set(archive) == {"main.py", "requirements.txt", "agents/insurance/domain.py", *PACKAGE_SOURCES}
+    assert set(archive) == {"main.py", "requirements.txt", "agents/insurance/domain.py",
+                            "agents/insurance/workflow_binding.py", *PACKAGE_SOURCES}
+    assert archive["agents/insurance/workflow_binding.py"] == (
+        ROOT / "apps" / "api" / "app" / "workflow_binding.py").read_bytes()
     assert archive["main.py"] == (ROOT / "agents" / "orchestrator" / "main.py").read_bytes()
     assert {name for name in archive if name.endswith(".yaml")} == {"agents/" + path for path in PROMPTS.values()}
     assert not any(name.startswith(("tests/", ".venv/", ".env")) or "/tests/" in name for name in archive)

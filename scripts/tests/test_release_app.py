@@ -469,6 +469,7 @@ def test_existing_rollback_is_never_overwritten(record):
     (["apps/api/app/main.py"], ["api"]),
     (["apps/api/app/insurance_domain.py"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
     (["apps/api/app/gateway_guard.py"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
+    (["apps/api/app/workflow_binding.py"], ["api", "mcp-claim-review"]),
     (["data/northwind/insurance-fixtures.json"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
     (["data/seed/generated/nw-fnol-demo-2001.pdf"], ["api", "mcp-policy-lookup", "mcp-claim-review"]),
     (["apps/mcp-claim-review/app/main.py"], ["mcp-claim-review"]),

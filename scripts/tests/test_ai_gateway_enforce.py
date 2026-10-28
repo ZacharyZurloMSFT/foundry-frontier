@@ -217,7 +217,7 @@ def test_audit_reports_account_identities_apps_detection_and_limits(tmp_path, ca
     assert {row["name"]: row["kind"] for row in report["mcpApps"]} == {
         "ca-insurance-lookup": "lookup", "ca-insurance-review": "claim-review"}
     assert any("gated manual decision" in line for line in report["mcpRecommendations"])
-    assert any("claim-review" in line and "stays direct" in line and "x-workflow-id" in line
+    assert any("Claim-review" in line and "application-signed workflow proofs" in line
                for line in report["mcpRecommendations"])
     assert "Foundry User" in report["limits"][0] and "never removed" in report["limits"][0]
     assert any("not implemented" in line and "gated manual decision" in line for line in report["limits"])

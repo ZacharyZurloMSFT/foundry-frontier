@@ -10,6 +10,9 @@ Environment, read once when the middleware is built:
   NORTHWIND_GATEWAY_TENANT_ID      GUID of the Entra tenant that issues the token
   NORTHWIND_GATEWAY_AUDIENCE       API audience, a GUID or api://<GUID>
   NORTHWIND_GATEWAY_ALLOWED_OIDS   comma-separated object IDs allowed to call (APIM's identity)
+  NORTHWIND_GATEWAY_TOKEN_HEADER   x-northwind-gateway-token (default), or authorization
+For direct AI Gateway MCP backends, select authorization and allow only the AI Gateway's
+managed identity. This does not change the API app's APIM trust or accept either header as fallback.
 Enabled with missing or malformed settings it fails closed (503) instead of allowing traffic.
 An unknown key ID may force a signing-key refresh at most once per MIN_REFRESH_SECONDS, so
 unauthenticated callers cannot turn requests into outbound fetches.
@@ -174,6 +177,8 @@ class GatewayGuardMiddleware:
         self.exempt_paths = frozenset(exempt_paths)
         self.enabled = flag == "true"
         self.config: _Config | None = None
+        header = env.get("NORTHWIND_GATEWAY_TOKEN_HEADER", "x-northwind-gateway-token").strip().lower()
+        self.token_header = header.encode("ascii") if header in ("x-northwind-gateway-token", "authorization") else None
         if flag not in ("", "true", "false"):
             logger.warning("%s=%r is not 'true', so the gateway guard stays disabled.", ENABLED_ENV, flag)
         if self.enabled:
@@ -204,15 +209,17 @@ class GatewayGuardMiddleware:
             await response(scope, receive, send)
 
     async def _check(self, scope: Scope) -> _Failure | None:
-        if self.config is None:
+        if self.config is None or self.token_header is None:
             return _MISCONFIGURED
-        tokens = [value for name, value in scope.get("headers", ()) if name.lower() == TOKEN_HEADER]
+        tokens = [value for name, value in scope.get("headers", ()) if name.lower() == self.token_header]
         if len(tokens) != 1:
             logger.debug("Gateway token rejected: %s", "repeated header" if tokens else "no token")
             return _REQUIRED
         token = tokens[0].decode("latin-1").strip()
         if token[:7].lower() == "bearer ":
             token = token[7:].strip()
+        elif self.token_header == b"authorization":
+            return _REQUIRED
         try:
             await _verify(token, self.config)
         except (jwt.PyJWKClientConnectionError, OSError) as exc:

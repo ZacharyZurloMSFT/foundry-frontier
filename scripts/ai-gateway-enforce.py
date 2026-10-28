@@ -84,9 +84,9 @@ MCP_RECOMMENDATIONS = [
         "publishes no static outbound addresses."
     ),
     (
-        "The claim-review MCP app (ca-insurance-review) stays direct because the gateway does not forward the "
-        "workflow-binding header (x-workflow-id, or the deprecated x-orders-workflow); protect it with its own "
-        "caller identity, not the gateway path."
+        "Claim-review currently uses classic APIM workflow headers. The staged managed-identity migration "
+        "replaces those with application-signed workflow proofs; do not cut over until compatibility, "
+        "backend identity and draft-only pending-approval behavior are independently verified."
     ),
     "These are gated manual decisions. This tool never changes container apps, ingress or network settings.",
 ]
