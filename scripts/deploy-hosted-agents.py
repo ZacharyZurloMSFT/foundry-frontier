@@ -371,7 +371,8 @@ def deploy(args):
                 if state == "active":
                     break
                 if state in {"failed", "deleted", "deleting"}:
-                    raise RuntimeError(f"Hosted version {name}:{version.version} is {state}: {version.as_dict().get('error')}")
+                    raise RuntimeError(f"Hosted version {name}:{version.version} is {state}; "
+                                       "inspect Foundry deployment diagnostics before retrying")
                 time.sleep(5)
             else:
                 raise TimeoutError(f"Hosted version {name}:{existing.version} did not become active")
@@ -398,7 +399,12 @@ def deploy(args):
                 ),
             )
             report.update({"version": version.version, "state": state, "principal_id": principal})
-            report["native_version"] = version.as_dict()
+            native = version.as_dict()
+            report["native_version"] = {
+                field: native[field] for field in
+                ("id", "name", "version", "status", "instance_identity", "created_at", "updated_at")
+                if field in native
+            }
             journal.atomic_json(args.output, report)
             print(json.dumps(report, indent=2))
     finally:

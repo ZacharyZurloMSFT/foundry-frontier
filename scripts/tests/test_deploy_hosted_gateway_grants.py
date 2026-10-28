@@ -385,6 +385,10 @@ def test_signed_draft_deployment_injects_key_without_packaging_or_reporting_it(t
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
     monkeypatch.setenv("UNIT_WORKFLOW_KEY", private)
+    original = Version.as_dict
+    monkeypatch.setattr(Version, "as_dict", lambda self: {
+        **original(self), "definition": {"environment_variables": {"CLAIM_WORKFLOW_SIGNING_KEY": private}},
+    })
     route = {**LOOKUP_ROUTE, "workflow_binding": "signed"}
     environment = {"AI_GATEWAY_MCP_REQUIRED": "true",
                    "AGENT_MCP_GATEWAY": json.dumps({"claim-action-draft": route})}
