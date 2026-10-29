@@ -15,7 +15,7 @@ azure-storage-blob>=12.24
 azure-ai-projects>=2.3,<3
 
 # Foundry Agent Service + OpenAI
-openai>=2.46,<3
+openai>=3.35.1,<4
 github-copilot-sdk[telemetry]==1.0.14
 pyyaml>=6.0.3,<7
 
