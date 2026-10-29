@@ -89,7 +89,7 @@ jobs:
           ref: ${{ steps.trust.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Select changes since the last successful automatic app release
@@ -155,7 +155,7 @@ jobs:
         with:
           ref: ${{ needs.verify.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: actions/setup-node@v4
