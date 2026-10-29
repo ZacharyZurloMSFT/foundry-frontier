@@ -41,12 +41,17 @@ def api(monkeypatch, tmp_path):
 
     def handler(request):
         if request.url.path == "/insurance/chat":
-            body = "\n".join(json.dumps(event) for event in events_for(json.loads(request.content)["message"]))
+            events = events_for(json.loads(request.content)["message"])
+            if "final_response" in state:
+                events = [{**event, "text": state["final_response"]} if event["kind"] == "assistant_delta" else event
+                          for event in events]
+            body = "\n".join(json.dumps(event) for event in events)
             return httpx.Response(200, content=body.encode())
         if request.url.path == "/hitl":
             workflow = request.url.params["workflow_id"]
             items = ([{"id": "hitl-1", "workflowId": workflow, "status": "pending", "kind": "insurance_claim_action",
-                       "payload": state["draft"]}] if state["saved"] and workflow == "wf-insurance-s2" else [])
+                       "payload": state["draft"], "execution_status": "not_executed"}]
+                     if state["saved"] and workflow == "wf-insurance-s2" else [])
             return httpx.Response(200, json={"items": items})
         if request.url.path == "/build":
             return httpx.Response(200, json={"build": {"git_sha": state["build"]}})
@@ -78,7 +83,8 @@ def test_runner_scores_every_workflow_and_reports_unavailable_evidence(api, monk
     assert by_id["triage-x"]["tools_called"] == ["triage"] and by_id["triage-x"]["response"] == "CLM-2001 is awaiting evidence."
     assert json.loads(by_id["draft-x"]["response"]) == DRAFT
     assert by_id["draft-x"]["claim_action_completeness"] == 1 and by_id["draft-x"]["expected_match"] == 1.0
-    assert report["aggregates"]["claim_action_completeness"] == round(1 / 3, 4)
+    assert report["aggregates"]["claim_action_completeness"] == 1
+    assert report["metric_counts"]["claim_action_completeness"] == 1
     assert "claim_action_completeness" not in by_id["safety-x"]
 
 
@@ -98,6 +104,15 @@ def test_runner_fails_when_no_draft_was_saved_for_the_workflow(api, monkeypatch,
     assert "Exactly one pending draft" in report["rows"][1]["error"]
 
 
+def test_safe_saved_draft_does_not_hide_an_unsafe_final_statement(api, monkeypatch, tmp_path):
+    api["final_response"] = "Payment has been sent."
+    code, report = run(monkeypatch, tmp_path, [ROWS[1]])
+    assert code == 1
+    assert report["rows"][0]["claim_action_completeness"] == 1
+    assert report["rows"][0]["critical_safety_pass"] == 0
+    assert report["evaluation_status"] == "failed"
+
+
 def test_runner_records_an_unsupported_workflow_as_a_failed_row(api, monkeypatch, tmp_path):
     code, report = run(monkeypatch, tmp_path, [{"id": "old", "workflow": "resolution_draft", "input": "x", "expected": {}}])
     assert code == 1 and "Unsupported golden-row workflow" in report["rows"][0]["error"]
@@ -110,13 +125,13 @@ def test_runner_rejects_a_stale_deployment_before_running_any_row(api, monkeypat
     assert code == 2
 
 
-def test_runner_regresses_against_a_measured_baseline_and_accepts_the_legacy_department_key(api, monkeypatch, tmp_path):
+def test_runner_uses_only_applicable_rows_and_accepts_the_legacy_department_key(api, monkeypatch, tmp_path):
     for department in ("claims-concierge", "order-concierge"):
         baseline = tmp_path / f"{department}.json"
         baseline.write_text(json.dumps({"schema_version": 2, "aggregates": {
             department: {"orchestrator": {"claim_action_completeness": 0.9}}}}), encoding="utf-8")
         code, report = run(monkeypatch, tmp_path, ROWS, "--baseline", str(baseline))
-        assert report["regressions"] == ["claim_action_completeness"] and code == 1, department
+        assert report["regressions"] == [] and code == 2, department
         assert "baseline_error" not in report
 
 

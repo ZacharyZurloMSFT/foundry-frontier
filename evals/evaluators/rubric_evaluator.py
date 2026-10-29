@@ -116,11 +116,13 @@ class RubricEvaluator:
                 "error": "unparseable_judge_output",
             }
         score = payload.get("score")
-        reason = payload.get("reason", "")
-        try:
-            score_int = int(score) if score is not None else None
-        except (TypeError, ValueError):
-            score_int = None
+        reason = payload.get("reason")
+        if type(score) is not int or not 1 <= score <= 5 or not isinstance(reason, str) or not reason.strip():
+            return {
+                self.score_key: None, self.reason_key: "invalid_judge_score_or_reason",
+                self.pass_key: False, "error": "invalid_judge_score_or_reason",
+            }
+        score_int = score
         out: dict[str, Any] = {
             self.score_key: score_int,
             self.reason_key: str(reason),

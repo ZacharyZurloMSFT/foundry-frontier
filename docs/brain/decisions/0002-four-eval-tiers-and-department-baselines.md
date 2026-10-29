@@ -23,7 +23,8 @@ Departments share one account, so one department's numbers must not mask another
 - Missing evidence is a failure, not a pass. In the eval runner and the harness paths a gateway failure is an
   evaluation failure, and missing judge access, missing baselines, disabled targets and unscored attacks are not
   successful eval evidence ([genaiops.md](../../genaiops.md#gateway-routing-and-the-tiers)). The hosted red-team
-  target is a known gap ([gotchas](../gotchas/evals-and-prompts.md)).
+  lane now fails closed and remains blocked pending verified cloud agentic support
+  ([gotchas](../gotchas/evals-and-prompts.md)).
 - Baseline numbers change only with explicit reviewer approval, in the same PR as the legitimate regression.
 
 ## Consequences

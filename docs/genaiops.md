@@ -50,7 +50,7 @@ flowchart LR
 | ---- | ---- | ------- | ---- | ------- | ----- |
 | 1 | Pull requests that touch `agents/`, `apps/api/`, `apps/mcp-claim-review/`, `evals/` or `data/golden/` | GitHub Models (`openai/gpt-4o-mini` by default) with the workflow `GITHUB_TOKEN` | No Azure credentials or quota | 14 judge-free cases that catch obvious prompt breakage: triage JSON and identifier discipline, cited wording, claim-action drafts, refusals, prompt injection | `.github/workflows/smoke-eval.yml`, `evals/smoke_eval.py` |
 | 2 | The same pull requests | The deployed insurance API at `STAGING_API_URI`, scored with Foundry evaluators | Foundry judge and safety-evaluator calls | The 50-row golden set (`data/golden/dataset.jsonl`) posted to `POST /insurance/chat` | `.github/workflows/evals-on-pr.yml`, `evals/run_evals.py` |
-| 3 | Weekly (Mondays 09:00 UTC), pushes to `main` that touch agents, rubrics, the red-team runner, the harness or the claim-review MCP, and manual runs | Foundry AI Red Team (PyRIT) against `northwind-insurance-orchestrator`, and the Copilot SDK harness through the API | Foundry red-team service | Jailbreak, harm, PII-exfiltration and tool-abuse attacks (25 per strategy, minimum pass rate 0.85) | `.github/workflows/red-team.yml`, `pipelines/red-team/run_redteam.py` |
+| 3 | Weekly (Mondays 09:00 UTC), pushes to `main` that touch agents, rubrics, the red-team runner, the harness or the claim-review MCP, and manual runs | Requested targets: `northwind-insurance-orchestrator` and Copilot SDK harness; configured agentic coverage is currently blocked pending a verified cloud backend | Foundry red-team service when approved and supported | Requested jailbreak, harm, PII-exfiltration and tool-abuse coverage; local `num_objectives` counts objectives per risk, not attacks per strategy | `.github/workflows/red-team.yml`, `pipelines/red-team/run_redteam.py` |
 | 4 | Nightly (07:00 UTC); the drift detector runs when it finishes | Copilot SDK harness runs recorded as `AI-conversation` events in Application Insights | Log Analytics query | About 5% of the last 24 hours re-scored with the harness contract, then a rolling z-score per metric | `.github/workflows/continuous-eval.yml`, `.github/workflows/drift-detector.yml`, `evals/continuous_eval.py`, `evals/drift_detector.py` |
 
 **Cost order, not fail-fast.** The tiers are ordered by cost, but they are
@@ -84,27 +84,41 @@ covers how the tiers fit into the delivery loop.
   failed row, an evaluator error or a regression larger than 0.05, and `2`
   incomplete evidence (see [Baselines](#baselines-and-the-regression-gate)). The
   workflow comments the aggregates on the PR and uploads `eval-results`.
+  It now passes the PR head to `--expected-build` and waits on the `staging`
+  environment; fork PRs do not get this cloud/OIDC job. Environment reviewers,
+  budget approval and candidate deployment must be configured separately.
+  Reports include per-metric denominators, workflow breakdowns and target-time
+  percentiles; local prompt hashes do not verify deployed specialist provenance.
 - **Tier 3.** The composite action `.github/actions/foundry-redteam` runs
   `python pipelines/red-team/run_redteam.py --agent <name> --strategies
   jailbreak,harm,pii-exfil,tool-abuse --attacks 25 --min-pass 0.85` for two
   targets in two jobs: the hosted `northwind-insurance-orchestrator`, and
   `copilot-sdk`, which attacks `POST /harness/runs` through
   `evals/harness_eval.py::redteam_target` (it rejects tool-context injection
-  instead of silently dropping it). A pass rate below `--min-pass` exits
-  non-zero; the harness target is strict and exits `2` when an attack was not
-  scored. The report is the artifact `redteam-<agent>`.
+  instead of silently dropping it). Both targets now fail closed on missing,
+  malformed or unscored evidence. The pinned local SDK cannot certify the
+  configured hosted/agentic risks; those requested runs exit `2` until a verified
+  cloud lane is integrated. Do not remove requested risks to turn it green.
+  Separately scoped local content-risk diagnostics weight individual scored
+  attacks and block any explicitly critical successful attack even above the
+  overall 0.85 minimum. The report is the artifact `redteam-<agent>`.
 - **Tier 4.** `python evals/continuous_eval.py` reads `AI-conversation` events
   from the last 24 hours (`APPINSIGHTS_RESOURCE_ID`), keeps about 5% with a
   fixed random seed, re-reads each harness run from `GET /harness/runs/{id}`
   (`API_URI`) and grades the persisted run with the harness contract; a claim
   action that a person already decided is accepted. The job fails when a sampled
   run breaks the contract and writes the artifact `continuous-eval-results`.
-  `evals/drift_detector.py` compares the latest artifact with the previous seven
-  days (at least three successful runs), flags a drop of 2σ or more in a `*_score`
-  metric, a 2σ move in a `*_pass` or safety metric, and files an issue titled
+  Reports identify their scope as `harness_contract_only`, not model-quality
+  evidence; no-sample windows and unsupported traces exit nonzero as incomplete.
+  `evals/drift_detector.py` compares the latest artifact with previous comparable
+  artifacts (at least three), matching target, scope and evaluator/dependency/fixture
+  hash. Completed failed runs are considered too. Deterioration of 2σ or more in
+  a score/pass/safety metric files an issue titled
   `[eval-regression] <metric> drifted <z>σ on continuous eval` with the labels
   `eval-regression`, `drift` and `copilot-fix` (the template
-  `.github/ISSUE_TEMPLATE/eval-regression.yml` is the manual equivalent).
+  `.github/ISSUE_TEMPLATE/eval-regression.yml` is the manual equivalent). A marker
+  avoids repeating issues found in the retrieved open-issue page. No Foundry
+  publication is claimed by this workflow.
 
 ### Additional offline assistant gate
 
@@ -387,6 +401,7 @@ and, unlike `foundry-redteam`, does not log in to Azure itself:
     dataset: data/golden/dataset.jsonl
     baseline: evals/baseline.json
     api_uri: ${{ secrets.STAGING_API_URI }}
+    expected_build: ${{ github.sha }}
     foundry_endpoint: ${{ secrets.FOUNDRY_ENDPOINT }}
     foundry_project_endpoint: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
 - uses: ./.github/actions/foundry-redteam
@@ -406,21 +421,28 @@ GitHub, not by anything in this repo): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
 optimizer and prompt registry also run in a `staging` environment. Tier 1 needs
 only the workflow's own `GITHUB_TOKEN`.
 
+The red-team example retains the requested safety coverage but currently fails
+closed: a modern cloud agentic backend, reviewed taxonomy, supported tools/region
+and explicit budget approval are still required. It is not a ready-to-run native
+cloud safety certification. The `foundry-eval` action requires the exact deployed
+candidate SHA and preserves the runner's nonzero exit even when writing outputs.
+
 ## What is and is not enforced today
 
 | Area | Today | Not enforced, or caveat |
 | ---- | ----- | ----------------------- |
 | Required checks | The workflows above run. | Which of them must pass before a merge is a branch-protection setting, and environment reviewers (`northwind-apps`, `staging`) and secrets are GitHub settings; the repo records none of them. [`api-management.md`](./api-management.md) notes that no `STAGING_API_URI` secret existed on 2026-10-22, so confirm it is set, and points at the insurance API, before you rely on Tiers 2 to 4. |
-| Tier 2 target | Scores the API at `STAGING_API_URI`. | No workflow deploys the PR's code there and none passes `--expected-build`, so a run proves nothing about a PR's own change unless that API was updated first. |
+| Tier 2 target | Checks the API at `STAGING_API_URI` against the PR head with `--expected-build` before scoring. | No workflow deploys the PR's code there. Stale staging fails; specialist versions still need independent verification. |
+| Foundry result publication | `evals/publish_foundry_evidence.py` can evaluate already-captured synthetic golden-set API responses and download the Foundry per-item results. | Manual opt-in only; requires an explicit row cap, cloud approval flag, project endpoint and judge deployment. No Foundry project is configured in this worktree, and no live run has been verified. Harness publication is unsupported. |
 | Harness and department sets | `data/golden/harness.jsonl` (17 rows) has a documented command. | No workflow runs it. The department sets (adjuster support 14, claim documents 10, contact center 12 rows) are authored regression rows that no workflow runs either ([`departments.md`](./departments.md)). |
-| Tier 3 | The hosted target fails below `--min-pass`; the harness target is strict. | For the hosted target `pipelines/red-team/run_redteam.py` writes a stub report and exits `0` when the SDK or the target fails. No step files an issue, although the composite action's description says it does. |
-| Tier 4 | Re-scores harness runs. | The harness is the only emitter of `AI-conversation` events. `evals/drift_detector.py` reads an `aggregates` object from each artifact, but `evals/continuous_eval.py` writes a list of rows, so no drift issue can be derived from it yet. The workflow's "Publish to observability dashboard" step only prints a message. |
+| Tier 3 | Both targets fail closed on missing evidence and unsupported SDK paths. | Configured hosted/agentic coverage remains blocked pending a verified modern cloud lane. Red-team issue filing is not implemented. |
+| Tier 4 | Saved harness contracts produce object-shaped reports with aggregates, sample counts and source hashes compatible with the drift detector. | Contract-only, not model-quality scoring; the Tier-4 workflow does not publish to Foundry. No-data and unsupported traces are incomplete. |
 | Baseline | Every script reads it. | Nothing writes it, although its `_comment` says the nightly Tier-4 job regenerates it. |
 | Optimizer | Nightly for `triage` and `claim_action_draft`; opens a PR only when a variant beats the baseline by `OPTIMIZER_MIN_LIFT` (default 0.05). | The matrix is fixed (the `agent` dispatch input is unused), and it exits cleanly with `improved=false` when the Prompt Optimizer SDK cannot be imported. |
 | Prompt Store | `scripts/publish-prompts.py` runs on merge. | Best effort: it prints a dry run when the SDK surface or endpoint is missing and skips files when the client has no `upload_prompt` or `create_prompt`; check the log for `published` lines. Department prompts are not published. |
 | Copilot coding agent | `eval-regression` issues carry `copilot-fix`. | GitHub reads setup steps from `.github/workflows/copilot-setup-steps.yml`, while this repo keeps the file at `.github/copilot-setup-steps.yml`. |
-| `foundry-eval` action | Defined for reuse. | Its `regressed` output reads a key that `evals/run_evals.py` never writes (it writes `regressions` and `regression_status`), so it is always `false`; rely on the step's exit code. |
-| CI scope | `.github/workflows/ci.yml` runs contracts, Bicep compilation, the web builds and tests. | It does not run `agents/tests`, `evals/tests` or `python evals/smoke_eval.py --self-check`, and ruff and mypy cover only the business-API contracts; run the full list in `.github/copilot-instructions.md` before a PR. |
+| `foundry-eval` action | Reads `regressions`, requires `expected_build` and preserves the runner's exit code while emitting outputs. | An empty regression list does not certify complete evidence or specialist provenance. |
+| CI scope | `.github/workflows/ci.yml` runs contracts, Bicep compilation, web tests and an isolated offline `evals/tests` job. | It does not run `agents/tests` or `python evals/smoke_eval.py --self-check`, and ruff/mypy scope remains limited; run the full list in `.github/copilot-instructions.md` before a PR. |
 
 ## Where this diverges from typical LangChain-in-a-notebook demos
 

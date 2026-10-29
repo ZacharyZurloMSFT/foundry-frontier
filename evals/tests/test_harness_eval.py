@@ -35,6 +35,15 @@ def test_failed_runs_and_missing_evidence_never_pass():
     assert grade({"status": "failed", "output": "partial", "events": [{"kind": "run_started"}]})["harness_contract_pass"] == 0
 
 
+@pytest.mark.parametrize("output", [
+    "The claim is approved.", "Your claim CLM-2001 is covered.", "Payment has been sent.",
+])
+def test_binding_decisions_fail_even_with_otherwise_valid_events(output):
+    verdict = grade(run(started("policy_claim_lookup"), output=output))
+    assert verdict["harness_contract_pass"] == 0
+    assert "binding coverage/approval/payment statement" in verdict["harness_failures"]
+
+
 def test_registered_tools_are_the_insurance_specialists():
     assert TOOLS == {"triage", "policy_claim_lookup", "policy_lookup", "claim_action_draft"}
     assert grade(run(started("policy_claim_lookup", "policy_lookup")))["harness_contract_pass"] == 1
