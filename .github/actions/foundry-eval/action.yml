@@ -12,6 +12,9 @@ inputs:
   api_uri:
     description: "Deployed insurance API endpoint under test (ca-insurance-api)"
     required: true
+  expected_build:
+    description: "Exact deployed candidate Git SHA; stale staging is not evaluation evidence"
+    required: true
   foundry_endpoint:
     description: "Foundry AI Services endpoint"
     required: true
@@ -51,14 +54,24 @@ runs:
         FOUNDRY_ENDPOINT: ${{ inputs.foundry_endpoint }}
         FOUNDRY_PROJECT_ENDPOINT: ${{ inputs.foundry_project_endpoint }}
         FOUNDRY_WORKER_DEPLOYMENT: ${{ inputs.worker_deployment }}
+        EXPECTED_BUILD: ${{ inputs.expected_build }}
+        EVAL_OUTPUT: ${{ inputs.output }}
       run: |
+        test -n "$EXPECTED_BUILD" || { echo "expected_build is required" >&2; exit 2; }
+        set +e
         python evals/run_evals.py \
           --dataset "${{ inputs.dataset }}" \
           --output  "${{ inputs.output }}" \
-          --baseline "${{ inputs.baseline }}"
+          --baseline "${{ inputs.baseline }}" \
+          --expected-build "$EXPECTED_BUILD"
+        status=$?
+        set -e
         echo "results_path=${{ inputs.output }}" >> "$GITHUB_OUTPUT"
-        python - <<'PY' && echo "regressed=true"  >> "$GITHUB_OUTPUT" || echo "regressed=false" >> "$GITHUB_OUTPUT"
-        import json, sys
-        r = json.load(open("${{ inputs.output }}"))
-        sys.exit(0 if r.get("regressed") else 1)
+        python - <<'PY'
+        import json, os
+        with open(os.environ["EVAL_OUTPUT"], encoding="utf-8") as stream:
+            result = json.load(stream)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+            stream.write("regressed=" + str(bool(result.get("regressions"))).lower() + "\n")
         PY
+        exit "$status"

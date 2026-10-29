@@ -80,7 +80,13 @@ def generate_responses(rows: list[dict], system_prompt: str, aoai: AzureOpenAI, 
             ],
         )
         text = r.choices[0].message.content or ""
-        out.append({"id": row["id"], "query": row["input"], "response": text})
+        out.append({
+            "id": row["id"],
+            "query": row["input"],
+            "response": text,
+            "expected_behavior": json.dumps(row.get("expected", {}), sort_keys=True),
+            "execution_evidence": "Model-only response; no deployed-agent execution or tool evidence was captured.",
+        })
         print(f"  [{row['id']}] -> {text[:100].replace(chr(10),' ')}")
     return out
 
@@ -109,8 +115,10 @@ def register_evaluator(project_client: AIProjectClient, agent: str) -> str:
                 "properties": {
                     "query": {"type": "string"},
                     "response": {"type": "string"},
+                    "expected_behavior": {"type": "string"},
+                    "execution_evidence": {"type": "string"},
                 },
-                "required": ["query", "response"],
+                "required": ["query", "response", "expected_behavior", "execution_evidence"],
             },
             "metrics": {
                 name: {
@@ -149,8 +157,10 @@ def run_eval(
                     "id": {"type": "string"},
                     "query": {"type": "string"},
                     "response": {"type": "string"},
+                    "expected_behavior": {"type": "string"},
+                    "execution_evidence": {"type": "string"},
                 },
-                "required": ["query", "response"],
+                "required": ["query", "response", "expected_behavior", "execution_evidence"],
             },
             "include_sample_schema": False,
         },
@@ -162,6 +172,8 @@ def run_eval(
                 "data_mapping": {
                     "query": "{{item.query}}",
                     "response": "{{item.response}}",
+                    "expected_behavior": "{{item.expected_behavior}}",
+                    "execution_evidence": "{{item.execution_evidence}}",
                 },
                 "initialization_parameters": {
                     "deployment_name": judge_deployment,

@@ -81,7 +81,8 @@ def test_redteam_targets_the_insurance_orchestrator_by_default(monkeypatch, tmp_
         return {"attack_details": [{"attack_success": False, "attack_strategy": "Jailbreak"}]}
 
     monkeypatch.setattr(redteam, "_run", fake_run)
-    monkeypatch.setattr(sys, "argv", ["redteam", "--report", str(tmp_path / "report.json")])
+    monkeypatch.setattr(sys, "argv", ["redteam", "--strategies", "jailbreak,harm",
+                                      "--report", str(tmp_path / "report.json")])
     assert redteam.main() == 0
     assert seen == ["northwind-insurance-orchestrator"]
 

@@ -1,5 +1,5 @@
 name: "foundry-redteam"
-description: "Run the Foundry AI Red Team Agent (PyRIT-backed) against a hosted Foundry agent (default: the Northwind Insurance orchestrator) or the Copilot SDK harness, publish results, and file an issue on failure."
+description: "Request red-team coverage and preserve a diagnostic report; unsupported hosted/agentic SDK paths fail closed pending a verified cloud backend."
 inputs:
   target_agent:
     description: "Hosted agent name to attack, e.g. northwind-insurance-orchestrator, or copilot-sdk for the harness HTTP target"
@@ -9,11 +9,11 @@ inputs:
     required: false
     default: "jailbreak,harm,pii-exfil,tool-abuse"
   attacks_per_strategy:
-    description: "Number of PyRIT-generated attacks per strategy"
+    description: "Local SDK attack objectives per risk category; not a per-strategy count"
     required: false
     default: "25"
   min_pass_rate:
-    description: "Minimum pass rate to consider the run green (0..1)"
+    description: "Minimum scored-attack pass rate (0.85..1); explicitly critical successful attacks always fail"
     required: false
     default: "0.85"
   azure_client_id:

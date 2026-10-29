@@ -126,7 +126,7 @@ class FakeHTTP:
 
 def saved(workflow, payload=DRAFT, **extra):
     return {"id": "hitl-1", "workflowId": workflow, "status": "pending", "kind": "insurance_claim_action",
-            "payload": payload, **extra}
+            "payload": payload, "execution_status": "not_executed", **extra}
 
 
 @pytest.mark.parametrize("same_workflow", [True, False])
@@ -156,6 +156,8 @@ def test_draft_workflow_falls_back_to_the_insurance_workflow_id_for_the_session(
     saved("wf-insurance-candidate", status="approved"),
     saved("wf-insurance-candidate", kind="resolution"),
     saved("wf-insurance-candidate", payload="not-an-object"),
+    saved("wf-insurance-candidate", execution_status="executed"),
+    saved("wf-insurance-candidate", execution_status=None),
 ])
 def test_draft_must_be_a_pending_unexecuted_claim_action_payload(monkeypatch, item):
     events = [{"kind": "session", "session_id": "candidate"}, {"kind": "assistant_message", "text": "Saved."}]
@@ -289,5 +291,5 @@ def test_golden_dataset_keeps_every_coverage_category_at_or_above_its_earlier_si
 def test_shipped_rubrics_exist_and_use_only_the_query_and_response_variables(legacy_vocabulary):
     for workflow in run_evals.RUBRIC_WORKFLOWS:
         text = (ROOT / "evals" / "evaluators" / "rubrics" / f"{workflow}_rubric.prompty").read_text(encoding="utf-8")
-        assert set(re.findall(r"\{\{\s*(\w+)\s*\}\}", text)) == {"query", "response"}
+        assert {"query", "response"} <= set(re.findall(r"\{\{\s*(\w+)\s*\}\}", text)) <= {"query", "response", "context"}
         assert "Northwind Insurance" in text and not legacy_vocabulary.search(text)

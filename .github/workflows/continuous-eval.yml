@@ -1,6 +1,6 @@
 name: Continuous Eval
-# Tier 4: re-scores ~5% of the last 24h of AI-conversation traces (insurance API / Copilot SDK
-# harness) with the same evaluators used at PR time. API_URI must point at the insurance API.
+# Tier 4: samples ~5% of the last 24h of AI-conversation traces as saved harness-contract
+# evidence, not Foundry model-quality scoring. API_URI must point at the insurance API.
 on:
   schedule:
     - cron: "0 7 * * *"   # nightly 07:00 UTC
@@ -33,9 +33,9 @@ jobs:
           FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
           API_URI: ${{ secrets.STAGING_API_URI }}
         run: python evals/continuous_eval.py
-      - name: Publish to observability dashboard
+      - name: Describe evidence scope
         run: |
-          echo "Results uploaded — see Foundry Observability > northwind.continuous_eval"
+          echo "Saved harness-contract evidence is available in the GitHub artifact; Foundry publication is not configured."
       - uses: actions/upload-artifact@v7
         if: always()
         with:

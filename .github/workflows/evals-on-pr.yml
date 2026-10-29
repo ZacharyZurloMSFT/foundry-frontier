@@ -18,7 +18,9 @@ permissions:
 
 jobs:
   evals:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    environment: staging
     steps:
       - uses: actions/checkout@v7
 
@@ -41,11 +43,13 @@ jobs:
           FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
           FOUNDRY_PROJECT_ENDPOINT: ${{ secrets.FOUNDRY_PROJECT_ENDPOINT }}
           FOUNDRY_WORKER_DEPLOYMENT: gpt-4o
+          EXPECTED_BUILD: ${{ github.event.pull_request.head.sha }}
         run: |
           python evals/run_evals.py \
             --dataset data/golden/dataset.jsonl \
             --output evals/results.json \
-            --baseline evals/baseline.json
+            --baseline evals/baseline.json \
+            --expected-build "$EXPECTED_BUILD"
 
       - name: Upload results
         if: always()

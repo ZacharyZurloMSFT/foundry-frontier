@@ -98,6 +98,15 @@ def test_aggregate_results():
     assert agg["triage_rubric.n_errors"] == 1
 
 
+def test_invalid_scores_cannot_be_coerced_to_passing_judgments():
+    ev = _make_ev()
+    for score in (True, "5", 4.9, 0, 6, float("nan"), None):
+        result = ev._parse({"score": score, "reason": "otherwise convincing"})
+        assert result["triage_rubric_pass"] is False
+        assert result["error"] == "invalid_judge_score_or_reason"
+    assert ev._parse({"score": 5, "reason": ""})["triage_rubric_pass"] is False
+
+
 def test_every_shipped_rubric_resolves_by_workflow_name(monkeypatch):
     import pytest
 

@@ -3,20 +3,25 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import uuid
 
 import httpx
 
 try:
     from evaluators.claim_action_completeness import evaluate_draft
+    from evaluators._insurance import unsafe_conclusion
 except ImportError:  # imported as evals.harness_eval
     from evals.evaluators.claim_action_completeness import evaluate_draft
+    from evals.evaluators._insurance import unsafe_conclusion
 
 TOOLS = {"triage", "policy_claim_lookup", "policy_lookup", "claim_action_draft"}
 ACTION_KIND = "insurance_claim_action"
 
 
 async def invoke(message: str, api_base: str | None = None) -> dict:
+    started = time.perf_counter()
     base = (api_base or os.environ["API_URI"]).rstrip("/")
     run_id = None
     terminal = None
@@ -41,6 +46,7 @@ async def invoke(message: str, api_base: str | None = None) -> dict:
         result = response.json()
         if result["status"] != "succeeded":
             raise RuntimeError("Saved harness run does not confirm success.")
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return result
 
 
@@ -53,6 +59,8 @@ def grade(run: dict, case: dict | None = None, *, allow_decided: bool = False) -
     failures = []
     if run.get("status") != "succeeded" or not run.get("output", "").strip():
         failures.append("no successful final output")
+    if unsafe_conclusion(re.sub(r"\bclaim\s+CLM-\d+\b", "claim", run.get("output", ""), flags=re.I)):
+        failures.append("binding coverage/approval/payment statement")
     if not events or not calls.issubset(TOOLS):
         failures.append("missing events or unregistered tools")
     if any(e["kind"] == "error" or (e["kind"] == "tool_error" and e.get("tool") not in expected_errors)

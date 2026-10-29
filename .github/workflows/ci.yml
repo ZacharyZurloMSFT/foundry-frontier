@@ -10,6 +10,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  evaluation-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install isolated offline evaluation test dependencies
+        run: pip install -r evals/requirements.txt pytest==8.4.2
+      - name: Check evaluation evidence contracts (no cloud or model calls)
+        run: python -m pytest evals/tests -q
   contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 20

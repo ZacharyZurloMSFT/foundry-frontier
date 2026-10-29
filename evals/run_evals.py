@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,8 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evaluators import judge_model_config_from_env, load_agent_rubric  # noqa: E402
 from evaluators.claim_action_completeness import evaluate as score_claim_action  # noqa: E402
+from evaluators.expectations import evaluate as score_expectations  # noqa: E402
+from evals.evidence import file_hash, report as evidence_report  # noqa: E402
 
 # Foundry evaluators SDK
 try:
@@ -99,12 +102,14 @@ async def chat_turn(http: httpx.AsyncClient, message: str) -> dict:
     workflow_id = None
     tool_names: dict[str, str] = {}
     specialist_results: dict[str, list[str]] = {}
+    events = []
     async with http.stream("POST", f"{API_BASE}/insurance/chat", json={"message": message}) as r:
         r.raise_for_status()
         async for line in r.aiter_lines():
             if not line.strip():
                 continue
             ev = json.loads(line)
+            events.append(ev)
             kind = ev.get("kind")
             if kind == "error":
                 raise RuntimeError(ev.get("message", "Workflow failed"))
@@ -124,7 +129,8 @@ async def chat_turn(http: httpx.AsyncClient, message: str) -> dict:
                 tool = tool_names.get(ev.get("call_id"), "")
                 specialist_results.setdefault(tool, []).append(ev["result"])
     return {"text": text, "session_id": session_id, "workflow_id": workflow_id,
-            "tools_called": list(dict.fromkeys(tool_names.values())), "specialist_results": specialist_results}
+            "tools_called": list(dict.fromkeys(tool_names.values())), "specialist_results": specialist_results,
+            "events": events, "tool_call_count": len(tool_names)}
 
 
 async def saved_draft(http: httpx.AsyncClient, turn: dict) -> str:
@@ -137,7 +143,7 @@ async def saved_draft(http: httpx.AsyncClient, turn: dict) -> str:
     saved.raise_for_status()
     drafts = [item for item in saved.json().get("items", [])
               if item.get("workflowId") == workflow_id and item.get("status") == "pending"
-              and item.get("kind") == ACTION_KIND]
+              and item.get("kind") == ACTION_KIND and item.get("execution_status") == "not_executed"]
     if len(drafts) != 1 or not isinstance(drafts[0].get("payload"), dict):
         raise RuntimeError("Exactly one pending draft bound to this session is required")
     return json.dumps(drafts[0]["payload"])
@@ -147,6 +153,7 @@ async def run_row(row: dict) -> dict:
     """Invoke the target workflow against the API. `response` is what the general evaluators
     grade; `rubric_response` is what the LLM-as-judge rubrics grade (the triage specialist's
     JSON when the orchestrator called it, otherwise the same text)."""
+    started = time.perf_counter()
     wf = row["workflow"]
     if wf not in CHAT_WORKFLOWS:
         raise ValueError(f"Unsupported golden-row workflow: {wf}")
@@ -157,8 +164,14 @@ async def run_row(row: dict) -> dict:
         else:
             response = turn["text"]
     triage = next((r for r in turn["specialist_results"].get("triage", []) if r.strip()), None)
-    return {"response": response, "rubric_response": triage if wf == "triage" and triage else response,
-            "tools_called": turn["tools_called"]}
+    return {"response": response, "assistant_response": turn["text"],
+            "rubric_response": triage if wf == "triage" and triage else response,
+            "tools_called": turn["tools_called"], "events": turn["events"],
+            "specialist_results": turn["specialist_results"],
+            "session_id": turn["session_id"], "workflow_id": turn["workflow_id"],
+            "tool_call_count": turn["tool_call_count"],
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "evidence_scope": "API execution and specialist outputs; internal specialist traces unverified."}
 
 
 async def run_workflow(row: dict) -> str:
@@ -175,15 +188,26 @@ def _score_row(
 ) -> dict[str, Any]:
     scores: dict[str, Any] = {
         "id": row["id"], "workflow": row["workflow"],
+        "query": row.get("input"),
+        "expected_behavior": json.dumps(
+            row.get("expected_behavior", row.get("expected", {})),
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
         "response_len": len(response),
         "response": response,
     }
     if row["workflow"] in DRAFT_WORKFLOWS:
         scores.update(score_claim_action(response=response, expected=row.get("expected")))
+    elif row["workflow"] in CHAT_WORKFLOWS:
+        scores.update(score_expectations(row, rubric_response if row["workflow"] == "triage" and rubric_response else response))
     if rubric_evals is not None:
         ev = rubric_evals.get(row["workflow"])
         if ev is not None:
-            scores.update(ev(query=row["input"], response=response if rubric_response is None else rubric_response))
+            scores.update(ev(
+                query=row["input"], response=response if rubric_response is None else rubric_response,
+                context=json.dumps({"expected": row.get("expected", {})}),
+            ))
     if foundry_evals is not None:
         for name, ev in foundry_evals.items():
             try:
@@ -246,6 +270,12 @@ async def main() -> int:
                 scores = _score_row({**row, "workflow": "harness"}, run["output"], foundry_evals, rubric_evals)
                 scores.update(grade(run, row))
                 scores.update(workflow=row["workflow"], run_id=run["run_id"])
+                scores.update({
+                    "events": run.get("events", []), "workflow_id": run.get("workflow_id"),
+                    "latency_ms": run.get("latency_ms"),
+                    "tool_call_count": sum(e.get("kind") == "tool_start" for e in run.get("events", [])),
+                    "evidence_scope": "Harness events and persisted approval; internal specialist traces unverified.",
+                })
                 results.append(scores)
             except Exception as exc:
                 logging.getLogger(__name__).exception("Harness evaluation failed for %s", row["id"])
@@ -256,30 +286,37 @@ async def main() -> int:
                 turn = await run_row(row)
                 scores = _score_row(row, turn["response"], foundry_evals, rubric_evals,
                                     rubric_response=turn["rubric_response"])
-                scores["tools_called"] = turn["tools_called"]
+                final_safety = score_expectations({"workflow": "safety"}, turn["assistant_response"])
+                scores["critical_safety_pass"] = min(
+                    scores.get("critical_safety_pass", 1.0), final_safety["critical_safety_pass"])
+                scores["final_response_failures"] = final_safety["expectation_failures"]
+                if not turn["assistant_response"].strip():
+                    scores["error"] = "No final assistant output was returned."
+                scores.update({key: value for key, value in turn.items() if key not in {"response", "rubric_response"}})
                 results.append(scores)
             except Exception as exc:
                 results.append({"id": row["id"], "workflow": row["workflow"], "error": str(exc)})
 
-    aggregates: dict[str, float] = {}
-    for result in results:
-        for evaluator, scores in list(result.items()):
-            if isinstance(scores, dict) and evaluator != "fields_present":
-                for metric, value in scores.items():
-                    if isinstance(value, (int, float)):
-                        if math.isfinite(value):
-                            result[f"{evaluator}.{metric}"] = value
-                        else:
-                            result["error"] = f"{evaluator}.{metric} was not a finite score."
-    for r in results:
-        for k, v in r.items():
-            if isinstance(v, (int, float)) and k != "response_len":
-                aggregates[k] = aggregates.get(k, 0.0) + float(v)
-    for k in aggregates:
-        aggregates[k] = round(aggregates[k] / max(1, len(results)), 4)
-
-    payload = {"aggregates": aggregates, "rows": results, "target": args.target,
-               "judge_status": "configured" if foundry_evals is not None else "unavailable"}
+    payload = evidence_report(results, target=args.target)
+    aggregates = payload["aggregates"]
+    payload.update(
+        judge_status="configured" if foundry_evals is not None else "unavailable",
+        dataset_sha256=file_hash(Path(args.dataset)),
+        expected_build=args.expected_build,
+        provenance_status="unverified_specialist_versions",
+        publication_status="not_published",
+    )
+    root = Path(__file__).resolve().parents[1]
+    payload["local_sources_sha256"] = {
+        str(path.relative_to(root)): file_hash(path)
+        for path in [
+            Path(__file__), Path(__file__).with_name("evidence.py"),
+            Path(__file__).with_name("harness_eval.py"),
+            *sorted((root / "agents" / "insurance").glob("*.yaml")),
+            *sorted((root / "evals" / "evaluators" / "rubrics").glob("*.prompty")),
+        ]
+    }
+    payload["judge_deployment"] = judge_cfg["azure_deployment"] if judge_cfg else None
     reference = {}
     baseline_status = "evaluated"
     try:
@@ -302,25 +339,27 @@ async def main() -> int:
             for wf in RUBRIC_WORKFLOWS
         )
         payload["regression_status"] = baseline_status if baseline_status != "evaluated" else "unavailable" if incomplete else "evaluated"
-    Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(json.dumps(aggregates, indent=2))
-
     if args.target == "copilot-sdk":
         failures = not results or any(
             r.get("harness_contract_pass") != 1.0 or r.get("error")
             or any(isinstance(v, dict) and v.get("error") for v in r.values())
             for r in results
         )
-        return 1 if failures or payload.get("regressions") else 2 if harness_incomplete else 0
-
-    failures = not results or any(
-        r.get("error") or any(isinstance(v, dict) and v.get("error") for v in r.values())
-        or ("claim_action_completeness" in r and (
-            r["claim_action_completeness"] != 1.0 or not r["plausible"] or r.get("expected_match") == 0.0))
-        or any(f"{wf}_rubric_pass" in r and not r[f"{wf}_rubric_pass"] for wf in RUBRIC_WORKFLOWS)
-        for r in results
-    )
-    return 1 if failures or payload.get("regressions") else 2 if incomplete else 0
+        code = 1 if failures or payload.get("regressions") else 2 if harness_incomplete else 0
+    else:
+        failures = not results or any(
+            r.get("error") or any(isinstance(v, dict) and v.get("error") for v in r.values())
+            or r.get("expectation_pass") == 0.0 or r.get("critical_safety_pass") == 0.0
+            or ("claim_action_completeness" in r and (
+                r["claim_action_completeness"] != 1.0 or not r["plausible"] or r.get("expected_match") == 0.0))
+            or any(f"{wf}_rubric_pass" in r and not r[f"{wf}_rubric_pass"] for wf in RUBRIC_WORKFLOWS)
+            for r in results
+        )
+        code = 1 if failures or payload.get("regressions") else 2 if incomplete else 0
+    payload["evaluation_status"] = {0: "evaluated", 1: "failed", 2: "incomplete"}[code]
+    Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(json.dumps(aggregates, indent=2))
+    return code
 
 
 if __name__ == "__main__":
