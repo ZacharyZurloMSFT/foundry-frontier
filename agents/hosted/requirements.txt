@@ -8,7 +8,7 @@ azure-ai-projects==2.3.0
 openai==2.46.0
 azure-identity>=1.19,<2
 httpx>=0.28,<1
-mcp>=1.28.1,<2
+mcp>=2.3.0,<3
 pydantic>=2.11,<3
 PyYAML>=6.0.2,<7
 PyJWT[crypto]>=2.10.1,<3
